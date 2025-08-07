@@ -1,0 +1,102 @@
+import logging
+import warnings
+
+import numpy as np
+
+from process_bigraph import Process, Composite, ProcessTypes
+from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
+
+from tyssue.behaviors.event_manager import EventManager
+from tyssue.behaviors.sheet.basic_events import reconnect
+from tyssue.core.history import History
+
+log = logging.getLogger(__name__)
+
+def set_pos(eptm, geom, pos):
+    """Updates the vertex position of the :class:`Epithelium` object.
+
+    Assumes that pos is passed as a 1D array to be reshaped as (eptm.Nv, eptm.dim)
+
+    """
+    log.debug("set pos")
+    eptm.vert_df.loc[eptm.active_verts, eptm.coords] = pos.reshape((-1, eptm.dim))
+    geom.update_all(eptm)
+
+class EulerTyssue(Process):
+    """Generalized Euler solver for Tyssue-based epithelial simulations
+    """
+    config_schema = {
+        "eptm": "string", #saved tyssue epithelium file
+        "geom": "any", #Tyssue Geometry class
+        "model": "any", #Tyssue Model class
+        "auto_reconnect": "bool", # if True, will automatically perform reconnections
+        "bounds": "tuple", # bounds the displacement of the vertices at each time step
+    }
+
+    def __init__(self, config, core):
+        super().__init__(config, core)
+
+        self._set_pos = set_pos
+        self.eptm = self.config["eptm"]
+        self.eptm.network_changed = False
+        self.geom = self.config["geom"]
+        self.model = self.config["model"]
+        self.history = History(self.eptm)
+
+        manager = EventManager()
+        if self.config["auto_reconnect"]:
+            if "reconnect" not in [n[0].__name__ for n in manager.next]:
+                manager.append(reconnect)
+
+        self.manager = manager
+        self.bounds = self.config["bounds"]
+
+    @property
+    def current_pos(self):
+        return self.eptm.vert_df.loc[
+            self.eptm.active_verts, self.eptm.coords
+        ].values.ravel()
+
+    def set_pos(self, pos):
+        """Updates the eptm vertices position"""
+        return self._set_pos(self.eptm, self.geom, pos)
+
+    def record(self, t):
+        self.history.record(time_stamp=t)
+
+    def ode_func(self):
+        """Computes the models' gradient.
+        Returns
+        -------
+        dot_r : 1D np.ndarray of shape (self.eptm.Nv * self.eptm.dim, )
+        .. math::
+        \frac{dr_i}{dt} = -\frac{\nabla U_i}{\eta_i}
+        """
+
+        grad_U = self.model.compute_gradient(self.eptm).loc[self.eptm.active_verts]
+        return (
+                -grad_U.values
+                / self.eptm.vert_df.loc[self.eptm.active_verts, "viscosity"].values[:, None]
+        ).ravel()
+
+    def update(self, inputs, interval):
+        pos = self.current_pos
+        dot_r = self.ode_func()
+        if self.bounds is not None:
+            dot_r = np.clip(dot_r, *self.bounds)
+        pos = pos + dot_r * interval
+        self.set_pos(pos)
+
+        if self.manager is not None:
+            self.manager.execute(self.eptm)
+            self.geom.update_all(self.eptm)
+            self.manager.update()
+
+        if self.eptm.network_changed:
+            network_changed = True
+        else:
+            network_changed = False
+
+        self.eptm.network_changed = False
+
+        self.record(inputs["global_time"])
