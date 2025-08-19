@@ -47,3 +47,25 @@ def apoptosis_cylinder(sheet, manager, death_rate, dt, radius, geom):
         # split_vert(sheet, vertex)
     manager.append(apoptosis_cylinder, death_rate=death_rate, dt=dt, radius=radius, geom=geom)
     fix_points_cylinder(sheet, radius=radius)
+
+def divide_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
+    if cell_uid is None:
+        if cell_idx is None:
+            raise ValueError("cell_uid or cell_idx must be specified")
+    if cell_uid is not None:
+        cell_idx = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
+    if radius is None:
+        radius = (sheet.vert_df["x"].max() - sheet.vert_df["x"].min())/2
+    daughter = cell_division(sheet, cell_idx, geom)
+    fix_points_cylinder(sheet, radius=radius)
+    return daughter
+
+def apoptosis_cell(sheet, geom, radius, cell_uid=None, cell_idx=None):
+    if cell_uid is None:
+        if cell_idx is None:
+            raise ValueError("cell_uid or cell_idx must be specified")
+    if cell_uid is not None:
+        cell_idx = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
+    if radius is None:
+        radius = (sheet.vert_df["x"].max() - sheet.vert_df["x"].min())/2
+    vertex = remove_face(sheet, cell_idx)

@@ -6,9 +6,14 @@ import numpy as np
 from process_bigraph import Process, Composite, ProcessTypes
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
+from vivarium_tyssue.maps import *
+
+from tyssue import Sheet
 from tyssue.behaviors.event_manager import EventManager
 from tyssue.behaviors.sheet.basic_events import reconnect
 from tyssue.core.history import History
+from tyssue.io.hdf5 import load_datasets
+from tyssue import config
 
 log = logging.getLogger(__name__)
 
@@ -22,13 +27,15 @@ def set_pos(eptm, geom, pos):
     eptm.vert_df.loc[eptm.active_verts, eptm.coords] = pos.reshape((-1, eptm.dim))
     geom.update_all(eptm)
 
-class EulerTyssue(Process):
+class EulerCylinder(Process):
     """Generalized Euler solver for Tyssue-based epithelial simulations
     """
     config_schema = {
         "eptm": "string", #saved tyssue epithelium file
-        "geom": "any", #Tyssue Geometry class
-        "model": "any", #Tyssue Model class
+        "geom": "string", #key indicating the desired geometry class in GEOMETRY_MAP
+        "effectors": "list[string]", #list of strings representing effectors from the EFFECTORS_MAP
+        "ref_effector": "string", #string, representing the effector from the EFFECTORS_MAP
+        "factory": "string", #key indicating the factory class to generate from the FACTORY_MAP
         "auto_reconnect": "bool", # if True, will automatically perform reconnections
         "bounds": "tuple", # bounds the displacement of the vertices at each time step
     }
@@ -37,10 +44,12 @@ class EulerTyssue(Process):
         super().__init__(config, core)
 
         self._set_pos = set_pos
-        self.eptm = self.config["eptm"]
+        self.geom = GEOMETRY_MAP[config["geom"]]
+        datasets = load_datasets(config["eptm"])
+        self.eptm = Sheet("epithelium", datasets)
         self.eptm.network_changed = False
-        self.geom = self.config["geom"]
-        self.model = self.config["model"]
+        effectors = [effector for effector in config["effectors"].values()]
+        self.model = FACTORY_MAP[config["factory"]](effectors, config["ref_effector"])
         self.history = History(self.eptm)
 
         manager = EventManager()
@@ -85,7 +94,7 @@ class EulerTyssue(Process):
         if self.bounds is not None:
             dot_r = np.clip(dot_r, *self.bounds)
         pos = pos + dot_r * interval
-        self.set_pos(pos)
+        self.eptm.set_pos(pos)
 
         if self.manager is not None:
             self.manager.execute(self.eptm)
