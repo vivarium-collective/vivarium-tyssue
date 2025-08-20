@@ -8,6 +8,8 @@ from tyssue.geometry.bulk_geometry import *
 from tyssue.dynamics.effectors import *
 from tyssue.dynamics.factory import *
 
+from vivarium_tyssue.behaviors import *
+
 GEOMETRY_MAP = {
     "PlanarGeometry": PlanarGeometry,
     "AnnularGeometry": AnnularGeometry,
@@ -48,4 +50,9 @@ FACTORY_MAP = {
     "model_factory": model_factory,
     "model_factory_vessel": model_factory_vessel,
     "model_factory_cylinder": model_factory_cylinder,
+}
+
+BEHAVIOR_MAP = {
+    "divide": divide_cell,
+    "apoptosis": apoptosis_cell,
 }
