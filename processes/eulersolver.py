@@ -40,9 +40,7 @@ class EulerCylinder(Process):
         "bounds": "tuple", # bounds the displacement of the vertices at each time step
     }
 
-    def __init__(self, config, core):
-        super().__init__(config, core)
-
+    def initialize(self, config):
         self._set_pos = set_pos
         self.geom = GEOMETRY_MAP[config["geom"]]
         datasets = load_datasets(config["eptm"])

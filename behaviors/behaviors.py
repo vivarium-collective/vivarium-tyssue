@@ -3,12 +3,14 @@ import numpy as np
 from tyssue.topology.sheet_topology import cell_division, remove_face
 
 def update_stem_cells(eptm):
+    """updates which cells in a cylinder model are classified as stem cells"""
     eptm.face_df['stem_cell'] = 0
     eptm.face_df['dying_cell'] = 0
     eptm.face_df.loc[(eptm.face_df["boundary"] != 1) & (eptm.face_df["z"] < 0), "stem_cell"] = 1
     eptm.face_df.loc[(eptm.face_df["z"] > 0), "dying_cell"] = 1
 
 def fix_points_cylinder(sheet, radius):
+    """fixes vertices on a cylinder surface"""
     xy = sheet.vert_df[['x', 'y']].to_numpy()
     r = np.linalg.norm(xy, axis=1)
     r_safe = np.where(r == 0, 1e-12, r)
@@ -17,13 +19,13 @@ def fix_points_cylinder(sheet, radius):
     sheet.vert_df['y'] = xy_on_cylinder[:, 1]
 
 def divide_cylinder(sheet, manager, geom, division_rate, dt, radius):
+    """basic function to apply division in a cylinder crypt model"""
     update_stem_cells(sheet)
     stem_cells = sheet.face_df.loc[(sheet.face_df["stem_cell"] == 1) & (sheet.face_df["area"]>=0.7*sheet.face_df["area"].mean())].copy()
     n_stem = len(stem_cells)
     cell_ids = list(stem_cells["unique_id"])
     n_divisions = np.random.binomial(n=n_stem, p=division_rate * dt)
     dividing_cells = np.random.choice(cell_ids, size=n_divisions, replace=False)
-
     for cell_id in dividing_cells:
         cell_idx = int(sheet.face_df[sheet.face_df["unique_id"] == cell_id].index[0])
         daughter = cell_division(sheet, cell_idx, geom)
@@ -31,6 +33,7 @@ def divide_cylinder(sheet, manager, geom, division_rate, dt, radius):
     fix_points_cylinder(sheet, radius=radius)
 
 def apoptosis_cylinder(sheet, manager, death_rate, dt, radius, geom):
+    """basic function to apply cell death in a cylinder crypt model"""
     update_stem_cells(sheet)
     dying_cells = sheet.face_df.loc[sheet.face_df["dying_cell"] == 1]
     n_dying = len(dying_cells)
@@ -49,6 +52,7 @@ def apoptosis_cylinder(sheet, manager, death_rate, dt, radius, geom):
     fix_points_cylinder(sheet, radius=radius)
 
 def divide_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
+    """"""
     if cell_uid is None:
         if cell_idx is None:
             raise ValueError("cell_uid or cell_idx must be specified")
