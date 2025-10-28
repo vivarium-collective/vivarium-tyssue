@@ -52,7 +52,14 @@ def apoptosis_cylinder(sheet, manager, death_rate, dt, radius, geom):
     fix_points_cylinder(sheet, radius=radius)
 
 def divide_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
-    """"""
+    """divides a cell within a tyssue sheet indexed by the cell idx or its unique id
+    Parameters:
+        sheet: tyssue sheet object, the cylindrical sheet object to perform division on
+        geom: a tyssue geometry class, the geometry being used
+        radius: float, radius of the cylinder
+        cell_uid: integer, unique cell id of the cell (must be provided if cell_idx is None)
+        cell_idx: integer, cell index of the cell in sheet.cell_df (must be provided if cell_uid is None)
+    """
     if cell_uid is None:
         if cell_idx is None:
             raise ValueError("cell_uid or cell_idx must be specified")
@@ -64,7 +71,8 @@ def divide_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
     fix_points_cylinder(sheet, radius=radius)
     return daughter
 
-def apoptosis_cell(sheet, geom, radius, cell_uid=None, cell_idx=None):
+def apoptosis_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
+    """removes a cell from a cylindrical tyssue sheet"""
     if cell_uid is None:
         if cell_idx is None:
             raise ValueError("cell_uid or cell_idx must be specified")
@@ -73,3 +81,5 @@ def apoptosis_cell(sheet, geom, radius, cell_uid=None, cell_idx=None):
     if radius is None:
         radius = (sheet.vert_df["x"].max() - sheet.vert_df["x"].min())/2
     vertex = remove_face(sheet, cell_idx)
+    fix_points_cylinder(sheet, radius=radius)
+    geom.update_all(sheet)
