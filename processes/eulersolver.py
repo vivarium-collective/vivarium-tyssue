@@ -2,6 +2,7 @@ import logging
 import warnings
 
 import numpy as np
+from pprint import pprint
 
 from process_bigraph import Process, Composite, ProcessTypes
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
@@ -31,6 +32,7 @@ class EulerSolver(Process):
     """Generalized Euler solver for Tyssue-based epithelial simulations
     """
     config_schema = {
+        "name": "string", #name for epithelium object
         "eptm": "string", #saved tyssue epithelium file
         "geom": "string", #key indicating the desired geometry class in GEOMETRY_MAP
         "effectors": "list[string]", #list of strings representing effectors from the EFFECTORS_MAP
@@ -77,8 +79,6 @@ class EulerSolver(Process):
         Returns
         -------
         dot_r : 1D np.ndarray of shape (self.eptm.Nv * self.eptm.dim, )
-        .. math::
-        \frac{dr_i}{dt} = -\frac{\nabla U_i}{\eta_i}
         """
 
         grad_U = self.model.compute_gradient(self.eptm).loc[self.eptm.active_verts]
@@ -89,20 +89,24 @@ class EulerSolver(Process):
 
     def inputs(self):
         return {
-            "behaviors": "map"
+            "behaviors": "maybe[map]"
         }
 
     def outputs(self):
         return {
-            "vert_df": "map",
-            "edge_df": "map",
-            "face_df": "map",
-            "cell_df": "map",
+            "vert_df": "tyssue_dset",
+            "edge_df": "tyssue_dset",
+            "face_df": "tyssue_dset",
+            "cell_df": "tyssue_dset",
             "network_changed": "bool",
         }
 
     def update(self, inputs, interval):
 
+        if len(inputs["behaviors"]) > 0:
+            for behavior, args in inputs["behaviors"].items():
+                func = BEHAVIOR_MAP[behavior]
+                self.manager.append(func, args)
         pos = self.current_pos
         dot_r = self.ode_func()
         if self.bounds is not None:
@@ -125,12 +129,26 @@ class EulerSolver(Process):
         self.record(inputs["global_time"])
 
         dicts = {}
-        for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
-            if hasattr(self.eptm, df_name):
-                cols = self.config.get("emit_columns", {}).get(df_name)
-                dicts[df_name] = getattr(self.eptm, df_name)[cols] if cols else getattr(self.eptm, df_name).reset_index().to_dict(orient="records")
-            else:
-                dicts[df_name] = {}
+
+        emit_columns = self.config.get("emit_columns", {})
+        # if emit_columns is empty, just dump all dataframes as dicts
+        if not emit_columns:
+            for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
+                if hasattr(self.eptm, df_name):
+                    dicts[df_name] = getattr(self.eptm, df_name).reset_index().to_dict(orient="records")
+                else:
+                    dicts[df_name] = {}
+        else:
+            for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
+                if hasattr(self.eptm, df_name):
+                    cols = emit_columns.get(df_name)
+                    df = getattr(self.eptm, df_name)
+                    if cols:
+                        df = df[cols]
+                    dicts[df_name] = df.reset_index().to_dict(orient="records")
+                else:
+                    dicts[df_name] = {}
+
         vert_df, edge_df, face_df, cell_df = (
             dicts.get("vert_df"),
             dicts.get("edge_df"),
@@ -145,3 +163,68 @@ class EulerSolver(Process):
             "cell_df": cell_df,
             "network_changed": network_changed,
         }
+
+def get_test_config():
+    return {
+        "name": "Test Cylinder",
+        "eptm": "test_cylinder.hf5",
+        "geom": "VesselGeometry",
+        "effectors": ["LineTension", "FaceAreaElasticity", "PerimeterElasticity"],
+        "ref_effector": "PerimeterElasticity",
+        "factory": "model_factory_vessel",
+        "auto_reconnect": True, # if True, will automatically perform reconnections
+        "bounds": (-1000, 1000), # bounds the displacement of the vertices at each time step
+        "emit_columns": {} # dict containing lists of column names to emit for each dataframe
+    }
+
+def get_test_spec(interval=0.1):
+    return {
+        "Tyssue": {
+            "_type": "process",
+            "address": "local:EulerSolver",
+            "config": get_test_config(),
+            "inputs": {
+                "behaviors": "Behaviors"
+            },
+            "outputs": {
+                "vert_df": "Vertex",
+                "edge_df": "Edge",
+                "face_df": "Face",
+                "cell_df": "Cell",
+                "network_changed": "Network Changed",
+            },
+        },
+        "Vertex": [],
+        "Edge": [],
+        "Face": [],
+        "Cell": [],
+        "Network Changed": False,
+        "Behaviors": {}
+    }
+
+def run_test_solver(core):
+    spec = get_test_spec()
+    spec["emitter"] = emitter_from_wires({
+        "global_time": ["global_time"],
+        "face_df": ["Face"],
+        "edge_df": ["Edge"],
+        "vert_df": ["Vert"],
+    })
+    sim = Composite(
+        {
+            "state": spec,
+        },
+        core=core,
+    )
+    results=sim.run(10)
+    pprint(results[20])
+
+if __name__ == "__main__":
+    from vivarium_tyssue import register_types
+    # create the core object
+    core = ProcessTypes()
+    # register data types
+    core = register_types(core)
+    core.register_process("EulerSolver", EulerSolver)
+
+    run_test_solver(core)
