@@ -34,12 +34,13 @@ class EulerSolver(Process):
     config_schema = {
         "name": "string", #name for epithelium object
         "eptm": "string", #saved tyssue epithelium file
+        "parameters": "map[map[float]]",
         "geom": "string", #key indicating the desired geometry class in GEOMETRY_MAP
         "effectors": "list[string]", #list of strings representing effectors from the EFFECTORS_MAP
         "ref_effector": "string", #string, representing the effector from the EFFECTORS_MAP
         "factory": "string", #key indicating the factory class to generate from the FACTORY_MAP
-        "auto_reconnect": "bool", # if True, will automatically perform reconnections
-        "bounds": "tuple", # bounds the displacement of the vertices at each time step
+        "auto_reconnect": "boolean", # if True, will automatically perform reconnections
+        "bounds": "map[float]", # bounds the displacement of the vertices at each time step
         "emit_columns": "map[list[string]]" # dict containing lists of column names to emit for each dataframe
     }
 
@@ -52,6 +53,11 @@ class EulerSolver(Process):
         effectors = [EFFECTORS_MAP[effector] for effector in config["effectors"]]
         self.model = FACTORY_MAP[config["factory"]](effectors, EFFECTORS_MAP[config["ref_effector"]])
         self.history = History(self.eptm)
+        if len(config["parameters"]) > 0:
+            for dataframe, parameters in config["parameters"].items():
+                df = getattr(self.eptm, dataframe)
+                for parameter, value in parameters.items():
+                    df[parameter] = value
 
         manager = EventManager()
         if self.config["auto_reconnect"]:
@@ -59,7 +65,10 @@ class EulerSolver(Process):
                 manager.append(reconnect)
 
         self.manager = manager
-        self.bounds = self.config["bounds"]
+        if len(self.config["bounds"]) > 0:
+            self.bounds = self.config["bounds"]
+        else:
+            self.bounds = None
 
     @property
     def current_pos(self):
@@ -89,16 +98,14 @@ class EulerSolver(Process):
 
     def inputs(self):
         return {
-            "behaviors": "maybe[map]"
+            "behaviors": "any",
+            "global_time": "float",
         }
 
     def outputs(self):
         return {
-            "vert_df": "tyssue_dset",
-            "edge_df": "tyssue_dset",
-            "face_df": "tyssue_dset",
-            "cell_df": "tyssue_dset",
-            "network_changed": "bool",
+            "datasets": "map[tyssue_dset]",
+            "network_changed": "boolean",
         }
 
     def update(self, inputs, interval):
@@ -134,7 +141,7 @@ class EulerSolver(Process):
         # if emit_columns is empty, just dump all dataframes as dicts
         if not emit_columns:
             for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
-                if hasattr(self.eptm, df_name):
+                if getattr(self.eptm, df_name) is not None:
                     dicts[df_name] = getattr(self.eptm, df_name).reset_index().to_dict(orient="records")
                 else:
                     dicts[df_name] = {}
@@ -157,10 +164,12 @@ class EulerSolver(Process):
         )
 
         return {
-            "vert_df": vert_df,
-            "edge_df": edge_df,
-            "face_df": face_df,
-            "cell_df": cell_df,
+            "datasets": {
+                "Vert": vert_df,
+                "Edge": edge_df,
+                "Face": face_df,
+                "Cell": cell_df,
+            },
             "network_changed": network_changed,
         }
 
@@ -168,12 +177,27 @@ def get_test_config():
     return {
         "name": "Test Cylinder",
         "eptm": "test_cylinder.hf5",
+        "parameters": {
+            "face_df": {
+                "area_elasticity": 1,
+                "prefered_area": 1,
+                "perimeter_elasticity": 0.1,
+                "prefered_perimeter": 3.6,
+            },
+            "edge_df": {
+                "line_tension": 0,
+                "is_active": 1,
+            },
+            "vert_df": {
+                "viscosity": 1,
+            }
+        },
         "geom": "VesselGeometry",
         "effectors": ["LineTension", "FaceAreaElasticity", "PerimeterElasticity"],
         "ref_effector": "PerimeterElasticity",
         "factory": "model_factory_vessel",
         "auto_reconnect": True, # if True, will automatically perform reconnections
-        "bounds": (-1000, 1000), # bounds the displacement of the vertices at each time step
+        "bounds": None, # bounds the displacement of the vertices at each time step
         "emit_columns": {} # dict containing lists of column names to emit for each dataframe
     }
 
@@ -184,20 +208,20 @@ def get_test_spec(interval=0.1):
             "address": "local:EulerSolver",
             "config": get_test_config(),
             "inputs": {
-                "behaviors": "Behaviors"
+                "behaviors": ["Behaviors"],
+                "global_time": ["global_time"],
             },
             "outputs": {
-                "vert_df": "Vertex",
-                "edge_df": "Edge",
-                "face_df": "Face",
-                "cell_df": "Cell",
-                "network_changed": "Network Changed",
+                "datasets": ["Datasets"],
+                "network_changed": ["Network Changed"],
             },
         },
-        "Vertex": [],
-        "Edge": [],
-        "Face": [],
-        "Cell": [],
+        "Datasets": {
+            "Vertex": {},
+            "Edge": {},
+            "Face": {},
+            "Cell": {},
+        },
         "Network Changed": False,
         "Behaviors": {}
     }
@@ -206,9 +230,9 @@ def run_test_solver(core):
     spec = get_test_spec()
     spec["emitter"] = emitter_from_wires({
         "global_time": ["global_time"],
-        "face_df": ["Face"],
-        "edge_df": ["Edge"],
-        "vert_df": ["Vert"],
+        "face_df": ["Datasets", "Face"],
+        "edge_df": ["Datasets", "Edge"],
+        "vert_df": ["Datasets", "Vert"],
     })
     sim = Composite(
         {
