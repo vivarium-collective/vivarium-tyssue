@@ -7,6 +7,10 @@ from tyssue.geometry.bulk_geometry import *
 
 from tyssue.dynamics.effectors import *
 from tyssue.dynamics.factory import *
+from tyssue.behaviors.sheet.apoptosis_events import apoptosis
+from tyssue.behaviors.sheet.basic_events import division, contraction
+
+from vivarium_tyssue.behaviors import *
 
 GEOMETRY_MAP = {
     "PlanarGeometry": PlanarGeometry,
@@ -48,4 +52,12 @@ FACTORY_MAP = {
     "model_factory": model_factory,
     "model_factory_vessel": model_factory_vessel,
     "model_factory_cylinder": model_factory_cylinder,
+}
+
+BEHAVIOR_MAP = {
+    "divide_basic": divide_cell,
+    "apoptosis_basic": apoptosis_cell,
+    "apoptosis": apoptosis,
+    "division": division,
+    "contraction": contraction,
 }
