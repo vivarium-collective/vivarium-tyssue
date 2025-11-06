@@ -98,7 +98,7 @@ class EulerSolver(Process):
 
     def inputs(self):
         return {
-            "behaviors": "any",
+            "behaviors": "behaviors",
             "global_time": "float",
         }
 
@@ -106,6 +106,7 @@ class EulerSolver(Process):
         return {
             "datasets": "map[tyssue_dset]",
             "network_changed": "boolean",
+            "behaviors": "map",
         }
 
     def update(self, inputs, interval):
@@ -163,6 +164,8 @@ class EulerSolver(Process):
             dicts.get("cell_df"),
         )
 
+        to_remove = [key for key in inputs["behaviors"]]
+
         return {
             "datasets": {
                 "Vert": vert_df,
@@ -171,6 +174,9 @@ class EulerSolver(Process):
                 "Cell": cell_df,
             },
             "network_changed": network_changed,
+            "behaviors": {
+                "_remove": to_remove,
+            },
         }
 
 def get_test_config():
@@ -214,10 +220,12 @@ def get_test_spec(interval=0.1):
             "outputs": {
                 "datasets": ["Datasets"],
                 "network_changed": ["Network Changed"],
+                "behaviors": ["Behaviors"],
             },
+            "interval": interval,
         },
         "Datasets": {
-            "Vertex": {},
+            "Vert": {},
             "Edge": {},
             "Face": {},
             "Cell": {},
@@ -240,15 +248,20 @@ def run_test_solver(core):
         },
         core=core,
     )
-    results=sim.run(10)
-    pprint(results[20])
+    sim.run(5)
+    results = gather_emitter_results(sim)[("emitter",)]
+    return results, sim
 
 if __name__ == "__main__":
     from vivarium_tyssue import register_types
+    import pandas as pd
     # create the core object
     core = ProcessTypes()
     # register data types
     core = register_types(core)
     core.register_process("EulerSolver", EulerSolver)
 
-    run_test_solver(core)
+    results, sim = run_test_solver(core)
+    df = pd.DataFrame.from_records(results[10]["face_df"], index="face")
+    pprint(df)
+

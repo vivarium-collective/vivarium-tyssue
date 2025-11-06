@@ -11,7 +11,7 @@ from tyssue import History
 from tyssue.dynamics import effectors, model_factory, model_factory_vessel, model_factory_cylinder
 from tyssue.generation.hexagonal_grids import hexa_cylinder
 from tyssue.generation.shapes import sheet_from_cell_centers
-from tyssue.geometry.sheet_geometry import CylinderGeometry as geom, CylinderGeometryInit
+from tyssue.geometry.vessel_geometry import VesselGeometry as geom
 from tyssue import config
 from tyssue.draw import sheet_view, create_gif
 from tyssue.geometry.vessel_geometry import VesselGeometry
@@ -65,17 +65,14 @@ points_xyz = hexa_cylinder(16,30, radius = 2.576, noise = 0.0, capped = True)
 sheet = sheet_from_cell_centers(points_xyz)
 sheet = sheet.extract_bounding_box(z_boundary = (-10.1, 10.1), coords=['x', 'y', 'z'])
 sheet.sanitize(trim_borders=False)
-CylinderGeometryInit.update_all(sheet)
+geom.update_all(sheet)
 sheet.network_changed = False
 
 #generate model
 model = model_factory_cylinder([
     effectors.LineTension,
     effectors.FaceAreaElasticity,
-    # effectors.PerimeterElasticity,
-    effectors.LumenVolumeElasticity,
-    effectors.SurfaceElasticity
-    # effectors.ChiralTorque
+    effectors.PerimeterElasticity,
 ], effectors.FaceAreaElasticity)
 
 #set model parameters
@@ -87,9 +84,6 @@ sheet.edge_df["line_tension"] = np.random.uniform(low=-0.1, high=0.1, size=sheet
 sheet.vert_df["viscosity"] = 1
 sheet.vert_df["prefered_deviation"] = 0
 sheet.vert_df["surface_elasticity"] = 5
-sheet.settings["lumen_vol_elasticity"] = 0.1
-sheet.settings["lumen_prefered_vol"] = sheet.settings["lumen_vol"]
-sheet.settings["vol_cell"] = sheet.settings["lumen_vol"]/len(sheet.face_df)
 sheet.settings["threshold_length"] = 0.1
 geom.update_all(sheet)
 
@@ -113,7 +107,7 @@ solver = EulerSolver(
 
 #set time variables
 dt = 0.05
-tf = 5
+tf = 50
 sheet.settings["dt"] = dt
 sheet.settings["p_4"] = 1/dt
 sheet.settings["p_5p"] = 1/dt
@@ -127,4 +121,6 @@ draw_specs["face"]["alpha"] = 0.2
 
 fig, ax = sheet_view(sheet, coords=["x", "z"], **draw_specs)
 plt.show()
+
+create_gif(history, output="test.gif", coords=["x", "z"], **draw_specs)
 
