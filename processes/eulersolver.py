@@ -1,5 +1,6 @@
 import logging
 import warnings
+import inspect
 
 import numpy as np
 from pprint import pprint
@@ -15,6 +16,8 @@ from tyssue.behaviors.sheet.basic_events import reconnect
 from tyssue.core.history import History
 from tyssue.io.hdf5 import load_datasets
 from tyssue import config
+
+from vivarium_tyssue.processes.regulations import TestRegulations
 
 log = logging.getLogger(__name__)
 
@@ -98,7 +101,7 @@ class EulerSolver(Process):
 
     def inputs(self):
         return {
-            "behaviors": "behaviors",
+            "behaviors": "any",
             "global_time": "float",
         }
 
@@ -112,9 +115,16 @@ class EulerSolver(Process):
     def update(self, inputs, interval):
 
         if len(inputs["behaviors"]) > 0:
-            for behavior, args in inputs["behaviors"].items():
+            for behavior, kwargs in inputs["behaviors"].items():
                 func = BEHAVIOR_MAP[behavior]
-                self.manager.append(func, args)
+                arg_names = [name for name, param in inspect.signature(func).parameters.items()]
+                if "manager" in arg_names:
+                    # kwargs["manager"] = self.manager
+                    self.manager.append(func, **kwargs)
+                    print(kwargs["cell_id"])
+                else:
+                    self.manager.append(func, **kwargs)
+
         pos = self.current_pos
         dot_r = self.ode_func()
         if self.bounds is not None:
@@ -188,7 +198,7 @@ def get_test_config():
                 "area_elasticity": 1,
                 "prefered_area": 1,
                 "perimeter_elasticity": 0.1,
-                "prefered_perimeter": 3.6,
+                "prefered_perimeter": 3.5,
             },
             "edge_df": {
                 "line_tension": 0,
@@ -207,7 +217,7 @@ def get_test_config():
         "emit_columns": {} # dict containing lists of column names to emit for each dataframe
     }
 
-def get_test_spec(interval=0.1):
+def get_test_spec(interval=0.05):
     return {
         "Tyssue": {
             "_type": "process",
@@ -234,6 +244,28 @@ def get_test_spec(interval=0.1):
         "Behaviors": {}
     }
 
+def get_test_regulation_spec(interval=0.1):
+    spec = get_test_spec(interval=interval)
+    spec["Regulation"] = {
+        "_type": "process",
+        "address": "local:TestRegulations",
+        "config": {
+            "period": 5,
+            "geom": "VesselGeometry",
+            "crit_area": 1.5,
+            "growth_rate": 0.1,
+        },
+        "inputs": {
+            "global_time": ["global_time"],
+            "datasets": ["Datasets"],
+        },
+        "outputs": {
+            "behaviors": ["Behaviors"],
+        },
+        "interval": interval,
+    }
+    return spec
+
 def run_test_solver(core):
     spec = get_test_spec()
     spec["emitter"] = emitter_from_wires({
@@ -252,6 +284,25 @@ def run_test_solver(core):
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
+def run_test_regulation(core):
+    spec = get_test_regulation_spec()
+    spec["emitter"] = emitter_from_wires({
+        "global_time": ["global_time"],
+        "face_df": ["Datasets", "Face"],
+        "edge_df": ["Datasets", "Edge"],
+        "vert_df": ["Datasets", "Vert"],
+        "behaviors": ["Behaviors"],
+    })
+    sim = Composite(
+        {
+            "state": spec,
+        },
+        core=core,
+    )
+    sim.run(20)
+    results = gather_emitter_results(sim)[("emitter",)]
+    return results, sim
+
 if __name__ == "__main__":
     from vivarium_tyssue import register_types
     import pandas as pd
@@ -260,8 +311,12 @@ if __name__ == "__main__":
     # register data types
     core = register_types(core)
     core.register_process("EulerSolver", EulerSolver)
+    core.register_process("TestRegulations", TestRegulations)
 
-    results, sim = run_test_solver(core)
-    df = pd.DataFrame.from_records(results[10]["face_df"], index="face")
-    pprint(df)
+    # results, sim = run_test_solver(core)
+    # df = pd.DataFrame.from_records(results[10]["face_df"], index="face")
+    # pprint(df)
+
+    results1, sim1 = run_test_regulation(core)
+    df = pd.DataFrame.from_records(results1[10]["face_df"], index="face")
 

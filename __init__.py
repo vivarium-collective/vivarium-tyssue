@@ -4,7 +4,19 @@ def tyssue_dset_update(schema, current, update, top_schema, top_state, path, cor
     return [i for i in update]
 
 def behaviors_update(schema, current, update, top_schema, top_state, path, core):
-    return {behavior:args for behavior, args in update.items()}
+    _update = current.copy()
+    if "_remove" in update.keys():
+        if len(update["_remove"]) > 0:
+            for i in update["_remove"]:
+                if i in _update:
+                    del _update[i]
+        del update["_remove"]
+
+    if len(update) > 0:
+        # _update = _update.update(update)
+        return {behavior:args for behavior, args in update.items()}
+    else:
+        return {}
 
 tyssue_dset_type = {
     "_type": "tyssue_dset",
