@@ -1,6 +1,7 @@
 import numpy as np
 
 from tyssue.topology.sheet_topology import cell_division, remove_face
+from vivarium_tyssue.maps import GEOMETRY_MAP
 
 def update_stem_cells(eptm):
     """updates which cells in a cylinder model are classified as stem cells"""
@@ -83,3 +84,34 @@ def apoptosis_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
     vertex = remove_face(sheet, cell_idx)
     fix_points_cylinder(sheet, radius=radius)
     geom.update_all(sheet)
+
+def division(sheet, manager, geom="SheetGeometry", cell_id=0, crit_area=2.0, growth_rate=0.1, dt=1.):
+    """Defines a division behavior.
+
+    Parameters
+    ----------
+
+    sheet: a :class:`Sheet` object
+    cell_id: int
+        the index of the dividing cell
+    crit_area: float
+        the area at which
+    growth_rate: float
+        increase in the prefered are per unit time
+        A_0(t + dt) = A0(t) * (1 + growth_rate * dt)
+    """
+    geom = GEOMETRY_MAP[geom]
+    if sheet.face_df.loc[cell_id, "area"] > crit_area:
+        # restore prefered_area
+        sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
+        # Do division
+        daughter = cell_division(sheet, cell_id, geom)
+        # Update the topology
+        sheet.reset_index(order=True)
+        # update geometry
+        geom.update_all(sheet)
+        print(f"cell n°{daughter} is born")
+    else:
+        #
+        sheet.face_df.loc[cell_id, "prefered_area"] *= (1 + dt * growth_rate)
+        manager.append(division, cell_id=cell_id, crit_area=crit_area, growth_rate=growth_rate, dt=dt)
