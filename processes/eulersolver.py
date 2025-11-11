@@ -7,6 +7,7 @@ from pprint import pprint
 
 from process_bigraph import Process, Composite, ProcessTypes
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
+from tyssue.draw import create_gif
 
 from vivarium_tyssue.maps import *
 
@@ -116,7 +117,8 @@ class EulerSolver(Process):
 
         if len(inputs["behaviors"]) > 0:
             for behavior, kwargs in inputs["behaviors"].items():
-                func = BEHAVIOR_MAP[behavior]
+                func = BEHAVIOR_MAP[kwargs["func"]]
+                del kwargs["func"]
                 arg_names = [name for name, param in inspect.signature(func).parameters.items()]
                 if "manager" in arg_names:
                     # kwargs["manager"] = self.manager
@@ -244,26 +246,48 @@ def get_test_spec(interval=0.05):
         "Behaviors": {}
     }
 
-def get_test_regulation_spec(interval=0.1):
+def get_test_regulation_spec(interval=0.1, double=False):
     spec = get_test_spec(interval=interval)
-    spec["Regulation"] = {
-        "_type": "process",
-        "address": "local:TestRegulations",
-        "config": {
-            "period": 5,
-            "geom": "VesselGeometry",
-            "crit_area": 1.5,
-            "growth_rate": 0.1,
-        },
-        "inputs": {
-            "global_time": ["global_time"],
-            "datasets": ["Datasets"],
-        },
-        "outputs": {
-            "behaviors": ["Behaviors"],
-        },
-        "interval": interval,
-    }
+    if double:
+        spec["Regulation"] = {
+            "_type": "process",
+            "address": "local:TestRegulations",
+            "config": {
+                "period": 5,
+                "geom": "VesselGeometry",
+                "crit_area": 1.5,
+                "growth_rate": 0.2,
+                "double": True,
+            },
+            "inputs": {
+                "global_time": ["global_time"],
+                "datasets": ["Datasets"],
+            },
+            "outputs": {
+                "behaviors": ["Behaviors"],
+            },
+            "interval": interval,
+        }
+    else:
+        spec["Regulation"] = {
+            "_type": "process",
+            "address": "local:TestRegulations",
+            "config": {
+                "period": 5,
+                "geom": "VesselGeometry",
+                "crit_area": 1.5,
+                "growth_rate": 0.2,
+                "double": False,
+            },
+            "inputs": {
+                "global_time": ["global_time"],
+                "datasets": ["Datasets"],
+            },
+            "outputs": {
+                "behaviors": ["Behaviors"],
+            },
+            "interval": interval,
+        }
     return spec
 
 def run_test_solver(core):
@@ -284,7 +308,29 @@ def run_test_solver(core):
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
-def run_test_regulation(core):
+def run_test_regulation(core, double = False):
+    if double:
+        spec = get_test_regulation_spec(interval=0.1, double=True)
+    else:
+        spec = get_test_regulation_spec(interval=0.1)
+    spec["emitter"] = emitter_from_wires({
+        "global_time": ["global_time"],
+        "face_df": ["Datasets", "Face"],
+        "edge_df": ["Datasets", "Edge"],
+        "vert_df": ["Datasets", "Vert"],
+        "behaviors": ["Behaviors"],
+    })
+    sim = Composite(
+        {
+            "state": spec,
+        },
+        core=core,
+    )
+    sim.run(20)
+    results = gather_emitter_results(sim)[("emitter",)]
+    return results, sim
+
+def run_test_regulation_double(core):
     spec = get_test_regulation_spec()
     spec["emitter"] = emitter_from_wires({
         "global_time": ["global_time"],
@@ -317,6 +363,15 @@ if __name__ == "__main__":
     # df = pd.DataFrame.from_records(results[10]["face_df"], index="face")
     # pprint(df)
 
-    results1, sim1 = run_test_regulation(core)
+    results1, sim1 = run_test_regulation(core, double=False)
+    history = sim1.state["Tyssue"]["instance"].history
+    history.update_datasets()
+    draw_specs = config.draw.sheet_spec()
+    draw_specs["face"]["visible"] = True
+    draw_specs["face"]["visible"] = True
+    draw_specs["face"]["alpha"] = 1
+    draw_specs["face"]["color"] = "blue"
+    draw_specs["edge"]["color"] = "black"
+    create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
     df = pd.DataFrame.from_records(results1[10]["face_df"], index="face")
 
