@@ -20,7 +20,7 @@ def fix_points_cylinder(sheet, radius):
     sheet.vert_df['y'] = xy_on_cylinder[:, 1]
 
 def divide_cylinder(sheet, manager, geom, division_rate, dt, radius):
-    """basic function to apply division in a cylinder crypt model"""
+    """basic function to apply division in a cylinder crypt_gillespie model"""
     update_stem_cells(sheet)
     stem_cells = sheet.face_df.loc[(sheet.face_df["stem_cell"] == 1) & (sheet.face_df["area"]>=0.7*sheet.face_df["area"].mean())].copy()
     n_stem = len(stem_cells)
@@ -34,7 +34,7 @@ def divide_cylinder(sheet, manager, geom, division_rate, dt, radius):
     fix_points_cylinder(sheet, radius=radius)
 
 def apoptosis_cylinder(sheet, manager, death_rate, dt, radius, geom):
-    """basic function to apply cell death in a cylinder crypt model"""
+    """basic function to apply cell death in a cylinder model"""
     update_stem_cells(sheet)
     dying_cells = sheet.face_df.loc[sheet.face_df["dying_cell"] == 1]
     n_dying = len(dying_cells)

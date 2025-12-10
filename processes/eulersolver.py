@@ -1,6 +1,7 @@
 import logging
 import warnings
 import inspect
+import time
 
 import numpy as np
 from pprint import pprint
@@ -38,6 +39,7 @@ class EulerSolver(Process):
     config_schema = {
         "name": "string", #name for epithelium object
         "eptm": "string", #saved tyssue epithelium file
+        "tissue_type": "string", #key indicating the desired tissue type from TISSUE_MAP
         "parameters": "map[map[float]]",
         "geom": "string", #key indicating the desired geometry class in GEOMETRY_MAP
         "effectors": "list[string]", #list of strings representing effectors from the EFFECTORS_MAP
@@ -45,15 +47,18 @@ class EulerSolver(Process):
         "factory": "string", #key indicating the factory class to generate from the FACTORY_MAP
         "auto_reconnect": "boolean", # if True, will automatically perform reconnections
         "bounds": "map[float]", # bounds the displacement of the vertices at each time step
-        "emit_columns": "map[list[string]]" # dict containing lists of column names to emit for each dataframe
+        "emit_columns": "map[list[string]]", # dict containing lists of column names to emit for each dataframe
+        "settings": "map",
     }
 
     def initialize(self, config):
         self._set_pos = set_pos
         self.geom = GEOMETRY_MAP[config["geom"]]
         datasets = load_datasets(config["eptm"])
-        self.eptm = Sheet("epithelium", datasets)
+        self.tyssue_type = TISSUE_MAP[config["tissue_type"]]
+        self.eptm = self.tyssue_type("epithelium", datasets)
         self.eptm.network_changed = False
+        self.eptm.settings.update(config["settings"])
         effectors = [EFFECTORS_MAP[effector] for effector in config["effectors"]]
         self.model = FACTORY_MAP[config["factory"]](effectors, EFFECTORS_MAP[config["ref_effector"]])
         self.history = History(self.eptm)
@@ -162,6 +167,8 @@ class EulerSolver(Process):
             for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
                 if hasattr(self.eptm, df_name):
                     cols = emit_columns.get(df_name)
+                    if not "unique_id" in cols:
+                        cols.append("unique_id")
                     df = getattr(self.eptm, df_name)
                     if cols:
                         df = df[cols]
@@ -195,6 +202,7 @@ def get_test_config():
     return {
         "name": "Test Cylinder",
         "eptm": "test_cylinder.hf5",
+        "tissue_type": "Sheet",
         "parameters": {
             "face_df": {
                 "area_elasticity": 1,
@@ -212,7 +220,7 @@ def get_test_config():
         },
         "geom": "VesselGeometry",
         "effectors": ["LineTension", "FaceAreaElasticity", "PerimeterElasticity"],
-        "ref_effector": "PerimeterElasticity",
+        "ref_effector": "FaceAreaElasticity",
         "factory": "model_factory_vessel",
         "auto_reconnect": True, # if True, will automatically perform reconnections
         "bounds": None, # bounds the displacement of the vertices at each time step
@@ -275,7 +283,7 @@ def get_test_regulation_spec(interval=0.1, double=False):
             "config": {
                 "period": 5,
                 "geom": "VesselGeometry",
-                "crit_area": 1.5,
+                "crit_area": 2,
                 "growth_rate": 0.2,
                 "double": False,
             },
@@ -359,19 +367,21 @@ if __name__ == "__main__":
     core.register_process("EulerSolver", EulerSolver)
     core.register_process("TestRegulations", TestRegulations)
 
-    # results, sim = run_test_solver(core)
-    # df = pd.DataFrame.from_records(results[10]["face_df"], index="face")
-    # pprint(df)
+    start= time.time()
+    results, sim = run_test_solver(core)
+    print(f"{time.time() - start} seconds")
+    df = pd.DataFrame.from_records(results[10]["face_df"], index="face")
+    pprint(df)
 
-    results1, sim1 = run_test_regulation(core, double=False)
-    history = sim1.state["Tyssue"]["instance"].history
-    history.update_datasets()
-    draw_specs = config.draw.sheet_spec()
-    draw_specs["face"]["visible"] = True
-    draw_specs["face"]["visible"] = True
-    draw_specs["face"]["alpha"] = 1
-    draw_specs["face"]["color"] = "blue"
-    draw_specs["edge"]["color"] = "black"
-    create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
-    df = pd.DataFrame.from_records(results1[10]["face_df"], index="face")
+    # results1, sim1 = run_test_regulation(core, double=False)
+    # history = sim1.state["Tyssue"]["instance"].history
+    # history.update_datasets()
+    # draw_specs = config.draw.sheet_spec()
+    # draw_specs["face"]["visible"] = True
+    # draw_specs["face"]["visible"] = True
+    # draw_specs["face"]["alpha"] = 1
+    # draw_specs["face"]["color"] = "blue"
+    # draw_specs["edge"]["color"] = "black"
+    # create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
+    # df = pd.DataFrame.from_records(results1[10]["face_df"], index="face")
 
