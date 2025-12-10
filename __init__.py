@@ -1,7 +1,19 @@
 from vivarium_tyssue.processes import register_processes
 
 def tyssue_dset_update(schema, current, update, top_schema, top_state, path, core):
-    return [i for i in update]
+    if len(current) == 0:
+        return [i for i in update]
+    else:
+        _current = {d["unique_id"]: d for d in current}
+        _update = {d["unique_id"]: d for d in update}
+        final = []
+        for uid, upd in _update.items():
+            if uid in _current:
+                merged = {**_current[uid], **upd}
+            else:
+                merged = upd
+            final.append(merged)
+        return final
 
 def behaviors_update(schema, current, update, top_schema, top_state, path, core):
     _update = current.copy()
