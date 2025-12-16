@@ -1,9 +1,17 @@
 import random
+import time
+import numpy as np
+from pprint import pprint
 
-from process_bigraph import Process
+from process_bigraph import Process, Composite, ProcessTypes
+from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
 from vivarium_tyssue.maps import *
 import vivarium_tyssue.models.crypt_gillespie.crypt_params as crypt_params
+from vivarium_tyssue.processes.eulersolver import EulerSolver, get_test_regulation_spec, run_test_solver
+
+from tyssue import config
+from tyssue.draw import create_gif
 
 class TestRegulations(Process):
 
@@ -61,3 +69,75 @@ class TestRegulations(Process):
 
         return {"behaviors": update}
 
+class StochasticLineTension(Process):
+
+    config_schema = {
+        "tau": {
+            "_type": "float",
+            "default": 1.0,
+        },
+        "sigma": "float",
+    }
+
+    def initialize(self, config):
+        self.tau = self.config["tau"]
+        self.sigma = self.config["sigma"]
+
+    def inputs(self):
+        return {
+            "dataset": "tyssue_dset", #path to edge dataframe
+        }
+
+    def outputs(self):
+        return {
+            "behaviors": "map"
+        }
+
+    def update(self, inputs, interval):
+        tension = np.array([edge["line_tension"] for edge in inputs])
+
+        decay = np.exp(-interval / self.tau)
+        noise_scale = list(self.sigma * np.sqrt(1 - np.exp(-2 * interval / self.tau)))
+
+def run_test_regulation(core, double = False):
+    if double:
+        spec = get_test_regulation_spec(interval=0.1, double=True)
+    else:
+        spec = get_test_regulation_spec(interval=0.1)
+    spec["emitter"] = emitter_from_wires({
+        "global_time": ["global_time"],
+        "face_df": ["Datasets", "Face"],
+        "edge_df": ["Datasets", "Edge"],
+        "vert_df": ["Datasets", "Vert"],
+        "behaviors": ["Behaviors"],
+    })
+    sim = Composite(
+        {
+            "state": spec,
+        },
+        core=core,
+    )
+    sim.run(20)
+    results = gather_emitter_results(sim)[("emitter",)]
+    return results, sim
+
+if __name__ == "__main__":
+    from vivarium_tyssue import register_types
+    import pandas as pd
+    # create the core object
+    core = ProcessTypes()
+    # register data types
+    core = register_types(core)
+    core.register_process("EulerSolver", EulerSolver)
+
+    results1, sim1 = run_test_regulation(core, double=False)
+    history = sim1.state["Tyssue"]["instance"].history
+    history.update_datasets()
+    draw_specs = config.draw.sheet_spec()
+    draw_specs["face"]["visible"] = True
+    draw_specs["face"]["visible"] = True
+    draw_specs["face"]["alpha"] = 1
+    draw_specs["face"]["color"] = "blue"
+    draw_specs["edge"]["color"] = "black"
+    create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
+    df = pd.DataFrame.from_records(results1[10]["face_df"], index="face")

@@ -1,4 +1,4 @@
-import crypt_params as param
+import vivarium_tyssue.models.crypt_gillespie.crypt_params as param
 import numpy as np
 
 rates_max = {}

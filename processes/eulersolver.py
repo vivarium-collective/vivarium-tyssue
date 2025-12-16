@@ -3,23 +3,17 @@ import warnings
 import inspect
 import time
 
-import numpy as np
 from pprint import pprint
 
 from process_bigraph import Process, Composite, ProcessTypes
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
-from tyssue.draw import create_gif
 
 from vivarium_tyssue.maps import *
 
-from tyssue import Sheet
 from tyssue.behaviors.event_manager import EventManager
 from tyssue.behaviors.sheet.basic_events import reconnect
 from tyssue.core.history import History
 from tyssue.io.hdf5 import load_datasets
-from tyssue import config
-
-from vivarium_tyssue.processes.regulations import TestRegulations
 
 log = logging.getLogger(__name__)
 
@@ -47,7 +41,7 @@ class EulerSolver(Process):
         "factory": "string", #key indicating the factory class to generate from the FACTORY_MAP
         "auto_reconnect": "boolean", # if True, will automatically perform reconnections
         "bounds": "map[float]", # bounds the displacement of the vertices at each time step
-        "emit_columns": "map[list[string]]", # dict containing lists of column names to emit for each dataframe
+        "output_columns": "map[list[string]]", # dict containing lists of column names to emit for each dataframe
         "settings": "map",
     }
 
@@ -155,9 +149,9 @@ class EulerSolver(Process):
 
         dicts = {}
 
-        emit_columns = self.config.get("emit_columns", {})
-        # if emit_columns is empty, just dump all dataframes as dicts
-        if not emit_columns:
+        output_columns = self.config.get("output_columns", {})
+        # if output_columns is empty, just dump all dataframes as dicts
+        if not output_columns:
             for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
                 if getattr(self.eptm, df_name) is not None:
                     dicts[df_name] = getattr(self.eptm, df_name).reset_index().to_dict(orient="records")
@@ -166,13 +160,16 @@ class EulerSolver(Process):
         else:
             for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
                 if hasattr(self.eptm, df_name):
-                    cols = emit_columns.get(df_name)
-                    if not "unique_id" in cols:
-                        cols.append("unique_id")
-                    df = getattr(self.eptm, df_name)
-                    if cols:
-                        df = df[cols]
-                    dicts[df_name] = df.reset_index().to_dict(orient="records")
+                    if df_name in output_columns.keys():
+                        cols = output_columns.get(df_name)
+                        if not "unique_id" in cols:
+                            cols.append("unique_id")
+                        df = getattr(self.eptm, df_name)
+                        if cols:
+                            df = df[cols]
+                        dicts[df_name] = df.reset_index().to_dict(orient="records")
+                    else:
+                        dicts[df_name] = getattr(self.eptm, df_name).reset_index().to_dict(orient="records")
                 else:
                     dicts[df_name] = {}
 
@@ -224,7 +221,7 @@ def get_test_config():
         "factory": "model_factory_vessel",
         "auto_reconnect": True, # if True, will automatically perform reconnections
         "bounds": None, # bounds the displacement of the vertices at each time step
-        "emit_columns": {} # dict containing lists of column names to emit for each dataframe
+        "output_columns": {} # dict containing lists of column names to emit for each dataframe
     }
 
 def get_test_spec(interval=0.05):
@@ -316,47 +313,6 @@ def run_test_solver(core):
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
-def run_test_regulation(core, double = False):
-    if double:
-        spec = get_test_regulation_spec(interval=0.1, double=True)
-    else:
-        spec = get_test_regulation_spec(interval=0.1)
-    spec["emitter"] = emitter_from_wires({
-        "global_time": ["global_time"],
-        "face_df": ["Datasets", "Face"],
-        "edge_df": ["Datasets", "Edge"],
-        "vert_df": ["Datasets", "Vert"],
-        "behaviors": ["Behaviors"],
-    })
-    sim = Composite(
-        {
-            "state": spec,
-        },
-        core=core,
-    )
-    sim.run(20)
-    results = gather_emitter_results(sim)[("emitter",)]
-    return results, sim
-
-def run_test_regulation_double(core):
-    spec = get_test_regulation_spec()
-    spec["emitter"] = emitter_from_wires({
-        "global_time": ["global_time"],
-        "face_df": ["Datasets", "Face"],
-        "edge_df": ["Datasets", "Edge"],
-        "vert_df": ["Datasets", "Vert"],
-        "behaviors": ["Behaviors"],
-    })
-    sim = Composite(
-        {
-            "state": spec,
-        },
-        core=core,
-    )
-    sim.run(20)
-    results = gather_emitter_results(sim)[("emitter",)]
-    return results, sim
-
 if __name__ == "__main__":
     from vivarium_tyssue import register_types
     import pandas as pd
@@ -365,13 +321,13 @@ if __name__ == "__main__":
     # register data types
     core = register_types(core)
     core.register_process("EulerSolver", EulerSolver)
-    core.register_process("TestRegulations", TestRegulations)
 
     start= time.time()
     results, sim = run_test_solver(core)
     print(f"{time.time() - start} seconds")
     df = pd.DataFrame.from_records(results[10]["face_df"], index="face")
     pprint(df)
+    pprint(results[10]["face_df"])
 
     # results1, sim1 = run_test_regulation(core, double=False)
     # history = sim1.state["Tyssue"]["instance"].history

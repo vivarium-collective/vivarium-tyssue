@@ -110,8 +110,12 @@ def division(sheet, manager, geom="SheetGeometry", cell_id=0, crit_area=2.0, gro
         sheet.reset_index(order=True)
         # update geometry
         geom.update_all(sheet)
+        sheet.network_changed = True
         print(f"cell n°{daughter} is born")
     else:
         #
         sheet.face_df.loc[cell_id, "prefered_area"] *= (1 + dt * growth_rate)
         manager.append(division, cell_id=cell_id, crit_area=crit_area, growth_rate=growth_rate, dt=dt)
+
+def stochastic_tension(sheet, tension):
+    pass
