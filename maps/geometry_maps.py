@@ -4,6 +4,7 @@ from tyssue.geometry.sheet_geometry import *
 from tyssue.geometry.vessel_geometry import *
 from tyssue.geometry.multisheetgeometry import *
 from tyssue.geometry.bulk_geometry import *
+from tyssue.geometry.cylinder_geometry import *
 
 GEOMETRY_MAP = {
     "PlanarGeometry": PlanarGeometry,

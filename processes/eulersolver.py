@@ -53,6 +53,7 @@ class EulerSolver(Process):
         self.eptm = self.tyssue_type("epithelium", datasets)
         self.eptm.network_changed = False
         self.eptm.settings.update(config["settings"])
+        self.geom.update_all(self.eptm)
         effectors = [EFFECTORS_MAP[effector] for effector in config["effectors"]]
         self.model = FACTORY_MAP[config["factory"]](effectors, EFFECTORS_MAP[config["ref_effector"]])
         self.history = History(self.eptm)
@@ -122,7 +123,6 @@ class EulerSolver(Process):
                 if "manager" in arg_names:
                     # kwargs["manager"] = self.manager
                     self.manager.append(func, **kwargs)
-                    print(kwargs["cell_id"])
                 else:
                     self.manager.append(func, **kwargs)
 
@@ -213,12 +213,15 @@ def get_test_config():
             },
             "vert_df": {
                 "viscosity": 1,
+                "vessel_elasticity": 1,
+                "prefered_radius": 2.5,
+                "is_alive": 1,
             }
         },
         "geom": "VesselGeometry",
-        "effectors": ["LineTension", "FaceAreaElasticity", "PerimeterElasticity"],
+        "effectors": ["LineTension", "FaceAreaElasticity", "PerimeterElasticity", "VesselSurfaceElasticity"],
         "ref_effector": "FaceAreaElasticity",
-        "factory": "model_factory_vessel",
+        "factory": "model_factory",
         "auto_reconnect": True, # if True, will automatically perform reconnections
         "bounds": None, # bounds the displacement of the vertices at each time step
         "output_columns": {} # dict containing lists of column names to emit for each dataframe
@@ -250,50 +253,6 @@ def get_test_spec(interval=0.05):
         "Network Changed": False,
         "Behaviors": {}
     }
-
-def get_test_regulation_spec(interval=0.1, double=False):
-    spec = get_test_spec(interval=interval)
-    if double:
-        spec["Regulation"] = {
-            "_type": "process",
-            "address": "local:TestRegulations",
-            "config": {
-                "period": 5,
-                "geom": "VesselGeometry",
-                "crit_area": 1.5,
-                "growth_rate": 0.2,
-                "double": True,
-            },
-            "inputs": {
-                "global_time": ["global_time"],
-                "datasets": ["Datasets"],
-            },
-            "outputs": {
-                "behaviors": ["Behaviors"],
-            },
-            "interval": interval,
-        }
-    else:
-        spec["Regulation"] = {
-            "_type": "process",
-            "address": "local:TestRegulations",
-            "config": {
-                "period": 5,
-                "geom": "VesselGeometry",
-                "crit_area": 2,
-                "growth_rate": 0.2,
-                "double": False,
-            },
-            "inputs": {
-                "global_time": ["global_time"],
-                "datasets": ["Datasets"],
-            },
-            "outputs": {
-                "behaviors": ["Behaviors"],
-            },
-            "interval": interval,
-        }
-    return spec
 
 def run_test_solver(core):
     spec = get_test_spec()

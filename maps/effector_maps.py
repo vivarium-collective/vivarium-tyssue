@@ -18,5 +18,5 @@ EFFECTORS_MAP = {
     "BarrierElasticity": BarrierElasticity,
     "ChiralTorque": ChiralTorque,
     "SurfaceElasticity": SurfaceElasticity,
-    "BoundaryElasticity": BoundaryElasticity,
+    "VesselSurfaceElasticity": VesselSurfaceElasticity,
 }
