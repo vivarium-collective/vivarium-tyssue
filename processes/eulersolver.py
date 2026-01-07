@@ -10,7 +10,6 @@ from process_bigraph import Process, Composite
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
 from vivarium_tyssue.maps import *
-from vivarium_tyssue import register_types
 
 from tyssue.behaviors.event_manager import EventManager
 from tyssue.behaviors.sheet.basic_events import reconnect
@@ -309,7 +308,7 @@ def run_test_solver(core):
     return results, sim
 
 if __name__ == "__main__":
-    from vivarium_tyssue import register_types
+    from vivarium_tyssue.data_types import register_types
     import pandas as pd
     # create the core object
     core = allocate_core()

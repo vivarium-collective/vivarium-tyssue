@@ -11,7 +11,6 @@ from process_bigraph import Process, Composite
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
 from vivarium_tyssue.maps import *
-import vivarium_tyssue.models.crypt_gillespie.crypt_params as crypt_params
 from vivarium_tyssue.processes.eulersolver import EulerSolver, get_test_spec, run_test_solver
 
 from tyssue import config
@@ -199,12 +198,12 @@ def run_test_stochastic(core):
         },
         core=core,
     )
-    sim.run(2)
+    sim.run(20)
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
 if __name__ == "__main__":
-    from vivarium_tyssue import register_types
+    from vivarium_tyssue.data_types import register_types
     import pandas as pd
     from bigraph_viz import plot_bigraph
 
@@ -212,9 +211,6 @@ if __name__ == "__main__":
     # create the core object
     core = allocate_core()
     # register processes
-    core.register_link("EulerSolver", EulerSolver)
-    core.register_link("StochasticLineTension", StochasticLineTension)
-    core.register_link("TestRegulations", TestRegulations)
     core = register_types(core)
 
     # results, sim = run_test_regulation(core, double=False)
