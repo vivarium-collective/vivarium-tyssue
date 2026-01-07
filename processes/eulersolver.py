@@ -5,10 +5,12 @@ import time
 
 from pprint import pprint
 
-from process_bigraph import Process, Composite, ProcessTypes
+from bigraph_schema import allocate_core
+from process_bigraph import Process, Composite
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
 from vivarium_tyssue.maps import *
+from vivarium_tyssue import register_types
 
 from tyssue.behaviors.event_manager import EventManager
 from tyssue.behaviors.sheet.basic_events import reconnect
@@ -74,6 +76,46 @@ class EulerSolver(Process):
         else:
             self.bounds = None
 
+    def initial_state(self):
+        dicts = {}
+        output_columns = self.config.get("output_columns", {})
+        # if output_columns is empty, just dump all dataframes as dicts
+        if not output_columns:
+            for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
+                if getattr(self.eptm, df_name) is not None:
+                    dicts[df_name] = getattr(self.eptm, df_name).reset_index().to_dict(orient="records")
+                else:
+                    dicts[df_name] = {}
+        else:
+            for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
+                if hasattr(self.eptm, df_name):
+                    if df_name in output_columns.keys():
+                        cols = output_columns.get(df_name)
+                        if not "unique_id" in cols:
+                            cols.append("unique_id")
+                        df = getattr(self.eptm, df_name)
+                        if cols:
+                            df = df[cols]
+                        dicts[df_name] = df.reset_index().to_dict(orient="records")
+                    else:
+                        dicts[df_name] = getattr(self.eptm, df_name).reset_index().to_dict(orient="records")
+                else:
+                    dicts[df_name] = {}
+        vert_df, edge_df, face_df, cell_df = (
+            dicts.get("vert_df"),
+            dicts.get("edge_df"),
+            dicts.get("face_df"),
+            dicts.get("cell_df"),
+        )
+        return {
+            "datasets": {
+                "Vert": vert_df,
+                "Edge": edge_df,
+                "Face": face_df,
+                "Cell": cell_df,
+            }
+        }
+
     @property
     def current_pos(self):
         return self.eptm.vert_df.loc[
@@ -102,7 +144,7 @@ class EulerSolver(Process):
 
     def inputs(self):
         return {
-            "behaviors": "any",
+            "behaviors": "map[behaviors]",
             "global_time": "float",
         }
 
@@ -110,11 +152,11 @@ class EulerSolver(Process):
         return {
             "datasets": "map[tyssue_dset]",
             "network_changed": "boolean",
-            "behaviors": "map",
+            "behaviors_update": "map",
         }
 
     def update(self, inputs, interval):
-
+        print(inputs["global_time"])
         if len(inputs["behaviors"]) > 0:
             for behavior, kwargs in inputs["behaviors"].items():
                 func = BEHAVIOR_MAP[kwargs["func"]]
@@ -190,7 +232,7 @@ class EulerSolver(Process):
                 "Cell": cell_df,
             },
             "network_changed": network_changed,
-            "behaviors": {
+            "behaviors_update": {
                 "_remove": to_remove,
             },
         }
@@ -227,7 +269,7 @@ def get_test_config():
         "output_columns": {} # dict containing lists of column names to emit for each dataframe
     }
 
-def get_test_spec(interval=0.05):
+def get_test_spec(interval=0.1):
     return {
         "Tyssue": {
             "_type": "process",
@@ -240,15 +282,9 @@ def get_test_spec(interval=0.05):
             "outputs": {
                 "datasets": ["Datasets"],
                 "network_changed": ["Network Changed"],
-                "behaviors": ["Behaviors"],
+                "behaviors_update": ["Behaviors"],
             },
             "interval": interval,
-        },
-        "Datasets": {
-            "Vert": {},
-            "Edge": {},
-            "Face": {},
-            "Cell": {},
         },
         "Network Changed": False,
         "Behaviors": {}
@@ -276,10 +312,10 @@ if __name__ == "__main__":
     from vivarium_tyssue import register_types
     import pandas as pd
     # create the core object
-    core = ProcessTypes()
-    # register data types
+    core = allocate_core()
+    core.register_link("EulerSolver", EulerSolver)
     core = register_types(core)
-    core.register_process("EulerSolver", EulerSolver)
+    # register data types
 
     start= time.time()
     results, sim = run_test_solver(core)

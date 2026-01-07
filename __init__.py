@@ -1,7 +1,13 @@
-from vivarium_tyssue.processes import register_processes
+from dataclasses import dataclass, field
+from bigraph_schema.schema import Node, Map, List
+from bigraph_schema.methods import apply
 
-def tyssue_dset_update(schema, current, update, top_schema, top_state, path, core):
-    if len(current) == 0:
+@dataclass(kw_only=True)
+class TyssueDset(List):
+    _element: Map = field(default_factory=Map)
+
+def tyssue_dset_update(schema, current, update, path):
+    if not current:
         return [i for i in update]
     else:
         _current = {d["unique_id"]: d for d in current}
@@ -15,7 +21,15 @@ def tyssue_dset_update(schema, current, update, top_schema, top_state, path, cor
             final.append(merged)
         return final
 
-def behaviors_update(schema, current, update, top_schema, top_state, path, core):
+@apply.dispatch
+def apply(schema: TyssueDset, current, update, path):
+    return tyssue_dset_update(schema, current, update, path), []
+
+@dataclass(kw_only=True)
+class Behaviors(Map):
+    _value: Map = field(default_factory=Map)
+
+def behaviors_update(schema, current, update, path):
     _update = current.copy()
     if "_remove" in update.keys():
         if len(update["_remove"]) > 0:
@@ -30,19 +44,11 @@ def behaviors_update(schema, current, update, top_schema, top_state, path, core)
     else:
         return {}
 
-tyssue_dset_type = {
-    "_type": "tyssue_dset",
-    "_inherit": "list[map[any]]",
-    "_apply": tyssue_dset_update,
-}
-
-behaviors_type = {
-    "_type": "behavior",
-    "_inherit": "map[map[any]]",
-    "_apply": behaviors_update,
-}
+@apply.dispatch
+def apply(schema: Behaviors, current, update, path):
+    return behaviors_update(schema, current, update, path), []
 
 def register_types(core):
-    core.register("tyssue_dset", tyssue_dset_type)
-    core.register("behaviors", behaviors_type)
-    return register_processes(core)
+    core.register_type("tyssue_dset", TyssueDset)
+    core.register_type("behaviors", Behaviors)
+    return core

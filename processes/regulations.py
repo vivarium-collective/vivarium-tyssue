@@ -6,7 +6,8 @@ import cProfile
 import pstats
 import io
 
-from process_bigraph import Process, Composite, ProcessTypes
+from bigraph_schema import allocate_core
+from process_bigraph import Process, Composite
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
 from vivarium_tyssue.maps import *
@@ -46,7 +47,7 @@ class TestRegulations(Process):
         on_period = (math.isclose(t % self.period, 0) or math.isclose(t % self.period, self.period)) and not math.isclose(t, 0)
         if on_period:
             faces = inputs["datasets"]["Face"]
-            positive_y = [row for row in faces if row["y"] > 1]
+            positive_y = [row for row in faces if (row["y"] > 1) & (row["z"] > -7) & (row["z"] < 7)]
 
             def pick():
                 return random.choice(positive_y)["face"]
@@ -179,7 +180,7 @@ def run_test_regulation(core, double = False):
         },
         core=core,
     )
-    sim.run(20)
+    sim.run(5)
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
@@ -198,22 +199,23 @@ def run_test_stochastic(core):
         },
         core=core,
     )
-    sim.run(20)
+    sim.run(2)
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
 if __name__ == "__main__":
     from vivarium_tyssue import register_types
     import pandas as pd
+    from bigraph_viz import plot_bigraph
 
     profiler = cProfile.Profile()
     # create the core object
-    core = ProcessTypes()
-    # register data types
+    core = allocate_core()
+    # register processes
+    core.register_link("EulerSolver", EulerSolver)
+    core.register_link("StochasticLineTension", StochasticLineTension)
+    core.register_link("TestRegulations", TestRegulations)
     core = register_types(core)
-    core.register_process("EulerSolver", EulerSolver)
-    core.register_process("TestRegulations", TestRegulations)
-    core.register_process("StochasticLineTension", StochasticLineTension)
 
     # results, sim = run_test_regulation(core, double=False)
     # history = sim.state["Tyssue"]["instance"].history
@@ -226,6 +228,7 @@ if __name__ == "__main__":
     # draw_specs["edge"]["color"] = "black"
     # create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
     # df = pd.DataFrame.from_records(results[10]["face_df"], index="face")
+
     start = time.time()
     profiler.enable()
     results1, sim1 = run_test_stochastic(core)
