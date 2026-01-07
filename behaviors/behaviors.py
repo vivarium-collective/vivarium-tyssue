@@ -100,18 +100,26 @@ def division(sheet, manager, geom="SheetGeometry", cell_id=0, crit_area=2.0, gro
         increase in the prefered are per unit time
         A_0(t + dt) = A0(t) * (1 + growth_rate * dt)
     """
-    geom = GEOMETRY_MAP[geom]
+    geometry = GEOMETRY_MAP[geom]
     if sheet.face_df.loc[cell_id, "area"] > crit_area:
         # restore prefered_area
         sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
         # Do division
-        daughter = cell_division(sheet, cell_id, geom)
+        daughter = cell_division(sheet, cell_id, geometry)
         # Update the topology
         sheet.reset_index(order=True)
         # update geometry
-        geom.update_all(sheet)
+        geometry.update_all(sheet)
+        sheet.network_changed = True
         print(f"cell n°{daughter} is born")
     else:
         #
         sheet.face_df.loc[cell_id, "prefered_area"] *= (1 + dt * growth_rate)
-        manager.append(division, cell_id=cell_id, crit_area=crit_area, growth_rate=growth_rate, dt=dt)
+        manager.append(division, geom=geom, cell_id=cell_id, crit_area=crit_area, growth_rate=growth_rate, dt=dt)
+
+def stochastic_tension(sheet, manager, tension_update=None):
+    if tension_update:
+        sheet.edge_df.loc[
+            sheet.edge_df["unique_id"].isin(tension_update),
+            "line_tension"
+        ] = sheet.edge_df["unique_id"].map(tension_update)

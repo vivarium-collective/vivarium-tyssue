@@ -9,4 +9,5 @@ BEHAVIOR_MAP = {
     "apoptosis": apoptosis,
     "division": division,
     "contraction": contraction,
+    "stochastic_tension": stochastic_tension,
 }
