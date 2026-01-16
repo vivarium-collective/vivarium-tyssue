@@ -10,6 +10,7 @@ from process_bigraph import Process, Composite
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
 from vivarium_tyssue.maps import *
+from vivarium_tyssue.data_types import get_frame_schema
 
 from tyssue.behaviors.event_manager import EventManager
 from tyssue.behaviors.sheet.basic_events import reconnect
@@ -27,6 +28,14 @@ def set_pos(eptm, geom, pos):
     log.debug("set pos")
     eptm.vert_df.loc[eptm.active_verts, eptm.coords] = pos.reshape((-1, eptm.dim))
     geom.update_all(eptm)
+
+def get_dataset_schema(eptm):
+    schema = {}
+    for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
+        if getattr(eptm, df_name) is not None:
+            schema[df_name] = {"_columns" : get_frame_schema(getattr(eptm, df_name))}
+    schema.update({"_type" : "tyssue_data"})
+    return schema
 
 class EulerSolver(Process):
     """Generalized Euler solver for Tyssue-based epithelial simulations
@@ -75,19 +84,20 @@ class EulerSolver(Process):
         else:
             self.bounds = None
 
-    def initial_state(self):
-        dicts = {}
+    def output_dfs(self):
         output_columns = self.config.get("output_columns", {})
         # if output_columns is empty, just dump all dataframes as dicts
+        output_dfs = {}
         if not output_columns:
             for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
                 if getattr(self.eptm, df_name) is not None:
-                    dicts[df_name] = getattr(self.eptm, df_name).reset_index().to_dict(orient="records")
+                    output_dfs[df_name] = getattr(self.eptm, df_name)
                 else:
-                    dicts[df_name] = {}
+                    output_dfs[df_name] = {}
         else:
             for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
-                if hasattr(self.eptm, df_name):
+                if getattr(self.eptm, df_name):
+                    print(df_name)
                     if df_name in output_columns.keys():
                         cols = output_columns.get(df_name)
                         if not "unique_id" in cols:
@@ -95,24 +105,20 @@ class EulerSolver(Process):
                         df = getattr(self.eptm, df_name)
                         if cols:
                             df = df[cols]
-                        dicts[df_name] = df.reset_index().to_dict(orient="records")
+                        output_dfs[df_name] = df
                     else:
-                        dicts[df_name] = getattr(self.eptm, df_name).reset_index().to_dict(orient="records")
+                        output_dfs[df_name] = getattr(self.eptm, df_name)
                 else:
-                    dicts[df_name] = {}
-        vert_df, edge_df, face_df, cell_df = (
-            dicts.get("vert_df"),
-            dicts.get("edge_df"),
-            dicts.get("face_df"),
-            dicts.get("cell_df"),
-        )
+                    output_dfs[df_name] = {}
+        return output_dfs
+
+    def initial_state(self):
+        outputs = self.output_dfs()
+        for df_name, df in outputs.items():
+            if not isinstance(df, dict):
+                outputs[df_name] = df.to_dict(orient="list")
         return {
-            "datasets": {
-                "Vert": vert_df,
-                "Edge": edge_df,
-                "Face": face_df,
-                "Cell": cell_df,
-            }
+            "datasets": outputs,
         }
 
     @property
@@ -148,8 +154,24 @@ class EulerSolver(Process):
         }
 
     def outputs(self):
+        datasets = {
+            "_type": "tyssue_data",
+            "vert_df": {
+                "_columns": get_frame_schema(self.eptm.vert_df)
+            },
+            "edge_df": {
+                "_columns": get_frame_schema(self.eptm.edge_df)
+            },
+            "face_df": {
+                "_columns": get_frame_schema(self.eptm.face_df)
+            },
+        }
+        if self.eptm.cell_df:
+            datasets["cell_df"] = {"_columns": get_frame_schema(self.eptm.cell_df)}
+        else:
+            datasets["cell_df"] = {}
         return {
-            "datasets": "map[tyssue_dset]",
+            "datasets": datasets,
             "network_changed": "boolean",
             "behaviors_update": "map",
         }
@@ -188,48 +210,12 @@ class EulerSolver(Process):
 
         self.record(inputs["global_time"])
 
-        dicts = {}
-
-        output_columns = self.config.get("output_columns", {})
-        # if output_columns is empty, just dump all dataframes as dicts
-        if not output_columns:
-            for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
-                if getattr(self.eptm, df_name) is not None:
-                    dicts[df_name] = getattr(self.eptm, df_name).reset_index().to_dict(orient="records")
-                else:
-                    dicts[df_name] = {}
-        else:
-            for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
-                if hasattr(self.eptm, df_name):
-                    if df_name in output_columns.keys():
-                        cols = output_columns.get(df_name)
-                        if not "unique_id" in cols:
-                            cols.append("unique_id")
-                        df = getattr(self.eptm, df_name)
-                        if cols:
-                            df = df[cols]
-                        dicts[df_name] = df.reset_index().to_dict(orient="records")
-                    else:
-                        dicts[df_name] = getattr(self.eptm, df_name).reset_index().to_dict(orient="records")
-                else:
-                    dicts[df_name] = {}
-
-        vert_df, edge_df, face_df, cell_df = (
-            dicts.get("vert_df"),
-            dicts.get("edge_df"),
-            dicts.get("face_df"),
-            dicts.get("cell_df"),
-        )
+        dfs = self.output_dfs()
 
         to_remove = [key for key in inputs["behaviors"]]
 
         return {
-            "datasets": {
-                "Vert": vert_df,
-                "Edge": edge_df,
-                "Face": face_df,
-                "Cell": cell_df,
-            },
+            "datasets": dfs,
             "network_changed": network_changed,
             "behaviors_update": {
                 "_remove": to_remove,
@@ -293,9 +279,9 @@ def run_test_solver(core):
     spec = get_test_spec()
     spec["emitter"] = emitter_from_wires({
         "global_time": ["global_time"],
-        "face_df": ["Datasets", "Face"],
-        "edge_df": ["Datasets", "Edge"],
-        "vert_df": ["Datasets", "Vert"],
+        "face_df": ["Datasets", "face_df"],
+        "edge_df": ["Datasets", "edge_df"],
+        "vert_df": ["Datasets", "vert_df"],
     })
     sim = Composite(
         {
@@ -309,11 +295,13 @@ def run_test_solver(core):
 
 if __name__ == "__main__":
     from vivarium_tyssue.data_types import register_types
+    from vivarium_tyssue.processes import register_processes
     import pandas as pd
     # create the core object
     core = allocate_core()
     core.register_link("EulerSolver", EulerSolver)
     core = register_types(core)
+    core = register_processes(core)
     # register data types
 
     start= time.time()

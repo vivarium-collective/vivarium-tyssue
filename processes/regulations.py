@@ -32,7 +32,7 @@ class TestRegulations(Process):
     def inputs(self):
         return {
             "global_time": "float",
-            "datasets": "map[tyssue_dset]",
+            "datasets": "tyssue_data",
         }
 
     def outputs(self):
@@ -179,7 +179,7 @@ def run_test_regulation(core, double = False):
         },
         core=core,
     )
-    sim.run(5)
+    sim.run(2)
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
@@ -198,7 +198,7 @@ def run_test_stochastic(core):
         },
         core=core,
     )
-    sim.run(20)
+    sim.run(2)
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
@@ -208,27 +208,32 @@ if __name__ == "__main__":
     from bigraph_viz import plot_bigraph
 
     profiler = cProfile.Profile()
+    profiler1 = cProfile.Profile()
     # create the core object
     core = allocate_core()
     # register processes
     core = register_types(core)
 
-    # results, sim = run_test_regulation(core, double=False)
-    # history = sim.state["Tyssue"]["instance"].history
-    # history.update_datasets()
-    # draw_specs = config.draw.sheet_spec()
-    # draw_specs["face"]["visible"] = True
-    # draw_specs["face"]["visible"] = True
-    # draw_specs["face"]["alpha"] = 1
-    # draw_specs["face"]["color"] = "blue"
-    # draw_specs["edge"]["color"] = "black"
-    # create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
-    # df = pd.DataFrame.from_records(results[10]["face_df"], index="face")
+    profiler.enable()
+    results, sim = run_test_regulation(core, double=False)
+    profiler.disable()
+    profiler.dump_stats("regulations.prof")
+    history = sim.state["Tyssue"]["instance"].history
+    history.update_datasets()
+    draw_specs = config.draw.sheet_spec()
+    draw_specs["face"]["visible"] = True
+    draw_specs["face"]["visible"] = True
+    draw_specs["face"]["alpha"] = 1
+    draw_specs["face"]["color"] = "blue"
+    draw_specs["edge"]["color"] = "black"
+    create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
+    df = pd.DataFrame.from_records(results[10]["face_df"], index="face")
 
     start = time.time()
-    profiler.enable()
+    profiler1.enable()
     results1, sim1 = run_test_stochastic(core)
-    profiler.disable()
+    profiler1.disable()
+    profiler1.dump_stats("regulations1.prof")
     print(f"{time.time() - start} seconds")
     history = sim1.state = sim1.state["Tyssue"]["instance"].history
     history.update_datasets()
@@ -239,9 +244,4 @@ if __name__ == "__main__":
     draw_specs["face"]["color"] = "blue"
     draw_specs["edge"]["color"] = "black"
     create_gif(history, "test_stochastic.gif", coords = ["x", "z"], **draw_specs)
-    df = pd.DataFrame.from_records(results1[10]["face_df"], index="face")
-
-    stream = io.StringIO()
-    stats = pstats.Stats(profiler, stream=stream).sort_stats("cumtime")
-    stats.print_stats(40)
-    print(stream.getvalue())
+    df1 = pd.DataFrame.from_records(results1[10]["face_df"], index="face")
