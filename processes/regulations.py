@@ -1,5 +1,6 @@
 import random
 import time
+import math
 import numpy as np
 from pprint import pprint
 import cProfile
@@ -11,6 +12,7 @@ from process_bigraph import Process, Composite
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
 from vivarium_tyssue.maps import *
+from vivarium_tyssue.core_maps import GEOMETRY_MAP
 from vivarium_tyssue.processes.eulersolver import EulerSolver, get_test_spec, run_test_solver
 
 from tyssue import config
@@ -32,12 +34,14 @@ class TestRegulations(Process):
     def inputs(self):
         return {
             "global_time": "float",
-            "datasets": "tyssue_data",
+            "datasets": {
+            "_type": "tyssue_data",
+            },
         }
 
     def outputs(self):
         return {
-            "behaviors": "map"
+            "behaviors": "behaviors"
         }
 
     def update(self, inputs, interval):
@@ -45,11 +49,10 @@ class TestRegulations(Process):
         t = inputs["global_time"]
         on_period = (math.isclose(t % self.period, 0) or math.isclose(t % self.period, self.period)) and not math.isclose(t, 0)
         if on_period:
-            faces = inputs["datasets"]["Face"]
-            positive_y = [row for row in faces if (row["y"] > 1) & (row["z"] > -7) & (row["z"] < 7)]
-
+            faces = inputs["datasets"]["face_df"]
+            positive_y = faces.loc[(faces["y"] > 1) & (faces["z"] > -7) & (faces["z"] < 7)]
             def pick():
-                return random.choice(positive_y)["face"]
+                return random.choice(positive_y.index)
 
             base = {
                 "geom": self.config["geom"],
@@ -89,28 +92,34 @@ class StochasticLineTension(Process):
 
     def inputs(self):
         return {
-            "dataset": "tyssue_dset", #path to edge dataframe
+            "datasets": {
+                "_type": "tyssue_data",
+            },
         }
 
     def outputs(self):
         return {
-            "behaviors": "map"
+            "behaviors": "behaviors"
         }
 
     def update(self, inputs, interval):
-        tension = np.array([edge["line_tension"] for edge in inputs["dataset"]])
-        unique_ids = [edge["unique_id"] for edge in inputs["dataset"]]
-        decay = np.exp(-interval / self.tau)
-        noise_scale = self.sigma * np.sqrt(1 - np.exp(-2 * interval / self.tau))
-        new_tension = list(decay * tension + noise_scale * np.random.randn(len(tension)))
-        tension_update = {unique_id:tension_v for unique_id, tension_v in zip(unique_ids, new_tension)}
+        if len(inputs["datasets"]["edge_df"]) > 0:
+            tension = np.array(inputs["datasets"]["edge_df"]["line_tension"])
+            unique_ids = np.array(inputs["datasets"]["edge_df"]["unique_id"])
+            decay = np.exp(-interval / self.tau)
+            noise_scale = self.sigma * np.sqrt(1 - np.exp(-2 * interval / self.tau))
+            new_tension = list(decay * tension + noise_scale * np.random.randn(len(tension)))
+            tension_update = {unique_id:tension_v for unique_id, tension_v in zip(unique_ids, new_tension)}
 
-        behavior = {
-            "func": "stochastic_tension",
-            "tension_update": tension_update,
-        }
+            behavior = {
+                "func": "stochastic_tension",
+                "tension_update": tension_update,
+            }
 
-        return {"behaviors": {"stochastic_tension": behavior}}
+            update = {"stochastic_tension": behavior}
+        else:
+            update = {}
+        return {"behaviors": update}
 
 # =====
 # TESTS
@@ -152,7 +161,7 @@ def get_test_stochastic_spec(interval=0.1, tau=1.0, sigma=1.0):
             "sigma": sigma,
         },
         "inputs": {
-            "dataset": ["Datasets", "Edge"],
+            "datasets": ["Datasets"],
         },
         "outputs": {
             "behaviors": ["Behaviors"],
@@ -168,9 +177,9 @@ def run_test_regulation(core, double = False):
         spec = get_test_regulation_spec(interval=0.1)
     spec["emitter"] = emitter_from_wires({
         "global_time": ["global_time"],
-        "face_df": ["Datasets", "Face"],
-        "edge_df": ["Datasets", "Edge"],
-        "vert_df": ["Datasets", "Vert"],
+        "face_df": ["Datasets", "face_df"],
+        "edge_df": ["Datasets", "edge_df"],
+        "vert_df": ["Datasets", "vert_df"],
         "behaviors": ["Behaviors"],
     })
     sim = Composite(
@@ -179,7 +188,7 @@ def run_test_regulation(core, double = False):
         },
         core=core,
     )
-    sim.run(2)
+    sim.run(20)
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
@@ -187,9 +196,9 @@ def run_test_stochastic(core):
     spec = get_test_stochastic_spec(interval=0.1, tau=1.0, sigma=0.1)
     spec["emitter"] = emitter_from_wires({
         "global_time": ["global_time"],
-        "face_df": ["Datasets", "Face"],
-        "edge_df": ["Datasets", "Edge"],
-        "vert_df": ["Datasets", "Vert"],
+        "face_df": ["Datasets", "face_df"],
+        "edge_df": ["Datasets", "edge_df"],
+        "vert_df": ["Datasets", "vert_df"],
         "behaviors": ["Behaviors"],
     })
     sim = Composite(
@@ -198,7 +207,7 @@ def run_test_stochastic(core):
         },
         core=core,
     )
-    sim.run(2)
+    sim.run(20)
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
@@ -206,6 +215,7 @@ if __name__ == "__main__":
     from vivarium_tyssue.data_types import register_types
     import pandas as pd
     from bigraph_viz import plot_bigraph
+    from vivarium_tyssue.processes import register_processes
 
     profiler = cProfile.Profile()
     profiler1 = cProfile.Profile()
@@ -213,27 +223,29 @@ if __name__ == "__main__":
     core = allocate_core()
     # register processes
     core = register_types(core)
+    core.register_link("EulerSolver", EulerSolver)
+    core = register_processes(core)
 
-    profiler.enable()
-    results, sim = run_test_regulation(core, double=False)
-    profiler.disable()
-    profiler.dump_stats("regulations.prof")
-    history = sim.state["Tyssue"]["instance"].history
-    history.update_datasets()
-    draw_specs = config.draw.sheet_spec()
-    draw_specs["face"]["visible"] = True
-    draw_specs["face"]["visible"] = True
-    draw_specs["face"]["alpha"] = 1
-    draw_specs["face"]["color"] = "blue"
-    draw_specs["edge"]["color"] = "black"
-    create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
-    df = pd.DataFrame.from_records(results[10]["face_df"], index="face")
+    # profiler.enable()
+    # results, sim = run_test_regulation(core, double=False)
+    # profiler.disable()
+    # profiler.dump_stats("regulations.prof")
+    # history = sim.state["Tyssue"]["instance"].history
+    # history.update_datasets()
+    # draw_specs = config.draw.sheet_spec()
+    # draw_specs["face"]["visible"] = True
+    # draw_specs["face"]["visible"] = True
+    # draw_specs["face"]["alpha"] = 1
+    # draw_specs["face"]["color"] = "blue"
+    # draw_specs["edge"]["color"] = "black"
+    # create_gif(history, "test_division.gif", coords = ["x", "z"], **draw_specs)
+    # df = pd.DataFrame(results[10]["face_df"]).set_index("face")
 
     start = time.time()
-    profiler1.enable()
+    # profiler1.enable()
     results1, sim1 = run_test_stochastic(core)
-    profiler1.disable()
-    profiler1.dump_stats("regulations1.prof")
+    # profiler1.disable()
+    # profiler1.dump_stats("regulations1.prof")
     print(f"{time.time() - start} seconds")
     history = sim1.state = sim1.state["Tyssue"]["instance"].history
     history.update_datasets()
@@ -244,4 +256,4 @@ if __name__ == "__main__":
     draw_specs["face"]["color"] = "blue"
     draw_specs["edge"]["color"] = "black"
     create_gif(history, "test_stochastic.gif", coords = ["x", "z"], **draw_specs)
-    df1 = pd.DataFrame.from_records(results1[10]["face_df"], index="face")
+    # df1 = pd.DataFrame.from_records(results1[10]["face_df"], index="face")

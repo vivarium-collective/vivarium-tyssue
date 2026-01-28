@@ -20,4 +20,3 @@ GEOMETRY_MAP = {
     "MonolayerGeometry": MonolayerGeometry,
     "ClosedMonolayerGeometry": ClosedMonolayerGeometry,
 }
-

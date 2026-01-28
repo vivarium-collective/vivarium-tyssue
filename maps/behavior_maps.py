@@ -4,7 +4,6 @@ from tyssue.behaviors.sheet.basic_events import contraction
 from vivarium_tyssue.behaviors import *
 
 BEHAVIOR_MAP = {
-    "divide_basic": divide_cell,
     "apoptosis_basic": apoptosis_cell,
     "apoptosis": apoptosis,
     "division": division,

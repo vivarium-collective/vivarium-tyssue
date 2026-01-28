@@ -1,7 +1,7 @@
 import numpy as np
 
 from tyssue.topology.sheet_topology import cell_division, remove_face
-from vivarium_tyssue.maps import GEOMETRY_MAP
+from vivarium_tyssue.core_maps import GEOMETRY_MAP
 
 def update_stem_cells(eptm):
     """updates which cells in a cylinder model are classified as stem cells"""

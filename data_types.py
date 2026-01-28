@@ -3,49 +3,49 @@ import pandas as pd
 
 from bigraph_schema import allocate_core
 from bigraph_schema.schema import dtype_schema
-from bigraph_schema.schema import Node, Map, List, Array
+from bigraph_schema.schema import Node, Map, List, Array, Frame, get_frame_schema
 from bigraph_schema.methods import apply, infer, realize, serialize
 
 
-#===============
-#Frame Dataclass
-#===============
-@dataclass(kw_only=True)
-class Frame(Node):
-    _columns: dict = field(default_factory=dict)
-
-def frame_update(scheme, current, update, path):
-    pass
-
-@apply.dispatch
-def apply(schema: Frame, state, update, path):
-    return update, []
-
-@serialize.dispatch
-def serialize(schema: Frame, state):
-    if not state:
-        return {}
-    return state.to_dict(orient="list")
-
-@realize.dispatch
-def realize(core, schema: Frame, encode, path=()):
-    if isinstance(encode, pd.DataFrame):
-        return schema, encode, []
-    elif not encode:
-        return schema, {}, []
-    else:
-        return schema, pd.DataFrame(encode), []
-
-@infer.dispatch
-def infer(core, value: pd.DataFrame, path=()):
-    columns = get_frame_schema(value)
-    return Frame(_columns=columns), []
-
-def get_frame_schema(df):
-    schema = {}
-    for column in df.columns:
-        schema[column] = dtype_schema(df.loc[:, column].dtype)
-    return schema
+# #===============
+# #Frame Dataclass
+# #===============
+# @dataclass(kw_only=True)
+# class Frame(Node):
+#     _columns: dict = field(default_factory=dict)
+#
+# def frame_update(scheme, current, update, path):
+#     pass
+#
+# @apply.dispatch
+# def apply(schema: Frame, state, update, path):
+#     return update, []
+#
+# @serialize.dispatch
+# def serialize(schema: Frame, state):
+#     if not state:
+#         return {}
+#     return state.to_dict(orient="list")
+#
+# @realize.dispatch
+# def realize(core, schema: Frame, encode, path=()):
+#     if isinstance(encode, pd.DataFrame):
+#         return schema, encode, []
+#     elif not encode:
+#         return schema, {}, []
+#     else:
+#         return schema, pd.DataFrame(encode), []
+#
+# @infer.dispatch
+# def infer(core, value: pd.DataFrame, path=()):
+#     columns = get_frame_schema(value)
+#     return Frame(_columns=columns), []
+#
+# def get_frame_schema(df):
+#     schema = {}
+#     for column in df.columns:
+#         schema[column] = dtype_schema(df.loc[:, column].dtype)
+#     return schema
 
 #====================
 #TyssueData Dataclass
@@ -56,6 +56,8 @@ class TyssueData(Node):
     edge_df: Frame = field(default_factory=Frame)
     face_df: Frame = field(default_factory=Frame)
     cell_df: Frame = field(default_factory=Frame)
+
+
 
 #====================
 #TyssueDset Dataclass

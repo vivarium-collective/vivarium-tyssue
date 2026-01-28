@@ -6,16 +6,19 @@ import time
 from pprint import pprint
 
 from bigraph_schema import allocate_core
+from bigraph_schema.schema import get_frame_schema
 from process_bigraph import Process, Composite
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
 from vivarium_tyssue.maps import *
-from vivarium_tyssue.data_types import get_frame_schema
+from vivarium_tyssue.core_maps import GEOMETRY_MAP
 
 from tyssue.behaviors.event_manager import EventManager
 from tyssue.behaviors.sheet.basic_events import reconnect
 from tyssue.core.history import History
 from tyssue.io.hdf5 import load_datasets
+from tyssue.draw import create_gif
+from tyssue import config
 
 log = logging.getLogger(__name__)
 
@@ -149,7 +152,7 @@ class EulerSolver(Process):
 
     def inputs(self):
         return {
-            "behaviors": "map[behaviors]",
+            "behaviors": "behaviors",
             "global_time": "float",
         }
 
@@ -254,12 +257,42 @@ def get_test_config():
         "output_columns": {} # dict containing lists of column names to emit for each dataframe
     }
 
-def get_test_spec(interval=0.1):
+def get_test_config_flat():
+    return {
+        "name": "Test Square",
+        "eptm": "test_square.hf5",
+        "tissue_type": "Sheet",
+        "parameters": {
+            "face_df": {
+                "area_elasticity": 1,
+                "prefered_area": 1,
+                "perimeter_elasticity": 0.1,
+                "prefered_perimeter": 3.5,
+            },
+            "edge_df": {
+                "line_tension": 0,
+                "is_active": 1,
+            },
+            "vert_df": {
+                "viscosity": 1,
+                "is_alive": 1,
+            }
+        },
+        "geom": "SheetGeometry",
+        "effectors": ["LineTension", "FaceAreaElasticity", "PerimeterElasticity"],
+        "ref_effector": "FaceAreaElasticity",
+        "factory": "model_factory",
+        "auto_reconnect": True, # if True, will automatically perform reconnections
+        "bounds": None, # bounds the displacement of the vertices at each time step
+        "output_columns": {} # dict containing lists of column names to emit for each dataframe
+    }
+
+def get_test_spec(interval=0.1, config=None):
     return {
         "Tyssue": {
             "_type": "process",
             "address": "local:EulerSolver",
-            "config": get_test_config(),
+            "config": config,
             "inputs": {
                 "behaviors": ["Behaviors"],
                 "global_time": ["global_time"],
@@ -275,8 +308,8 @@ def get_test_spec(interval=0.1):
         "Behaviors": {}
     }
 
-def run_test_solver(core):
-    spec = get_test_spec()
+def run_test_solver(core, config=None):
+    spec = get_test_spec(config=config)
     spec["emitter"] = emitter_from_wires({
         "global_time": ["global_time"],
         "face_df": ["Datasets", "face_df"],
@@ -289,7 +322,7 @@ def run_test_solver(core):
         },
         core=core,
     )
-    sim.run(5)
+    sim.run(20)
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
@@ -304,15 +337,12 @@ if __name__ == "__main__":
     core = register_processes(core)
     # register data types
 
-    start= time.time()
-    results, sim = run_test_solver(core)
-    print(f"{time.time() - start} seconds")
-    df = pd.DataFrame.from_records(results[10]["face_df"], index="face")
-    pprint(df)
-    pprint(results[10]["face_df"])
-
-    # results1, sim1 = run_test_regulation(core, double=False)
-    # history = sim1.state["Tyssue"]["instance"].history
+    # start= time.time()
+    # results, sim = run_test_solver(core, config=get_test_config())
+    # print(f"{time.time() - start} seconds")
+    # pprint(results[10]["face_df"])
+    # pprint(results[8]["face_df"])
+    # history = sim.state["Tyssue"]["instance"].history
     # history.update_datasets()
     # draw_specs = config.draw.sheet_spec()
     # draw_specs["face"]["visible"] = True
@@ -321,5 +351,19 @@ if __name__ == "__main__":
     # draw_specs["face"]["color"] = "blue"
     # draw_specs["edge"]["color"] = "black"
     # create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
-    # df = pd.DataFrame.from_records(results1[10]["face_df"], index="face")
+
+    start = time.time()
+    results, sim = run_test_solver(core, config=get_test_config_flat())
+    print(f"{time.time() - start} seconds")
+    pprint(results[10]["face_df"])
+    pprint(results[8]["face_df"])
+    history = sim.state["Tyssue"]["instance"].history
+    history.update_datasets()
+    draw_specs = config.draw.sheet_spec()
+    draw_specs["face"]["visible"] = True
+    draw_specs["face"]["visible"] = True
+    draw_specs["face"]["alpha"] = 1
+    draw_specs["face"]["color"] = "blue"
+    draw_specs["edge"]["color"] = "black"
+    create_gif(history, "test_flat.gif", coords=["x", "y"], **draw_specs)
 
