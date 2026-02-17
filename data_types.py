@@ -93,19 +93,18 @@ class Behaviors(Map):
     _value: Map = field(default_factory=Map)
 
 def behaviors_update(schema, current, update, path):
-    _update = current.copy()
-    if "_remove" in update.keys():
-        if len(update["_remove"]) > 0:
-            for i in update["_remove"]:
-                if i in _update:
-                    del _update[i]
-        del update["_remove"]
+    result = current.copy()
 
-    if len(update) > 0:
-        # _update = _update.update(update)
-        return {behavior:args for behavior, args in update.items()}
-    else:
-        return {}
+    # Handle removals
+    for key in update.get("_remove", []):
+        result.pop(key, None)
+
+    # Apply updates (excluding _remove)
+    for behavior, args in update.items():
+        if behavior != "_remove":
+            result[behavior] = args
+
+    return result
 
 @apply.dispatch
 def apply(schema: Behaviors, current, update, path):

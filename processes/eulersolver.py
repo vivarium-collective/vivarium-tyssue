@@ -47,7 +47,7 @@ class EulerSolver(Process):
         "name": "string", #name for epithelium object
         "eptm": "string", #saved tyssue epithelium file
         "tissue_type": "string", #key indicating the desired tissue type from TISSUE_MAP
-        "parameters": "map[map[float]]",
+        "parameters": "map[map]",
         "geom": "string", #key indicating the desired geometry class in GEOMETRY_MAP
         "effectors": "list[string]", #list of strings representing effectors from the EFFECTORS_MAP
         "ref_effector": "string", #string, representing the effector from the EFFECTORS_MAP
@@ -234,7 +234,7 @@ def get_test_config():
             "face_df": {
                 "area_elasticity": 1,
                 "prefered_area": 1,
-                "perimeter_elasticity": 0.1,
+                "perimeter_elasticity": 1,
                 "prefered_perimeter": 3.5,
             },
             "edge_df": {
@@ -252,6 +252,9 @@ def get_test_config():
         "effectors": ["LineTension", "FaceAreaElasticity", "PerimeterElasticity", "VesselSurfaceElasticity"],
         "ref_effector": "FaceAreaElasticity",
         "factory": "model_factory",
+        "settings": {
+            "threshold_length": 0.03
+        },
         "auto_reconnect": True, # if True, will automatically perform reconnections
         "bounds": None, # bounds the displacement of the vertices at each time step
         "output_columns": {} # dict containing lists of column names to emit for each dataframe
@@ -267,7 +270,12 @@ def get_test_config_flat():
                 "area_elasticity": 1,
                 "prefered_area": 1,
                 "perimeter_elasticity": 0.1,
-                "prefered_perimeter": 3.5,
+                "prefered_perimeter": 3.6,
+                "migration_strength": [0.1 if i == 33 else 0.0 for i in range(206)],
+                "is_alive": 1,
+                "mx": 1,
+                "mz": 0,
+                "my": 1,
             },
             "edge_df": {
                 "line_tension": 0,
@@ -279,9 +287,12 @@ def get_test_config_flat():
             }
         },
         "geom": "SheetGeometry",
-        "effectors": ["LineTension", "FaceAreaElasticity", "PerimeterElasticity"],
+        "effectors": ["LineTension", "FaceAreaElasticity", "PerimeterElasticity", "ActiveMigration"],
         "ref_effector": "FaceAreaElasticity",
-        "factory": "model_factory",
+        "factory": "model_factory_bound",
+        "settings": {
+            "threshold_length": 0.03
+        },
         "auto_reconnect": True, # if True, will automatically perform reconnections
         "bounds": None, # bounds the displacement of the vertices at each time step
         "output_columns": {} # dict containing lists of column names to emit for each dataframe
@@ -308,8 +319,8 @@ def get_test_spec(interval=0.1, config=None):
         "Behaviors": {}
     }
 
-def run_test_solver(core, config=None):
-    spec = get_test_spec(config=config)
+def run_test_solver(core, config=None, tf=20):
+    spec = get_test_spec(interval=0.01, config=config)
     spec["emitter"] = emitter_from_wires({
         "global_time": ["global_time"],
         "face_df": ["Datasets", "face_df"],
@@ -322,7 +333,7 @@ def run_test_solver(core, config=None):
         },
         core=core,
     )
-    sim.run(20)
+    sim.run(tf)
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
@@ -330,6 +341,7 @@ if __name__ == "__main__":
     from vivarium_tyssue.data_types import register_types
     from vivarium_tyssue.processes import register_processes
     import pandas as pd
+    from matplotlib import pyplot as plt
     # create the core object
     core = allocate_core()
     core.register_link("EulerSolver", EulerSolver)
@@ -353,17 +365,18 @@ if __name__ == "__main__":
     # create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
 
     start = time.time()
-    results, sim = run_test_solver(core, config=get_test_config_flat())
+    results, sim = run_test_solver(core, config=get_test_config_flat(), tf = 40)
     print(f"{time.time() - start} seconds")
     pprint(results[10]["face_df"])
     pprint(results[8]["face_df"])
     history = sim.state["Tyssue"]["instance"].history
     history.update_datasets()
     draw_specs = config.draw.sheet_spec()
+    cmap = plt.get_cmap("autumn")
+    color_map = cmap([0.2 if i == 33 else 0.0 for i in range(206)])
     draw_specs["face"]["visible"] = True
-    draw_specs["face"]["visible"] = True
-    draw_specs["face"]["alpha"] = 1
-    draw_specs["face"]["color"] = "blue"
+    draw_specs["face"]["alpha"] = 0.5
+    draw_specs["face"]["color"] = color_map
     draw_specs["edge"]["color"] = "black"
-    create_gif(history, "test_flat.gif", coords=["x", "y"], **draw_specs)
+    create_gif(history, "test_flat.gif", coords=["x", "y"], num_frames = 200, **draw_specs)
 

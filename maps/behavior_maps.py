@@ -9,4 +9,5 @@ BEHAVIOR_MAP = {
     "division": division,
     "contraction": contraction,
     "stochastic_tension": stochastic_tension,
+    "cell_jamming": cell_jamming,
 }

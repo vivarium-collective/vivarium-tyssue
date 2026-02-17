@@ -19,4 +19,5 @@ EFFECTORS_MAP = {
     "ChiralTorque": ChiralTorque,
     "SurfaceElasticity": SurfaceElasticity,
     "VesselSurfaceElasticity": VesselSurfaceElasticity,
+    "ActiveMigration": ActiveMigration,
 }

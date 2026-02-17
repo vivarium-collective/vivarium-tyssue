@@ -123,3 +123,10 @@ def stochastic_tension(sheet, manager, tension_update=None):
             sheet.edge_df["unique_id"].isin(tension_update),
             "line_tension"
         ] = sheet.edge_df["unique_id"].map(tension_update)
+
+def cell_jamming(sheet, manager, rate, limits, dt):
+    if (sheet.face_df["prefered_perimeter"].mean()) > limits[0] or (sheet.face_df["prefered_perimeter"].mean() < limits[1]):
+        sheet.face_df["prefered_perimeter"] *= (1 + rate * dt)
+        manager.append(cell_jamming, rate=rate, limits=limits, dt=dt)
+    else:
+        print("Jamming Complete")
