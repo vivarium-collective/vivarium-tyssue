@@ -5,15 +5,20 @@ import time
 
 from pprint import pprint
 
-from process_bigraph import Process, Composite, ProcessTypes
+from bigraph_schema import allocate_core
+from bigraph_schema.schema import get_frame_schema
+from process_bigraph import Process, Composite
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
 from vivarium_tyssue.maps import *
+from vivarium_tyssue.core_maps import GEOMETRY_MAP
 
 from tyssue.behaviors.event_manager import EventManager
 from tyssue.behaviors.sheet.basic_events import reconnect
 from tyssue.core.history import History
 from tyssue.io.hdf5 import load_datasets
+from tyssue.draw import create_gif
+from tyssue import config
 
 log = logging.getLogger(__name__)
 
@@ -27,6 +32,14 @@ def set_pos(eptm, geom, pos):
     eptm.vert_df.loc[eptm.active_verts, eptm.coords] = pos.reshape((-1, eptm.dim))
     geom.update_all(eptm)
 
+def get_dataset_schema(eptm):
+    schema = {}
+    for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
+        if getattr(eptm, df_name) is not None:
+            schema[df_name] = {"_columns" : get_frame_schema(getattr(eptm, df_name))}
+    schema.update({"_type" : "tyssue_data"})
+    return schema
+
 class EulerSolver(Process):
     """Generalized Euler solver for Tyssue-based epithelial simulations
     """
@@ -34,7 +47,7 @@ class EulerSolver(Process):
         "name": "string", #name for epithelium object
         "eptm": "string", #saved tyssue epithelium file
         "tissue_type": "string", #key indicating the desired tissue type from TISSUE_MAP
-        "parameters": "map[map[float]]",
+        "parameters": "map[map]",
         "geom": "string", #key indicating the desired geometry class in GEOMETRY_MAP
         "effectors": "list[string]", #list of strings representing effectors from the EFFECTORS_MAP
         "ref_effector": "string", #string, representing the effector from the EFFECTORS_MAP
@@ -74,6 +87,43 @@ class EulerSolver(Process):
         else:
             self.bounds = None
 
+    def output_dfs(self):
+        output_columns = self.config.get("output_columns", {})
+        # if output_columns is empty, just dump all dataframes as dicts
+        output_dfs = {}
+        if not output_columns:
+            for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
+                if getattr(self.eptm, df_name) is not None:
+                    output_dfs[df_name] = getattr(self.eptm, df_name)
+                else:
+                    output_dfs[df_name] = {}
+        else:
+            for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
+                if getattr(self.eptm, df_name):
+                    print(df_name)
+                    if df_name in output_columns.keys():
+                        cols = output_columns.get(df_name)
+                        if not "unique_id" in cols:
+                            cols.append("unique_id")
+                        df = getattr(self.eptm, df_name)
+                        if cols:
+                            df = df[cols]
+                        output_dfs[df_name] = df
+                    else:
+                        output_dfs[df_name] = getattr(self.eptm, df_name)
+                else:
+                    output_dfs[df_name] = {}
+        return output_dfs
+
+    def initial_state(self):
+        outputs = self.output_dfs()
+        for df_name, df in outputs.items():
+            if not isinstance(df, dict):
+                outputs[df_name] = df.to_dict(orient="list")
+        return {
+            "datasets": outputs,
+        }
+
     @property
     def current_pos(self):
         return self.eptm.vert_df.loc[
@@ -102,19 +152,35 @@ class EulerSolver(Process):
 
     def inputs(self):
         return {
-            "behaviors": "any",
+            "behaviors": "behaviors",
             "global_time": "float",
         }
 
     def outputs(self):
+        datasets = {
+            "_type": "tyssue_data",
+            "vert_df": {
+                "_columns": get_frame_schema(self.eptm.vert_df)
+            },
+            "edge_df": {
+                "_columns": get_frame_schema(self.eptm.edge_df)
+            },
+            "face_df": {
+                "_columns": get_frame_schema(self.eptm.face_df)
+            },
+        }
+        if self.eptm.cell_df:
+            datasets["cell_df"] = {"_columns": get_frame_schema(self.eptm.cell_df)}
+        else:
+            datasets["cell_df"] = {}
         return {
-            "datasets": "map[tyssue_dset]",
+            "datasets": datasets,
             "network_changed": "boolean",
-            "behaviors": "map",
+            "behaviors_update": "map",
         }
 
     def update(self, inputs, interval):
-
+        print(inputs["global_time"])
         if len(inputs["behaviors"]) > 0:
             for behavior, kwargs in inputs["behaviors"].items():
                 func = BEHAVIOR_MAP[kwargs["func"]]
@@ -147,50 +213,14 @@ class EulerSolver(Process):
 
         self.record(inputs["global_time"])
 
-        dicts = {}
-
-        output_columns = self.config.get("output_columns", {})
-        # if output_columns is empty, just dump all dataframes as dicts
-        if not output_columns:
-            for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
-                if getattr(self.eptm, df_name) is not None:
-                    dicts[df_name] = getattr(self.eptm, df_name).reset_index().to_dict(orient="records")
-                else:
-                    dicts[df_name] = {}
-        else:
-            for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
-                if hasattr(self.eptm, df_name):
-                    if df_name in output_columns.keys():
-                        cols = output_columns.get(df_name)
-                        if not "unique_id" in cols:
-                            cols.append("unique_id")
-                        df = getattr(self.eptm, df_name)
-                        if cols:
-                            df = df[cols]
-                        dicts[df_name] = df.reset_index().to_dict(orient="records")
-                    else:
-                        dicts[df_name] = getattr(self.eptm, df_name).reset_index().to_dict(orient="records")
-                else:
-                    dicts[df_name] = {}
-
-        vert_df, edge_df, face_df, cell_df = (
-            dicts.get("vert_df"),
-            dicts.get("edge_df"),
-            dicts.get("face_df"),
-            dicts.get("cell_df"),
-        )
+        dfs = self.output_dfs()
 
         to_remove = [key for key in inputs["behaviors"]]
 
         return {
-            "datasets": {
-                "Vert": vert_df,
-                "Edge": edge_df,
-                "Face": face_df,
-                "Cell": cell_df,
-            },
+            "datasets": dfs,
             "network_changed": network_changed,
-            "behaviors": {
+            "behaviors_update": {
                 "_remove": to_remove,
             },
         }
@@ -204,7 +234,7 @@ def get_test_config():
             "face_df": {
                 "area_elasticity": 1,
                 "prefered_area": 1,
-                "perimeter_elasticity": 0.1,
+                "perimeter_elasticity": 1,
                 "prefered_perimeter": 3.5,
             },
             "edge_df": {
@@ -222,17 +252,58 @@ def get_test_config():
         "effectors": ["LineTension", "FaceAreaElasticity", "PerimeterElasticity", "VesselSurfaceElasticity"],
         "ref_effector": "FaceAreaElasticity",
         "factory": "model_factory",
+        "settings": {
+            "threshold_length": 0.03
+        },
         "auto_reconnect": True, # if True, will automatically perform reconnections
         "bounds": None, # bounds the displacement of the vertices at each time step
         "output_columns": {} # dict containing lists of column names to emit for each dataframe
     }
 
-def get_test_spec(interval=0.05):
+def get_test_config_flat():
+    return {
+        "name": "Test Square",
+        "eptm": "test_square.hf5",
+        "tissue_type": "Sheet",
+        "parameters": {
+            "face_df": {
+                "area_elasticity": 1,
+                "prefered_area": 1,
+                "perimeter_elasticity": 0.1,
+                "prefered_perimeter": 3.6,
+                "migration_strength": [0.1 if i == 33 else 0.0 for i in range(206)],
+                "is_alive": 1,
+                "mx": 1,
+                "mz": 0,
+                "my": 1,
+            },
+            "edge_df": {
+                "line_tension": 0,
+                "is_active": 1,
+            },
+            "vert_df": {
+                "viscosity": 1,
+                "is_alive": 1,
+            }
+        },
+        "geom": "SheetGeometry",
+        "effectors": ["LineTension", "FaceAreaElasticity", "PerimeterElasticity", "ActiveMigration"],
+        "ref_effector": "FaceAreaElasticity",
+        "factory": "model_factory_bound",
+        "settings": {
+            "threshold_length": 0.03
+        },
+        "auto_reconnect": True, # if True, will automatically perform reconnections
+        "bounds": None, # bounds the displacement of the vertices at each time step
+        "output_columns": {} # dict containing lists of column names to emit for each dataframe
+    }
+
+def get_test_spec(interval=0.1, config=None):
     return {
         "Tyssue": {
             "_type": "process",
             "address": "local:EulerSolver",
-            "config": get_test_config(),
+            "config": config,
             "inputs": {
                 "behaviors": ["Behaviors"],
                 "global_time": ["global_time"],
@@ -240,27 +311,21 @@ def get_test_spec(interval=0.05):
             "outputs": {
                 "datasets": ["Datasets"],
                 "network_changed": ["Network Changed"],
-                "behaviors": ["Behaviors"],
+                "behaviors_update": ["Behaviors"],
             },
             "interval": interval,
-        },
-        "Datasets": {
-            "Vert": {},
-            "Edge": {},
-            "Face": {},
-            "Cell": {},
         },
         "Network Changed": False,
         "Behaviors": {}
     }
 
-def run_test_solver(core):
-    spec = get_test_spec()
+def run_test_solver(core, config=None, tf=20):
+    spec = get_test_spec(interval=0.01, config=config)
     spec["emitter"] = emitter_from_wires({
         "global_time": ["global_time"],
-        "face_df": ["Datasets", "Face"],
-        "edge_df": ["Datasets", "Edge"],
-        "vert_df": ["Datasets", "Vert"],
+        "face_df": ["Datasets", "face_df"],
+        "edge_df": ["Datasets", "edge_df"],
+        "vert_df": ["Datasets", "vert_df"],
     })
     sim = Composite(
         {
@@ -268,28 +333,28 @@ def run_test_solver(core):
         },
         core=core,
     )
-    sim.run(5)
+    sim.run(tf)
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
 if __name__ == "__main__":
-    from vivarium_tyssue import register_types
+    from vivarium_tyssue.data_types import register_types
+    from vivarium_tyssue.processes import register_processes
     import pandas as pd
+    from matplotlib import pyplot as plt
     # create the core object
-    core = ProcessTypes()
-    # register data types
+    core = allocate_core()
+    core.register_link("EulerSolver", EulerSolver)
     core = register_types(core)
-    core.register_process("EulerSolver", EulerSolver)
+    core = register_processes(core)
+    # register data types
 
-    start= time.time()
-    results, sim = run_test_solver(core)
-    print(f"{time.time() - start} seconds")
-    df = pd.DataFrame.from_records(results[10]["face_df"], index="face")
-    pprint(df)
-    pprint(results[10]["face_df"])
-
-    # results1, sim1 = run_test_regulation(core, double=False)
-    # history = sim1.state["Tyssue"]["instance"].history
+    # start= time.time()
+    # results, sim = run_test_solver(core, config=get_test_config())
+    # print(f"{time.time() - start} seconds")
+    # pprint(results[10]["face_df"])
+    # pprint(results[8]["face_df"])
+    # history = sim.state["Tyssue"]["instance"].history
     # history.update_datasets()
     # draw_specs = config.draw.sheet_spec()
     # draw_specs["face"]["visible"] = True
@@ -298,5 +363,20 @@ if __name__ == "__main__":
     # draw_specs["face"]["color"] = "blue"
     # draw_specs["edge"]["color"] = "black"
     # create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
-    # df = pd.DataFrame.from_records(results1[10]["face_df"], index="face")
+
+    start = time.time()
+    results, sim = run_test_solver(core, config=get_test_config_flat(), tf = 40)
+    print(f"{time.time() - start} seconds")
+    pprint(results[10]["face_df"])
+    pprint(results[8]["face_df"])
+    history = sim.state["Tyssue"]["instance"].history
+    history.update_datasets()
+    draw_specs = config.draw.sheet_spec()
+    cmap = plt.get_cmap("autumn")
+    color_map = cmap([0.2 if i == 33 else 0.0 for i in range(206)])
+    draw_specs["face"]["visible"] = True
+    draw_specs["face"]["alpha"] = 0.5
+    draw_specs["face"]["color"] = color_map
+    draw_specs["edge"]["color"] = "black"
+    create_gif(history, "test_flat.gif", coords=["x", "y"], num_frames = 200, **draw_specs)
 
