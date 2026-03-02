@@ -85,7 +85,7 @@ def apoptosis_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
     fix_points_cylinder(sheet, radius=radius)
     geom.update_all(sheet)
 
-def division(sheet, manager, geom="SheetGeometry", cell_id=0, crit_area=2.0, growth_rate=0.1, dt=1.):
+def division(sheet, manager, geom= "SheetGeometry", cell_id=0, crit_area=2.0, growth_rate=0.1, dt=1.):
     """Defines a division behavior.
 
     Parameters
@@ -130,3 +130,19 @@ def cell_jamming(sheet, manager, rate, limits, dt):
         manager.append(cell_jamming, rate=rate, limits=limits, dt=dt)
     else:
         print("Jamming Complete")
+
+def apply_gradient(sheet, manager, parameter_updates=None):
+    """
+    Parameters:
+    sheet: a :class:`Sheet` object
+    manager: a :class:`Manager` object
+    parameter_updates: a dictionary of parameters (keys) and dataframe name & updates (values)
+    """
+    if parameter_updates:
+        for parameter, updates in parameter_updates.items():
+            sheet.datasets[updates["dataframe"]].loc[
+                sheet.datasets[updates["dataframe"]]["unique_id"].isin(updates["update"]),
+                parameter
+            ] = sheet.datasets[updates["dataframe"]]["unique_id"].map(
+                updates["update"]
+            )

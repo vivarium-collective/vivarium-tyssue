@@ -8,7 +8,7 @@ import pstats
 import io
 
 from bigraph_schema import allocate_core
-from process_bigraph import Process, Composite
+from process_bigraph import Step, Process, Composite
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
 from vivarium_tyssue.maps import *
@@ -17,6 +17,25 @@ from vivarium_tyssue.processes.eulersolver import EulerSolver, get_test_spec, ru
 
 from tyssue import config
 from tyssue.draw import create_gif
+
+
+def linear_gradient(x, m, c):
+    """Simple linear gradient function"""
+    return m * x + c
+
+def exponential_gradient(x, a, c):
+    """Simple exponential gradient function"""
+    return a ** x + c
+
+def hill_gradient(x, vmax, hmax, n=1):
+    """Simple hill-equation gradient function"""
+    return (vmax * x**n)/(hmax**n + x**n)
+
+GRADIENT_MAP = {
+    "linear": linear_gradient,
+    "exponential": exponential_gradient,
+    "hill": hill_gradient,
+}
 
 class TestRegulations(Process):
 
@@ -160,6 +179,59 @@ class CellJamming(Process):
             update = {}
         return {"behaviors": update}
 
+
+class ParameterGradient(Step):
+    """Creates a 1D gradient of chemical or mechanical signal"""
+    config_schema = {
+        "gradient_type": "string", #gradient function key for gradient function
+        "axis": "string", #direction axis for gradient
+        "args": "map[float]", #parameters for chosen gradient equation
+        "model_parameters": "map[string]", #map of parameter names (keys) and dataframe the parameter is found in (values)
+    }
+    def initialize(self, config):
+        self.gradient = GRADIENT_MAP[config["gradient_type"]]
+        self.args = config["args"]
+        self.axis = config["axis"]
+        self.model_parameters = config["model_parameters"]
+
+    def inputs(self):
+        return {
+            "datasets": "tyssue_data",
+        }
+
+    def outputs(self):
+        return {
+            "behaviors": "behaviors"
+        }
+
+    def update(self, inputs):
+        parameter_updates = {}
+        for parameter, df in self.model_parameters.items():
+            if len(inputs["datasets"][df+"_df"]) > 0:
+                if df == "edge":
+                    positions = np.array((
+                            inputs["datasets"]["edge_df"][f"s{self.axis}"] +
+                            inputs["datasets"]["edge_df"][f"t{self.axis}"]
+                        )/2
+                    )
+                else:
+                    positions = np.array(inputs["datasets"][df+"_df"][self.axis])
+                unique_ids = np.array(inputs["datasets"][df+"_df"]["unique_id"])
+
+                new_parameter = self.gradient(x=positions, **self.args)
+                parameter_update = {unique_id:parameter for unique_id, parameter in zip(unique_ids, new_parameter)}
+                parameter_updates[parameter] = {
+                    "dataframe" : df,
+                    "update" : parameter_update,
+                }
+            behavior = {
+                "func": "apply_gradient",
+                "parameter_updates": parameter_updates,
+            }
+            update = {"apply_gradient": behavior}
+            return {"behaviors": update}
+
+
 # =====
 # TESTS
 # =====
@@ -237,18 +309,49 @@ def get_test_jamming_spec(interval = 0.1, config=None, tau=1.0, sigma=1.0):
     }
     return spec
 
-def run_test_regulation(core, double = False, tf=20, dt=0.1):
-    if double:
-        spec = get_test_regulation_spec(interval=dt, double=True)
+def get_test_gradient_spec(interval=0.1, config=None, tau=1.0, sigma=1.0):
+    if callable(config):
+        spec = get_test_stochastic_spec(interval=interval, config=config(), tau=tau, sigma=sigma)
     else:
-        spec = get_test_regulation_spec(interval=dt)
-    spec["emitter"] = emitter_from_wires({
+        spec = get_test_stochastic_spec(interval=interval, config=config, tau=tau, sigma=sigma)
+    spec["Gradient"] = {
+        "_type": "step",
+        "address": "local:ParameterGradient",
+        "config": {
+            "gradient_type": "linear",
+            "axis": "x",
+            "args": {
+                "m": -0.1,
+                "c": 4.6,
+            },
+            "model_parameters": {
+                "prefered_perimeter": "face"
+            }
+        },
+        "inputs": {
+            "datasets": ["Datasets"],
+        },
+        "outputs": {
+            "behaviors": ["Behaviors"],
+        },
+    }
+    return spec
+
+test_emitter = emitter_from_wires({
         "global_time": ["global_time"],
         "face_df": ["Datasets", "face_df"],
         "edge_df": ["Datasets", "edge_df"],
         "vert_df": ["Datasets", "vert_df"],
         "behaviors": ["Behaviors"],
-    })
+})
+
+def run_test_regulation(core, double = False, tf=20, dt=0.1):
+    if double:
+        spec = get_test_regulation_spec(interval=dt, double=True)
+    else:
+        spec = get_test_regulation_spec(interval=dt)
+    spec["emitter"] = test_emitter
+
     sim = Composite(
         {
             "state": spec,
@@ -266,13 +369,7 @@ def run_test_stochastic(core, config = None, tf=20, dt=0.1, jamming=False):
     else:
         spec = get_test_stochastic_spec(interval=dt, config=config, tau=0.2, sigma=0.1)
 
-    spec["emitter"] = emitter_from_wires({
-        "global_time": ["global_time"],
-        "face_df": ["Datasets", "face_df"],
-        "edge_df": ["Datasets", "edge_df"],
-        "vert_df": ["Datasets", "vert_df"],
-        "behaviors": ["Behaviors"],
-    })
+    spec["emitter"] = test_emitter
     sim = Composite(
         {
             "state": spec,
@@ -283,6 +380,20 @@ def run_test_stochastic(core, config = None, tf=20, dt=0.1, jamming=False):
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
+def run_test_gradient(core, config = None, tf=20, dt=0.1):
+    spec = get_test_gradient_spec(interval=dt, config=config, tau=0.2, sigma=0.1)
+    spec["Tyssue"]["config"]["parameters"]["face_df"]["migration_strength"] = [0.1 if i == 96 else 0.0 for i in range(206)]
+    spec["Tyssue"]["config"]["parameters"]["face_df"]["my"] = 0
+    spec["emitter"] = test_emitter
+    sim = Composite(
+        {
+            "state": spec,
+        },
+        core=core,
+    )
+    sim.run(tf)
+    results = gather_emitter_results(sim)[("emitter",)]
+    return results, sim
 
 if __name__ == "__main__":
     from vivarium_tyssue.data_types import register_types
@@ -298,43 +409,45 @@ if __name__ == "__main__":
     # register processes
     core = register_types(core)
     core.register_link("EulerSolver", EulerSolver)
+    core.register_link("EulerSolver", EulerSolver)
     core = register_processes(core)
 
-    # profiler.enable()
     # results, sim = run_test_regulation(core, double=False)
-    # profiler.disable()
-    # profiler.dump_stats("regulations.prof")
     # history = sim.state["Tyssue"]["instance"].history
     # history.update_datasets()
     # draw_specs = config.draw.sheet_spec()
     # draw_specs["face"]["visible"] = True
-    # draw_specs["face"]["visible"] = True
-    # draw_specs["face"]["alpha"] = 1
+    # draw_specs["face"]["alpha"] = 0.5
     # draw_specs["face"]["color"] = "blue"
     # draw_specs["edge"]["color"] = "black"
     # create_gif(history, "test_division.gif", coords = ["x", "z"], **draw_specs)
     # df = pd.DataFrame(results[10]["face_df"]).set_index("face")
 
-    for jamming in [True]:
-        if jamming:
-            file_name = "test_jamming_flat.gif"
-        else:
-            file_name = "test_stochastic_migration.gif"
-        start = time.time()
-        # profiler1.enable()
-        results1, sim1 = run_test_stochastic(core, config=get_test_config_flat(), tf=200, dt = 0.01, jamming=jamming)
-        # profiler1.disable()
-        # profiler1.dump_stats("regulations1.prof")
-        print(f"{time.time() - start} seconds")
-        history = sim1.state["Tyssue"]["instance"].history
-        history.update_datasets()
-        draw_specs = config.draw.sheet_spec()
-        cmap = plt.get_cmap("autumn")
-        color_map = cmap([1 if i == 33 else 0.0 for i in range(206)])
-        draw_specs["face"]["visible"] = True
-        draw_specs["face"]["alpha"] = 0.5
-        draw_specs["face"]["color"] = color_map
-        draw_specs["edge"]["color"] = "black"
-        draw_specs["edge"]["color"] = "black"
-        create_gif(history, output=file_name, coords = ["x", "y"], **draw_specs, num_frames=200)
-        # df1 = pd.DataFrame.from_records(results1[10]["face_df"], index="face")
+    # for jamming in [True, False]:
+    #     if jamming:
+    #         file_name = "test_jamming_flat.gif"
+    #     else:
+    #         file_name = "test_stochastic_migration.gif"
+    #     start = time.time()
+    #     results1, sim1 = run_test_stochastic(
+    #         core,
+    #         config=get_test_config_flat(),
+    #         tf=20,
+    #         dt=0.1,
+    #         jamming=jamming)
+    #     history = sim1.state["Tyssue"]["instance"].history
+    #     history.update_datasets()
+    draw_specs = config.draw.sheet_spec()
+    cmap = plt.get_cmap("autumn")
+    color_map = cmap([1 if i == 96 else 0.0 for i in range(206)])
+    draw_specs["face"]["visible"] = True
+    draw_specs["face"]["alpha"] = 0.5
+    draw_specs["face"]["color"] = color_map
+    draw_specs["edge"]["color"] = "black"
+    draw_specs["edge"]["color"] = "black"
+        # create_gif(history, output=file_name, coords = ["x", "y"], **draw_specs, num_frames=200)
+
+    results2, sim2 = run_test_gradient(core, config=get_test_config_flat(), tf=200, dt=0.01)
+    history = sim2.state["Tyssue"]["instance"].history
+    history.update_datasets()
+    create_gif(history, output="test_gradient.gif", coords = ["x", "y"], **draw_specs, num_frames=200)
