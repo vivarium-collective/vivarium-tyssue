@@ -6,4 +6,5 @@ def register_processes(core):
     core.register_link("TestRegulations", TestRegulations)
     core.register_link("StochasticLineTension", StochasticLineTension)
     core.register_link("CellJamming", CellJamming)
+    core.register_link("ParameterGradient", ParameterGradient)
     return core

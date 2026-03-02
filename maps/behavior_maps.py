@@ -10,4 +10,5 @@ BEHAVIOR_MAP = {
     "contraction": contraction,
     "stochastic_tension": stochastic_tension,
     "cell_jamming": cell_jamming,
+    "apply_gradient": apply_gradient,
 }
