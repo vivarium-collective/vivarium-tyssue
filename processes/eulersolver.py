@@ -22,23 +22,23 @@ from tyssue import config
 
 log = logging.getLogger(__name__)
 
+maps = {
+    "GEOMETRY_MAP": GEOMETRY_MAP,
+    "FACTORY_MAP": FACTORY_MAP,
+    "EFFECTORS_MAP": EFFECTORS_MAP,
+    "TISSUE_MAP": TISSUE_MAP,
+    "BEHAVIOR_MAP": BEHAVIOR_MAP,
+}
+
 def set_pos(eptm, geom, pos):
     """Updates the vertex position of the :class:`Epithelium` object.
 
     Assumes that pos is passed as a 1D array to be reshaped as (eptm.Nv, eptm.dim)
-
     """
     log.debug("set pos")
     eptm.vert_df.loc[eptm.active_verts, eptm.coords] = pos.reshape((-1, eptm.dim))
     geom.update_all(eptm)
 
-def get_dataset_schema(eptm):
-    schema = {}
-    for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
-        if getattr(eptm, df_name) is not None:
-            schema[df_name] = {"_columns" : get_frame_schema(getattr(eptm, df_name))}
-    schema.update({"_type" : "tyssue_data"})
-    return schema
 
 class EulerSolver(Process):
     """Generalized Euler solver for Tyssue-based epithelial simulations
@@ -56,19 +56,23 @@ class EulerSolver(Process):
         "bounds": "map[float]", # bounds the displacement of the vertices at each time step
         "output_columns": "map[list[string]]", # dict containing lists of column names to emit for each dataframe
         "settings": "map",
+        "maps": "map", #map of maps, if using default
     }
 
     def initialize(self, config):
+        self.maps = maps
+        if self.config["maps"]:
+            self.maps.update(self.config["maps"])
         self._set_pos = set_pos
-        self.geom = GEOMETRY_MAP[config["geom"]]
+        self.geom = self.maps["GEOMETRY_MAP"][config["geom"]]
         datasets = load_datasets(config["eptm"])
-        self.tyssue_type = TISSUE_MAP[config["tissue_type"]]
+        self.tyssue_type = self.maps["TISSUE_MAP"][config["tissue_type"]]
         self.eptm = self.tyssue_type("epithelium", datasets)
         self.eptm.network_changed = False
         self.eptm.settings.update(config["settings"])
         self.geom.update_all(self.eptm)
-        effectors = [EFFECTORS_MAP[effector] for effector in config["effectors"]]
-        self.model = FACTORY_MAP[config["factory"]](effectors, EFFECTORS_MAP[config["ref_effector"]])
+        effectors = [self.maps["EFFECTORS_MAP"][effector] for effector in config["effectors"]]
+        self.model = self.maps["FACTORY_MAP"][config["factory"]](effectors, self.maps["EFFECTORS_MAP"][config["ref_effector"]])
         self.history = History(self.eptm)
         if len(config["parameters"]) > 0:
             for dataframe, parameters in config["parameters"].items():
@@ -183,14 +187,15 @@ class EulerSolver(Process):
         print(inputs["global_time"])
         if len(inputs["behaviors"]) > 0:
             for behavior, kwargs in inputs["behaviors"].items():
-                func = BEHAVIOR_MAP[kwargs["func"]]
+                func = self.maps["BEHAVIOR_MAP"][kwargs["func"]]
                 del kwargs["func"]
                 arg_names = [name for name, param in inspect.signature(func).parameters.items()]
-                if "manager" in arg_names:
-                    # kwargs["manager"] = self.manager
+                if "geom" in arg_names:
+                    kwargs["geom"] = self.maps["BEHAVIOR_MAP"][kwargs["geom"]]
                     self.manager.append(func, **kwargs)
                 else:
                     self.manager.append(func, **kwargs)
+
 
         pos = self.current_pos
         dot_r = self.ode_func()
@@ -225,118 +230,6 @@ class EulerSolver(Process):
             },
         }
 
-def get_test_config():
-    return {
-        "name": "Test Cylinder",
-        "eptm": "test_cylinder.hf5",
-        "tissue_type": "Sheet",
-        "parameters": {
-            "face_df": {
-                "area_elasticity": 1,
-                "prefered_area": 1,
-                "perimeter_elasticity": 1,
-                "prefered_perimeter": 3.5,
-            },
-            "edge_df": {
-                "line_tension": 0,
-                "is_active": 1,
-            },
-            "vert_df": {
-                "viscosity": 1,
-                "vessel_elasticity": 1,
-                "prefered_radius": 2.5,
-                "is_alive": 1,
-            }
-        },
-        "geom": "VesselGeometry",
-        "effectors": ["LineTension", "FaceAreaElasticity", "PerimeterElasticity", "VesselSurfaceElasticity"],
-        "ref_effector": "FaceAreaElasticity",
-        "factory": "model_factory",
-        "settings": {
-            "threshold_length": 0.03
-        },
-        "auto_reconnect": True, # if True, will automatically perform reconnections
-        "bounds": None, # bounds the displacement of the vertices at each time step
-        "output_columns": {} # dict containing lists of column names to emit for each dataframe
-    }
-
-def get_test_config_flat():
-    return {
-        "name": "Test Square",
-        "eptm": "test_square.hf5",
-        "tissue_type": "Sheet",
-        "parameters": {
-            "face_df": {
-                "area_elasticity": 1,
-                "prefered_area": 1,
-                "perimeter_elasticity": 0.1,
-                "prefered_perimeter": 3.6,
-                "migration_strength": [0.1 if i == 33 else 0.0 for i in range(206)],
-                "is_alive": 1,
-                "mx": 1,
-                "mz": 0,
-                "my": 1,
-            },
-            "edge_df": {
-                "line_tension": 0,
-                "is_active": 1,
-            },
-            "vert_df": {
-                "viscosity": 1,
-                "is_alive": 1,
-            }
-        },
-        "geom": "SheetGeometry",
-        "effectors": ["LineTension", "FaceAreaElasticity", "PerimeterElasticity", "ActiveMigration"],
-        "ref_effector": "FaceAreaElasticity",
-        "factory": "model_factory_bound",
-        "settings": {
-            "threshold_length": 0.03
-        },
-        "auto_reconnect": True, # if True, will automatically perform reconnections
-        "bounds": None, # bounds the displacement of the vertices at each time step
-        "output_columns": {} # dict containing lists of column names to emit for each dataframe
-    }
-
-def get_test_spec(interval=0.1, config=None):
-    return {
-        "Tyssue": {
-            "_type": "process",
-            "address": "local:EulerSolver",
-            "config": config,
-            "inputs": {
-                "behaviors": ["Behaviors"],
-                "global_time": ["global_time"],
-            },
-            "outputs": {
-                "datasets": ["Datasets"],
-                "network_changed": ["Network Changed"],
-                "behaviors_update": ["Behaviors"],
-            },
-            "interval": interval,
-        },
-        "Network Changed": False,
-        "Behaviors": {}
-    }
-
-def run_test_solver(core, config=None, tf=20):
-    spec = get_test_spec(interval=0.01, config=config)
-    spec["emitter"] = emitter_from_wires({
-        "global_time": ["global_time"],
-        "face_df": ["Datasets", "face_df"],
-        "edge_df": ["Datasets", "edge_df"],
-        "vert_df": ["Datasets", "vert_df"],
-    })
-    sim = Composite(
-        {
-            "state": spec,
-        },
-        core=core,
-    )
-    sim.run(tf)
-    results = gather_emitter_results(sim)[("emitter",)]
-    return results, sim
-
 if __name__ == "__main__":
     from vivarium_tyssue.data_types import register_types
     from vivarium_tyssue.processes import register_processes
@@ -349,34 +242,5 @@ if __name__ == "__main__":
     core = register_processes(core)
     # register data types
 
-    # start= time.time()
-    # results, sim = run_test_solver(core, config=get_test_config())
-    # print(f"{time.time() - start} seconds")
-    # pprint(results[10]["face_df"])
-    # pprint(results[8]["face_df"])
-    # history = sim.state["Tyssue"]["instance"].history
-    # history.update_datasets()
-    # draw_specs = config.draw.sheet_spec()
-    # draw_specs["face"]["visible"] = True
-    # draw_specs["face"]["visible"] = True
-    # draw_specs["face"]["alpha"] = 1
-    # draw_specs["face"]["color"] = "blue"
-    # draw_specs["edge"]["color"] = "black"
-    # create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
 
-    start = time.time()
-    results, sim = run_test_solver(core, config=get_test_config_flat(), tf = 40)
-    print(f"{time.time() - start} seconds")
-    pprint(results[10]["face_df"])
-    pprint(results[8]["face_df"])
-    history = sim.state["Tyssue"]["instance"].history
-    history.update_datasets()
-    draw_specs = config.draw.sheet_spec()
-    cmap = plt.get_cmap("autumn")
-    color_map = cmap([0.2 if i == 33 else 0.0 for i in range(206)])
-    draw_specs["face"]["visible"] = True
-    draw_specs["face"]["alpha"] = 0.5
-    draw_specs["face"]["color"] = color_map
-    draw_specs["edge"]["color"] = "black"
-    create_gif(history, "test_flat.gif", coords=["x", "y"], num_frames = 200, **draw_specs)
 
