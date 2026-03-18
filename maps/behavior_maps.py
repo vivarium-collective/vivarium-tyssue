@@ -8,7 +8,7 @@ BEHAVIOR_MAP = {
     "apoptosis": apoptosis,
     "division": division,
     "contraction": contraction,
-    "stochastic_tension": stochastic_tension,
+    "update_tension": update_tension,
     "cell_jamming": cell_jamming,
     "apply_gradient": apply_gradient,
 }

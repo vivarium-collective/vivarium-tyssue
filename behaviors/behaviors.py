@@ -100,7 +100,10 @@ def division(sheet, manager, geom= "SheetGeometry", cell_id=0, crit_area=2.0, gr
         increase in the prefered are per unit time
         A_0(t + dt) = A0(t) * (1 + growth_rate * dt)
     """
-    geometry = GEOMETRY_MAP[geom]
+    if type(geom) == str:
+        geometry = GEOMETRY_MAP[geom]
+    else:
+        geometry = geom
     if sheet.face_df.loc[cell_id, "area"] > crit_area:
         # restore prefered_area
         sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
@@ -117,7 +120,9 @@ def division(sheet, manager, geom= "SheetGeometry", cell_id=0, crit_area=2.0, gr
         sheet.face_df.loc[cell_id, "prefered_area"] *= (1 + dt * growth_rate)
         manager.append(division, geom=geom, cell_id=cell_id, crit_area=crit_area, growth_rate=growth_rate, dt=dt)
 
-def stochastic_tension(sheet, manager, tension_update=None):
+def update_tension(sheet, manager, tension_update=None):
+    if sheet.edge_df["line_tension"].dtype == "int64":
+        sheet.edge_df["line_tension"] = sheet.edge_df["line_tension"].astype(float)
     if tension_update:
         sheet.edge_df.loc[
             sheet.edge_df["unique_id"].isin(tension_update),
