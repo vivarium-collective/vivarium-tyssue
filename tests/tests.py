@@ -9,6 +9,10 @@ from bigraph_schema import allocate_core
 from process_bigraph import Step, Process, Composite
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
+from vivarium_tyssue.models.crypt_gillespie.crypt_params import *
+from vivarium_tyssue.models.crypt_gillespie.jump_rates import *
+
+
 def get_test_config():
     return {
         "name": "Test Cylinder",
@@ -323,6 +327,32 @@ def run_test_anisotropic(core, config = None, tf=20, dt=0.1):
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
+def get_test_gillespie_config(
+        interval = 0.1,
+        growth_rate= 0.1,
+        shrink_rate=0.1,
+        division_crit=2,
+        apoptosis_crit=0.3
+    ):
+    return {
+        "cell_types": cell_types,
+        "rates_max": rates_max,
+        "michaelis_constants": K,
+        "transition_lengths": k,
+        "geom": "VesselGeometry",
+        "global_interval": interval,
+        "growth_rate": growth_rate,
+        "shrink_rate": shrink_rate,
+        "division_crit": division_crit,
+        "apoptosis_crit": apoptosis_crit,
+    }
+
+
+
+def get_test_gillespie_spec(interval=0.1, config=None):
+    if callable(config):
+        spec = get_test_spec(interval=interval, config=config())
+
 if __name__ == "__main__":
 
     import pandas as pd
@@ -414,7 +444,7 @@ if __name__ == "__main__":
     # history.update_datasets()
     # create_gif(history, output="test_gradient.gif", coords = ["x", "y"], **draw_specs, num_frames=200)
 
-    results3, sim3 = run_test_anisotropic(core, config=get_test_config_flat(), tf=200, dt=0.1)
+    results3, sim3 = run_test_anisotropic(core, config=get_test_config_flat(), tf=20, dt=0.1)
     history = sim3.state["Tyssue"]["instance"].history
     history.update_datasets()
-    create_gif(history, output="test_anisotropic.gif", coords = ["x", "y"], **draw_specs, num_frames=200)
+    create_gif(history, output="test_anisotropic_behavior.gif", coords = ["x", "y"], **draw_specs, num_frames=200)

@@ -156,7 +156,7 @@ class EulerSolver(Process):
 
     def inputs(self):
         return {
-            "behaviors": "behaviors",
+            "behaviors": "list[node]",
             "global_time": "float",
         }
 
@@ -180,13 +180,13 @@ class EulerSolver(Process):
         return {
             "datasets": datasets,
             "network_changed": "boolean",
-            "behaviors_update": "map",
+            "behaviors_update": "list",
         }
 
     def update(self, inputs, interval):
         print(inputs["global_time"])
         if len(inputs["behaviors"]) > 0:
-            for behavior, kwargs in inputs["behaviors"].items():
+            for kwargs in inputs["behaviors"]:
                 func = self.maps["BEHAVIOR_MAP"][kwargs["func"]]
                 del kwargs["func"]
                 arg_names = [name for name, param in inspect.signature(func).parameters.items()]
@@ -195,7 +195,6 @@ class EulerSolver(Process):
                     self.manager.append(func, **kwargs)
                 else:
                     self.manager.append(func, **kwargs)
-
 
         pos = self.current_pos
         dot_r = self.ode_func()
@@ -220,13 +219,11 @@ class EulerSolver(Process):
 
         dfs = self.output_dfs()
 
-        to_remove = [key for key in inputs["behaviors"]]
-
         return {
             "datasets": dfs,
             "network_changed": network_changed,
             "behaviors_update": {
-                "_remove": to_remove,
+                "_remove": "all",
             },
         }
 

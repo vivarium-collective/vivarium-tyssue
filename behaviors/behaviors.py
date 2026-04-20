@@ -19,38 +19,7 @@ def fix_points_cylinder(sheet, radius):
     sheet.vert_df['x'] = xy_on_cylinder[:, 0]
     sheet.vert_df['y'] = xy_on_cylinder[:, 1]
 
-def divide_cylinder(sheet, manager, geom, division_rate, dt, radius):
-    """basic function to apply division in a cylinder crypt_gillespie model"""
-    update_stem_cells(sheet)
-    stem_cells = sheet.face_df.loc[(sheet.face_df["stem_cell"] == 1) & (sheet.face_df["area"]>=0.7*sheet.face_df["area"].mean())].copy()
-    n_stem = len(stem_cells)
-    cell_ids = list(stem_cells["unique_id"])
-    n_divisions = np.random.binomial(n=n_stem, p=division_rate * dt)
-    dividing_cells = np.random.choice(cell_ids, size=n_divisions, replace=False)
-    for cell_id in dividing_cells:
-        cell_idx = int(sheet.face_df[sheet.face_df["unique_id"] == cell_id].index[0])
-        daughter = cell_division(sheet, cell_idx, geom)
-    manager.append(divide_cylinder, geom=geom, division_rate=division_rate, dt=dt, radius=radius)
-    fix_points_cylinder(sheet, radius=radius)
-
-def apoptosis_cylinder(sheet, manager, death_rate, dt, radius, geom):
-    """basic function to apply cell death in a cylinder model"""
-    update_stem_cells(sheet)
-    dying_cells = sheet.face_df.loc[sheet.face_df["dying_cell"] == 1]
-    n_dying = len(dying_cells)
-    cell_ids = list(dying_cells["unique_id"])
-    n_deaths = np.random.binomial(n=n_dying, p=death_rate * dt)
-    to_kill = np.random.choice(cell_ids, size=n_deaths, replace=False)
-
-    for cell_id in to_kill:
-        cell_idx = int(sheet.face_df[sheet.face_df["unique_id"] == cell_id].index[0])
-        # if sheet.face_df.loc[cell_idx, "boundary"] == 0:
-        vertex = remove_face(sheet, cell_idx)
-        # else:
-        #     vertex = drop_face(sheet, cell_idx, geom)
-        # split_vert(sheet, vertex)
-    manager.append(apoptosis_cylinder, death_rate=death_rate, dt=dt, radius=radius, geom=geom)
-    fix_points_cylinder(sheet, radius=radius)
+#Cell Divisions
 
 def divide_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
     """divides a cell within a tyssue sheet indexed by the cell idx or its unique id
@@ -72,20 +41,9 @@ def divide_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
     fix_points_cylinder(sheet, radius=radius)
     return daughter
 
-def apoptosis_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
-    """removes a cell from a cylindrical tyssue sheet"""
-    if cell_uid is None:
-        if cell_idx is None:
-            raise ValueError("cell_uid or cell_idx must be specified")
-    if cell_uid is not None:
-        cell_idx = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
-    if radius is None:
-        radius = (sheet.vert_df["x"].max() - sheet.vert_df["x"].min())/2
-    vertex = remove_face(sheet, cell_idx)
-    fix_points_cylinder(sheet, radius=radius)
-    geom.update_all(sheet)
-
-def division(sheet, manager, geom= "SheetGeometry", cell_id=0, crit_area=2.0, growth_rate=0.1, dt=1.):
+def division(
+        sheet, manager, geom= "SheetGeometry", cell_uid=0, crit_area=2.0, growth_rate=0.1, dt=1.
+):
     """Defines a division behavior.
 
     Parameters
@@ -104,6 +62,7 @@ def division(sheet, manager, geom= "SheetGeometry", cell_id=0, crit_area=2.0, gr
         geometry = GEOMETRY_MAP[geom]
     else:
         geometry = geom
+    cell_id = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
     if sheet.face_df.loc[cell_id, "area"] > crit_area:
         # restore prefered_area
         sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
@@ -118,7 +77,93 @@ def division(sheet, manager, geom= "SheetGeometry", cell_id=0, crit_area=2.0, gr
     else:
         #
         sheet.face_df.loc[cell_id, "prefered_area"] *= (1 + dt * growth_rate)
-        manager.append(division, geom=geom, cell_id=cell_id, crit_area=crit_area, growth_rate=growth_rate, dt=dt)
+        manager.append(
+            division,
+            geom=geom,
+            cell_uid=cell_uid,
+            crit_area=crit_area,
+            growth_rate=growth_rate,
+            dt=dt
+        )
+
+def divide_crypt(
+        sheet, manager, geom= "SheetGeometry", cell_uid=0, cell_type="None", crit_area=2.0, growth_rate=0.1, dt=1.
+    ):
+    if type(geom) == str:
+        geometry = GEOMETRY_MAP[geom]
+    else:
+        geometry = geom
+    cell_id = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
+    sheet.face_df.loc[cell_id, "cell_type"] = "dividing"
+    if sheet.face_df.loc[cell_id, "area"] > crit_area:
+        # restore prefered_area
+        sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
+        # Do division
+        daughter = cell_division(sheet, cell_id, geometry)
+        # Update the topology
+        sheet.reset_index(order=True)
+        # update geometry
+        geometry.update_all(sheet)
+        sheet.network_changed = True
+        sheet.face_df.loc[cell_id, "cell_type"] = cell_type
+        sheet.face_df.loc[daughter, "cell_type"] = cell_type
+        print(f"cell n°{daughter} is born")
+    else:
+        #
+        sheet.face_df.loc[cell_id, "prefered_area"] *= (1 + dt * growth_rate)
+        manager.append(
+            divide_crypt,
+            geom=geom,
+            cell_uid=cell_uid,
+            cell_type=cell_type,
+            crit_area=crit_area,
+            growth_rate=growth_rate,
+            dt=dt
+        )
+
+#Apoptosis behaviors
+def apoptosis_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
+    """removes a cell from a cylindrical tyssue sheet"""
+    if cell_uid is None:
+        if cell_idx is None:
+            raise ValueError("cell_uid or cell_idx must be specified")
+    if cell_uid is not None:
+        cell_idx = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
+    if radius is None:
+        radius = (sheet.vert_df["x"].max() - sheet.vert_df["x"].min())/2
+    vertex = remove_face(sheet, cell_idx)
+    fix_points_cylinder(sheet, radius=radius)
+    geom.update_all(sheet)
+
+def apoptosis_extrusion(
+        sheet, manager, geom= "SheetGeometry", cell_uid=0, crit_area=0.5, shrink_rate=0.1, dt=1.
+):
+    if type(geom) == str:
+        geometry = GEOMETRY_MAP[geom]
+    else:
+        geometry = geom
+    cell_id = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
+    if sheet.face_df.loc[cell_id, "area"] < crit_area:
+        # Restore prefered_area
+        sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
+        # Remove the cell division
+        vertex = remove_face(sheet, cell_id, geometry)
+        # Update the topology
+        sheet.reset_index(order=True)
+        # update geometry
+        geometry.update_all(sheet)
+        sheet.network_changed = True
+    else:
+        #
+        sheet.face_df.loc[cell_id, "prefered_area"] *= (1 - dt * shrink_rate)
+        manager.append(
+            apoptosis_extrusion,
+            geom=geom,
+            cell_uid=cell_uid,
+            crit_area=crit_area,
+            shrink_rate=shrink_rate,
+            dt=dt
+        )
 
 def update_tension(sheet, manager, tension_update=None):
     if sheet.edge_df["line_tension"].dtype == "int64":
@@ -151,3 +196,6 @@ def apply_gradient(sheet, manager, parameter_updates=None):
             ] = sheet.datasets[updates["dataframe"]]["unique_id"].map(
                 updates["update"]
             )
+
+def differentiation(sheet, manager, cell_uid, new_type):
+    sheet.face_df.loc[sheet.face_df["unique_id"] == cell_uid, "cell_type"] = new_type

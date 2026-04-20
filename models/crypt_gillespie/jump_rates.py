@@ -3,11 +3,13 @@ import numpy as np
 
 rates_max = {}
 K = {}
-l = {}
+k = {}
+regulations = {}
 for i in param.cell_types:
     rates_max[i] = {}
     K[i] = {}
-    l[i] = {}
+    k[i] = {}
+    regulations[i] = {}
 
 ##############################
 # Max rates: MUST define at least one per cell type
@@ -46,16 +48,41 @@ K['ent']['ex_z'] = 190.
 K['ent']['ex_ci'] = 20.
 
 
-# l (width of transition in regulation function)
-l['ci'] = 6.
-l['sc']['sc_z'] = 5.
-l['sc']['sc_but'] = 5.
+# k (width of transition in regulation function)
+k['ci'] = 6.
+k['sc']['sc_z'] = 5.
+k['sc']['sc_but'] = 5.
 
-l['pc']['pc_z'] = 40.
+k['pc']['pc_z'] = 40.
 
-l['pc']['ent_z'] = 15.
-l['pc']['ent_but'] = 5.
+k['pc']['ent_z'] = 15.
+k['pc']['ent_but'] = 5.
 
-l['ent']['ex_z'] = 15.
+k['ent']['ex_z'] = 15.
 
+# regulations (name and type of regulations for each jump)
+regulations["sc"]["sc"] = {"wnt": "positive"}
+regulations["sc"]["pc"] = {"wnt": "negative"}
 
+regulations["pc"]["ent"] = {"wnt": "negative"}
+regulations["pc"]["gc"] = {"wnt": "negative"}
+regulations["pc"]["pc"] = {"wnt": "positive"}
+
+regulations["ent"]["ex"] = {"wnt": "negative"}
+
+regulations["gc"]["ex"] = {"wnt": "negative"}
+
+def loc_to_wnt(loc):
+    wnt = -0.67*loc + 10
+    return wnt
+
+regulations_map = {
+    "wnt": loc_to_wnt,
+}
+
+JUMP_MAP = {
+    "rates_max": rates_max,
+    "K": K,
+    "transition_lengths": k,
+    "regulations": regulations,
+}

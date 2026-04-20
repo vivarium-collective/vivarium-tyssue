@@ -1,6 +1,5 @@
 from tyssue.behaviors.sheet.apoptosis_events import apoptosis
 from tyssue.behaviors.sheet.basic_events import contraction
-
 from vivarium_tyssue.behaviors import *
 
 BEHAVIOR_MAP = {
@@ -11,4 +10,7 @@ BEHAVIOR_MAP = {
     "update_tension": update_tension,
     "cell_jamming": cell_jamming,
     "apply_gradient": apply_gradient,
+    "divide_crypt": divide_crypt,
+    "apoptosis_extrusion": apoptosis_extrusion,
+    "differentiation": differentiation,
 }
