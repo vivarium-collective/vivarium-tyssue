@@ -50,22 +50,25 @@ def f_rate(face_df, cell_uid, cell_type, jump):
     cell: cell index
     jump:
     """
-    rate_max = rates_max[cell_uid][jump]
-    regulators = regulations[cell_type][jump]
-    loc = face_df.loc[cell_uid]["y"]
+    rate_max = rates_max[cell_type][jump]
     rate = rate_max
-    K_j = K[cell_type][jump]
-    k_j = k[cell_type][jump]
+    if regulations[cell_type]:
+        regulators = regulations[cell_type][jump]
+        loc = face_df.loc[cell_uid]["y"]
 
-    for regulator, regulation in regulators.values():
-        if regulation == "positive":
-            regulation_function = regulations_map[regulator]
-            regulation_term = reg_pol(regulation_function(loc), K_j, k_j)
-            rate *= regulation_term
-        if regulation == "negative":
-            regulation_function = regulations_map[regulator]
-            regulation_term = 1 - reg_pol(regulation_function(loc), K_j, k_j)
-            rate *= regulation_term
+        for regulator, regulation in regulators.items():
+            if (jump + "_" + regulator in K[cell_type]) & (jump + "_" + regulator in k[cell_type]):
+                K_j = K[cell_type][jump + "_" + regulator]
+                k_j = k[cell_type][jump + "_" + regulator]
+                if regulation == "positive":
+                    regulation_function = regulations_map[regulator]
+                    regulation_term = reg_pol(regulation_function(loc), K_j, k_j)
+                    rate *= regulation_term
+                if regulation == "negative":
+                    regulation_function = regulations_map[regulator]
+                    regulation_term = 1 - reg_pol(regulation_function(loc), K_j, k_j)
+                    rate *= regulation_term
+
     return rate
 
 class Gillespie(Process):
@@ -122,11 +125,11 @@ class Gillespie(Process):
 
         #pick cell
         cell_id = np.random.choice(np.arange(0, n_cells), 1, p=probability)[0]
-        cell_uid = face_df.loc[cell_id]["uid"]
+        cell_uid = face_df.loc[cell_id]["unique_id"]
         cell_type = face_df.loc[cell_id]["cell_type"]
 
         #pick event
-        jumps, proba_j = list(zip(self.rates_max[cell_type].items()))
+        jumps, proba_j = list(zip(*self.rates_max[cell_type].items()))
         proba_j = np.asarray(proba_j)/sum(self.rates_max[cell_type].values())
         jump = np.random.choice(jumps, 1, p=proba_j)[0]
 

@@ -35,30 +35,30 @@ rates_max['dcs']['dcs'] = 0.
 # Michaelis constant
 K['ci'] = 41.
 
-K['sc']['sc_z'] = 12.
+K['sc']['sc_wnt'] = 12.
 K['sc']['sc_but'] = 2.
 K['sc']['ci'] = 53.
 
-K['pc']['pc_z'] = 40.
+K['pc']['pc_wnt'] = 40.
 
-K['pc']['ent_z'] = 40.
+K['pc']['ent_wnt'] = 40.
 K['pc']['ent_but'] = 1.5
 
-K['ent']['ex_z'] = 190.
+K['ent']['ex_wnt'] = 190.
 K['ent']['ex_ci'] = 20.
 
 
 # k (width of transition in regulation function)
 k['ci'] = 6.
-k['sc']['sc_z'] = 5.
+k['sc']['sc_wnt'] = 5.
 k['sc']['sc_but'] = 5.
 
-k['pc']['pc_z'] = 40.
+k['pc']['pc_wnt'] = 40.
 
-k['pc']['ent_z'] = 15.
+k['pc']['ent_wnt'] = 15.
 k['pc']['ent_but'] = 5.
 
-k['ent']['ex_z'] = 15.
+k['ent']['ex_wnt'] = 15.
 
 # regulations (name and type of regulations for each jump)
 regulations["sc"]["sc"] = {"wnt": "positive"}
@@ -69,8 +69,6 @@ regulations["pc"]["gc"] = {"wnt": "negative"}
 regulations["pc"]["pc"] = {"wnt": "positive"}
 
 regulations["ent"]["ex"] = {"wnt": "negative"}
-
-regulations["gc"]["ex"] = {"wnt": "negative"}
 
 def loc_to_wnt(loc):
     wnt = -0.67*loc + 10
