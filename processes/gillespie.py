@@ -98,6 +98,16 @@ class Gillespie(Process):
         self.division_crit = config["division_crit"]
         self.apoptosis_crit = config["apoptosis_crit"]
 
+    def calculate_timestep(self, interval, state):
+        # calculate next time-step
+        face_df = state["datasets"]["face_df"]
+        u0 = np.random.random_sample()
+        max_rates = f_rates_max(face_df, rates_max, valid_types=self.cell_types)
+        face_df["max_rate"] = max_rates
+        max_total = sum(max_rates)
+        time_interval = -np.log(u0) / max_total
+        return time_interval
+
     def inputs(self):
         return {
             "datasets": "tyssue_data",
@@ -171,36 +181,4 @@ class Gillespie(Process):
         return {
             "behaviors": event,
             "gillespie_trigger": 1,
-        }
-
-class GillespieTime(Step):
-    config_schema = {
-        "cell_types": "list[string]"
-    }
-
-    def inputs(self):
-        return {
-            "datasets": "tyssue_data",
-            "gillespie_trigger": "float",
-        }
-
-    def outputs(self):
-        return {
-            "timestep": "overwrite[float]",
-        }
-
-    def initialize(self, config):
-        self.cell_types = config["cell_types"]
-
-    def update(self, inputs):
-        #calculate next time-step
-        face_df = inputs["datasets"]["face_df"]
-        u0 = np.random.random_sample()
-        max_rates = f_rates_max(face_df, rates_max, valid_types=self.cell_types)
-        face_df["max_rate"] = max_rates
-        max_total = sum(max_rates)
-        time_interval = -np.log(u0) / max_total
-
-        return {
-            "timestep": time_interval,
         }
