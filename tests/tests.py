@@ -364,23 +364,7 @@ def base_gillespie_spec(interval=0.1):
         },
         "interval": interval,
     }
-    spec["Gillespie Timestep"] = {
-        "_type": "step",
-        "address": "local:GillespieTime",
-        "config": {
-            "cell_types": cell_types,
-        },
-        "inputs": {
-            "datasets": ["Datasets"],
-            "gillespie_trigger": ["Gillespie Trigger"],
-        },
-        "outputs": {
-            "timestep": ["Gillespie", "interval"],
-        },
-        "_trigger": {
-            "gillespie_trigger": "float",
-        }
-    }
+
     return spec
 
 def get_test_gillespie_spec(interval=0.1, config=None, tau=1.0, sigma=1.0):
