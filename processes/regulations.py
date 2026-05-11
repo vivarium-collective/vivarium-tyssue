@@ -51,7 +51,7 @@ class TestRegulations(Process):
 
     def outputs(self):
         return {
-            "behaviors": "behaviors"
+            "behaviors": "list[node]"
         }
 
     def update(self, inputs, interval):
@@ -73,16 +73,12 @@ class TestRegulations(Process):
             }
 
             if self.config["double"]:
-                update = {
-                    "division1": {**base, "cell_id": pick()},
-                    "division2": {**base, "cell_id": pick()},
-                }
+                update = [{**base, "cell_id": pick()}, {**base, "cell_id": pick()}]
             else:
-                update = {
-                    "division": {**base, "cell_id": pick()}
-                }
+                update = [{**base, "cell_id": pick()}]
+
         else:
-            update = {}
+            update = []
 
         return {"behaviors": update}
 
@@ -109,7 +105,7 @@ class StochasticLineTension(Process):
 
     def outputs(self):
         return {
-            "behaviors": "behaviors"
+            "behaviors": "list[node]"
         }
 
     def update(self, inputs, interval):
@@ -121,14 +117,13 @@ class StochasticLineTension(Process):
             new_tension = list(decay * tension + noise_scale * np.random.randn(len(tension)))
             tension_update = {unique_id:tension_v for unique_id, tension_v in zip(unique_ids, new_tension)}
 
-            behavior = {
+            update = [{
                 "func": "update_tension",
                 "tension_update": tension_update,
-            }
+            }]
 
-            update = {"update_tension": behavior}
         else:
-            update = {}
+            update = []
         return {"behaviors": update}
 
 
@@ -154,20 +149,19 @@ class CellJamming(Process):
 
     def outputs(self):
         return {
-            "behaviors": "behaviors"
+            "behaviors": "list[node]"
         }
 
     def update(self, inputs, interval):
         if math.isclose(inputs["global_time"], self.trigger_time):
-            behavior = {
+            update = [{
                 "func": "cell_jamming",
                 "rate": self.rate,
                 "limits": self.limits,
                 "dt": interval,
-            }
-            update = {"cell_jamming": behavior}
+            }]
         else:
-            update = {}
+            update = []
         return {"behaviors": update}
 
 
@@ -192,7 +186,7 @@ class ParameterGradient(Step):
 
     def outputs(self):
         return {
-            "behaviors": "behaviors"
+            "behaviors": "list[node]"
         }
 
     def update(self, inputs):
@@ -215,11 +209,10 @@ class ParameterGradient(Step):
                     "dataframe" : df,
                     "update" : parameter_update,
                 }
-            behavior = {
+            update = [{
                 "func": "apply_gradient",
                 "parameter_updates": parameter_updates,
-            }
-            update = {"apply_gradient": behavior}
+            }]
             return {"behaviors": update}
 
 class AnisotropicTension(Step):
@@ -240,7 +233,7 @@ class AnisotropicTension(Step):
 
     def outputs(self):
         return {
-            "behaviors": "behaviors"
+            "behaviors": "list[node]"
         }
 
     def update(self, inputs):
@@ -265,11 +258,8 @@ class AnisotropicTension(Step):
         tension_update = dict(zip(unique_ids, tensions))
 
         return {
-            "behaviors": {
-                "update_tension": {
-                    "func": "update_tension",
-                    "tension_update": tension_update,
-                }
-            }
+            "behaviors": [{
+                "func": "update_tension",
+                "tension_update": tension_update,
+            }]
         }
-

@@ -6,8 +6,13 @@ import pstats
 import io
 
 from bigraph_schema import allocate_core
+from jupyterlab_server import spec
 from process_bigraph import Step, Process, Composite
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
+
+from vivarium_tyssue.models.crypt_gillespie.crypt_params import *
+from vivarium_tyssue.models.crypt_gillespie.jump_rates import *
+
 
 def get_test_config():
     return {
@@ -323,6 +328,72 @@ def run_test_anisotropic(core, config = None, tf=20, dt=0.1):
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
 
+def get_test_gillespie_config(
+        interval = 0.1,
+        growth_rate= 0.1,
+        shrink_rate=0.1,
+        division_crit=2,
+        apoptosis_crit=0.3
+    ):
+    return {
+        "cell_types": cell_types,
+        "rates_max": rates_max,
+        "michaelis_constants": K,
+        "transition_lengths": k,
+        "geom": "VesselGeometry",
+        "global_interval": interval,
+        "growth_rate": growth_rate,
+        "shrink_rate": shrink_rate,
+        "division_crit": division_crit,
+        "apoptosis_crit": apoptosis_crit,
+    }
+
+def base_gillespie_spec(interval=0.1):
+    spec = {}
+    spec["Gillespie"] = {
+        "_type": "process",
+        "address": "local:Gillespie",
+        "config": get_test_gillespie_config(),
+        "inputs": {
+            "datasets": ["Datasets"],
+            "global_time": ["global_time"]
+        },
+        "outputs": {
+            "behaviors": ["Behaviors"],
+            "gillespie_trigger": ["Gillespie Trigger"],
+        },
+        "interval": interval,
+    }
+
+    return spec
+
+def get_test_gillespie_spec(interval=0.1, config=None, tau=1.0, sigma=1.0):
+    if callable(config):
+        spec = get_test_stochastic_spec(interval=interval, config=config(), tau=tau, sigma=sigma)
+    else:
+        spec = get_test_stochastic_spec(interval=interval, config=config, tau=tau, sigma=sigma)
+
+    spec["Tyssue"]["config"]["eptm"] = "crypt_cylinder.hf5"
+    spec["Tyssue"]["config"]["geom"] = "VesselGeometry"
+    spec["Tyssue"]["config"]["effectors"] = ["FaceAreaElasticity", "PerimeterElasticity", "LineTension"]
+
+    gillespie_spec = base_gillespie_spec(interval=interval)
+    spec.update(gillespie_spec)
+    return spec
+
+def run_test_gillespie(core, config = None, tf=20, dt=0.1, tau=1.0, sigma=1.0):
+    spec = get_test_gillespie_spec(interval=dt, config=config, tau=tau, sigma=sigma)
+    spec["emitter"] = test_emitter
+    sim = Composite(
+        {
+            "state": spec,
+        },
+        core=core,
+    )
+    sim.run(tf)
+    results = gather_emitter_results(sim)[("emitter",)]
+    return results, sim
+
 if __name__ == "__main__":
 
     import pandas as pd
@@ -414,7 +485,12 @@ if __name__ == "__main__":
     # history.update_datasets()
     # create_gif(history, output="test_gradient.gif", coords = ["x", "y"], **draw_specs, num_frames=200)
 
-    results3, sim3 = run_test_anisotropic(core, config=get_test_config_flat(), tf=200, dt=0.1)
-    history = sim3.state["Tyssue"]["instance"].history
+    # results3, sim3 = run_test_anisotropic(core, config=get_test_config_flat(), tf=20, dt=0.1)
+    # history = sim3.state["Tyssue"]["instance"].history
+    # history.update_datasets()
+    # create_gif(history, output="test_anisotropic_behavior.gif", coords = ["x", "y"], **draw_specs, num_frames=200)
+
+    results4, sim4 = run_test_gillespie(core, config=get_test_config(), tf=40, dt=0.1, tau=0.2, sigma=0.1)
+    history = sim4.state["Tyssue"]["instance"].history
     history.update_datasets()
-    create_gif(history, output="test_anisotropic.gif", coords = ["x", "y"], **draw_specs, num_frames=200)
+    create_gif(history, output="test_gillespie.gif", coords = ["x", "z"], **draw_specs, num_frames=200)

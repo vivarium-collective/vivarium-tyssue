@@ -45,8 +45,8 @@ def apply(schema: TyssueDset, current, update, path):
 #Behaviors Dataclass
 #===================
 @dataclass(kw_only=True)
-class Behaviors(Map):
-    _value: Map = field(default_factory=Map)
+class Behaviors(List):
+    _value: List = field(default_factory=List)
 
 def behaviors_update(schema, current, update, path):
     result = current.copy()
