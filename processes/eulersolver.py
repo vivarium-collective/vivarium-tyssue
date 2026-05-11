@@ -191,11 +191,13 @@ class EulerSolver(Process):
                 del kwargs["func"]
                 arg_names = [name for name, param in inspect.signature(func).parameters.items()]
                 if "geom" in arg_names:
-                    kwargs["geom"] = self.maps["BEHAVIOR_MAP"][kwargs["geom"]]
+                    kwargs["geom"] = self.maps["GEOMETRY_MAP"][kwargs["geom"]]
                     self.manager.append(func, **kwargs)
                 else:
                     self.manager.append(func, **kwargs)
-
+            behavior_update = {"_remove": "all"}
+        else:
+            behavior_update = []
         pos = self.current_pos
         dot_r = self.ode_func()
         if self.bounds is not None:
@@ -222,9 +224,7 @@ class EulerSolver(Process):
         return {
             "datasets": dfs,
             "network_changed": network_changed,
-            "behaviors_update": {
-                "_remove": "all",
-            },
+            "behaviors_update": behavior_update,
         }
 
 if __name__ == "__main__":

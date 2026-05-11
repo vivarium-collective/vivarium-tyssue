@@ -1,7 +1,7 @@
 from pprint import pprint
 import time
 
-from process_bigraph import Process, Composite
+from process_bigraph import Process, Composite, Step
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
 from vivarium_tyssue.models.crypt_gillespie.crypt_params import *
@@ -106,18 +106,17 @@ class Gillespie(Process):
 
     def outputs(self):
         return {
-            "timestep": "float",
-            "behaviors": "list[node]"
+            "behaviors": "list[node]",
+            "gillespie_trigger": "float",
         }
 
     def update(self, inputs, interval):
         #calculate next time-step
         face_df = inputs["datasets"]["face_df"]
-        u0 = np.random.random_sample()
         max_rates = f_rates_max(face_df, rates_max, valid_types=self.cell_types)
         face_df["max_rate"] = max_rates
         max_total = sum(max_rates)
-        time_interval = -np.log(u0) / max_total
+        # time_interval = _time_interval - interval
 
         #pick cell and event accept/reject
         probability = np.divide(max_rates, max_total)
@@ -125,7 +124,7 @@ class Gillespie(Process):
 
         #pick cell
         cell_id = np.random.choice(np.arange(0, n_cells), 1, p=probability)[0]
-        cell_uid = face_df.loc[cell_id]["unique_id"]
+        cell_uid = int(face_df.loc[cell_id]["unique_id"])
         cell_type = face_df.loc[cell_id]["cell_type"]
 
         #pick event
@@ -170,7 +169,38 @@ class Gillespie(Process):
                 }]
 
         return {
-            "timestep": time_interval,
             "behaviors": event,
+            "gillespie_trigger": 1,
         }
 
+class GillespieTime(Step):
+    config_schema = {
+        "cell_types": "list[string]"
+    }
+
+    def inputs(self):
+        return {
+            "datasets": "tyssue_data",
+            "gillespie_trigger": "float",
+        }
+
+    def outputs(self):
+        return {
+            "timestep": "overwrite[float]",
+        }
+
+    def initialize(self, config):
+        self.cell_types = config["cell_types"]
+
+    def update(self, inputs):
+        #calculate next time-step
+        face_df = inputs["datasets"]["face_df"]
+        u0 = np.random.random_sample()
+        max_rates = f_rates_max(face_df, rates_max, valid_types=self.cell_types)
+        face_df["max_rate"] = max_rates
+        max_total = sum(max_rates)
+        time_interval = -np.log(u0) / max_total
+
+        return {
+            "timestep": time_interval,
+        }

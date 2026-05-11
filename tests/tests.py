@@ -348,6 +348,41 @@ def get_test_gillespie_config(
         "apoptosis_crit": apoptosis_crit,
     }
 
+def base_gillespie_spec(interval=0.1):
+    spec = {}
+    spec["Gillespie"] = {
+        "_type": "process",
+        "address": "local:Gillespie",
+        "config": get_test_gillespie_config(),
+        "inputs": {
+            "datasets": ["Datasets"],
+            "global_time": ["global_time"]
+        },
+        "outputs": {
+            "behaviors": ["Behaviors"],
+            "gillespie_trigger": ["Gillespie Trigger"],
+        },
+        "interval": interval,
+    }
+    spec["Gillespie Timestep"] = {
+        "_type": "step",
+        "address": "local:GillespieTime",
+        "config": {
+            "cell_types": cell_types,
+        },
+        "inputs": {
+            "datasets": ["Datasets"],
+            "gillespie_trigger": ["Gillespie Trigger"],
+        },
+        "outputs": {
+            "timestep": ["Gillespie", "interval"],
+        },
+        "_trigger": {
+            "gillespie_trigger": "float",
+        }
+    }
+    return spec
+
 def get_test_gillespie_spec(interval=0.1, config=None, tau=1.0, sigma=1.0):
     if callable(config):
         spec = get_test_stochastic_spec(interval=interval, config=config(), tau=tau, sigma=sigma)
@@ -358,24 +393,13 @@ def get_test_gillespie_spec(interval=0.1, config=None, tau=1.0, sigma=1.0):
     spec["Tyssue"]["config"]["geom"] = "VesselGeometry"
     spec["Tyssue"]["config"]["effectors"] = ["FaceAreaElasticity", "PerimeterElasticity", "LineTension"]
 
-    spec["Gillespie"] = {
-        "_type": "process",
-        "address": "local:Gillespie",
-        "config": get_test_gillespie_config(),
-        "inputs": {
-            "datasets": ["Datasets"],
-            "global_time": ["global_time"]
-        },
-        "outputs": {
-            "timestep": ["Gillespie", "interval"],
-            "behaviors": ["Behaviors"],
-        },
-        "interval": interval,
-    }
+    gillespie_spec = base_gillespie_spec(interval=interval)
+    spec.update(gillespie_spec)
     return spec
 
 def run_test_gillespie(core, config = None, tf=20, dt=0.1, tau=1.0, sigma=1.0):
     spec = get_test_gillespie_spec(interval=dt, config=config, tau=tau, sigma=sigma)
+    spec["emitter"] = test_emitter
     sim = Composite(
         {
             "state": spec,

@@ -14,19 +14,19 @@ for i in param.cell_types:
 ##############################
 # Max rates: MUST define at least one per cell type
 # Stem cell
-rates_max['sc']['sc'] = 0.15  # 0.09
-rates_max['sc']['pc'] = 0.2  # 0.04
+rates_max['sc']['sc'] = 0.15/10  # 0.09
+rates_max['sc']['pc'] = 0.2/10  # 0.04
 
 # Progenitor cell
-rates_max['pc']['pc'] = 0.22
-rates_max['pc']['ent'] = 0.25  # 0.15
+rates_max['pc']['pc'] = 0.22/10
+rates_max['pc']['ent'] = 0.25/10  # 0.15
 rates_max['pc']['gc'] = rates_max['pc']['ent'] * 0.33
 
 # Goblet cell
-rates_max['gc']['ex'] = 0.34  # 0.4
+rates_max['gc']['ex'] = 0.34/10  # 0.4
 
 # Enterocyte
-rates_max['ent']['ex'] = 0.34  # 0.4
+rates_max['ent']['ex'] = 0.34/10  # 0.4
 
 # DCS
 rates_max['dcs']['dcs'] = 0.

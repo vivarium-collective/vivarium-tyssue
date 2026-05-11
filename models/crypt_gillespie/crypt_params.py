@@ -102,5 +102,4 @@ def assign_cell_types(eptm, axis, spatial_prob_func=None, random_seed=None):
         for i in range(n_cells)
     ]
 
-    eptm.face_df["cell_type"] = assigned
-    return eptm
+    return assigned

@@ -147,7 +147,7 @@ def apoptosis_extrusion(
         # Restore prefered_area
         sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
         # Remove the cell division
-        vertex = remove_face(sheet, cell_id, geometry)
+        vertex = remove_face(sheet, cell_id)
         # Update the topology
         sheet.reset_index(order=True)
         # update geometry
