@@ -10,5 +10,4 @@ def register_processes(core):
     core.register_link("ParameterGradient", ParameterGradient)
     core.register_link("AnisotropicTension", AnisotropicTension)
     core.register_link("Gillespie", Gillespie)
-    core.register_link("GillespieTime", GillespieTime)
     return core

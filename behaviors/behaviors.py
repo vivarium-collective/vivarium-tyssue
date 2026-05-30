@@ -142,7 +142,12 @@ def apoptosis_extrusion(
         geometry = GEOMETRY_MAP[geom]
     else:
         geometry = geom
-    cell_id = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
+    try:
+        cell_id = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
+    except:
+        print("Cell not found, skipping event")
+        return
+    sheet.face_df.loc[cell_id, "cell_type"] = "extruding"
     if sheet.face_df.loc[cell_id, "area"] < crit_area:
         # Restore prefered_area
         sheet.face_df.loc[cell_id, "prefered_area"] = 1.0

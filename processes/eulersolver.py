@@ -56,7 +56,7 @@ class EulerSolver(Process):
         "bounds": "map[float]", # bounds the displacement of the vertices at each time step
         "output_columns": "map[list[string]]", # dict containing lists of column names to emit for each dataframe
         "settings": "map",
-        "maps": "map", #map of maps, if using default
+        "maps": "map", #map of maps, leave empty if using default
     }
 
     def initialize(self, config):
@@ -185,6 +185,7 @@ class EulerSolver(Process):
 
     def update(self, inputs, interval):
         print(inputs["global_time"])
+        behavior_update = []
         if len(inputs["behaviors"]) > 0:
             for kwargs in inputs["behaviors"]:
                 func = self.maps["BEHAVIOR_MAP"][kwargs["func"]]
@@ -196,8 +197,7 @@ class EulerSolver(Process):
                 else:
                     self.manager.append(func, **kwargs)
             behavior_update = {"_remove": "all"}
-        else:
-            behavior_update = []
+
         pos = self.current_pos
         dot_r = self.ode_func()
         if self.bounds is not None:

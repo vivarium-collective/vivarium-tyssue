@@ -12,6 +12,7 @@ from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
 from vivarium_tyssue.models.crypt_gillespie.crypt_params import *
 from vivarium_tyssue.models.crypt_gillespie.jump_rates import *
+from vivarium_tyssue.draw import *
 
 
 def get_test_config():
@@ -21,20 +22,20 @@ def get_test_config():
         "tissue_type": "Sheet",
         "parameters": {
             "face_df": {
-                "area_elasticity": 1,
-                "prefered_area": 1,
-                "perimeter_elasticity": 1,
+                "area_elasticity": 1.0,
+                "prefered_area": 1.0,
+                "perimeter_elasticity": 0.5,
                 "prefered_perimeter": 3.5,
             },
             "edge_df": {
-                "line_tension": 0,
-                "is_active": 1,
+                "line_tension": 0.0,
+                "is_active": 1.0,
             },
             "vert_df": {
-                "viscosity": 1,
-                "vessel_elasticity": 1,
+                "viscosity": 0.1,
+                "vessel_elasticity": 1.0,
                 "prefered_radius": 2.5,
-                "is_alive": 1,
+                "is_alive": 1.0,
             }
         },
         "geom": "VesselGeometry",
@@ -330,10 +331,10 @@ def run_test_anisotropic(core, config = None, tf=20, dt=0.1):
 
 def get_test_gillespie_config(
         interval = 0.1,
-        growth_rate= 0.1,
-        shrink_rate=0.1,
-        division_crit=2,
-        apoptosis_crit=0.3
+        growth_rate= 0.02,
+        shrink_rate=0.02,
+        division_crit=1.2,
+        apoptosis_crit=0.1,
     ):
     return {
         "cell_types": cell_types,
@@ -346,6 +347,8 @@ def get_test_gillespie_config(
         "shrink_rate": shrink_rate,
         "division_crit": division_crit,
         "apoptosis_crit": apoptosis_crit,
+        "regulations": regulations,
+        "regulation_loc": regulation_loc
     }
 
 def base_gillespie_spec(interval=0.1):
@@ -356,6 +359,7 @@ def base_gillespie_spec(interval=0.1):
         "config": get_test_gillespie_config(),
         "inputs": {
             "datasets": ["Datasets"],
+            "behaviors": ["Behaviors"],
             "global_time": ["global_time"]
         },
         "outputs": {
@@ -367,23 +371,35 @@ def base_gillespie_spec(interval=0.1):
 
     return spec
 
-def get_test_gillespie_spec(interval=0.1, config=None, tau=1.0, sigma=1.0):
+def get_test_gillespie_spec(interval=0.01, config=None, tau=1.0, sigma=1.0):
     if callable(config):
-        spec = get_test_stochastic_spec(interval=interval, config=config(), tau=tau, sigma=sigma)
+        spec = get_test_spec(interval=interval, config=config())
     else:
-        spec = get_test_stochastic_spec(interval=interval, config=config, tau=tau, sigma=sigma)
+        spec = get_test_spec(interval=interval, config=config)
 
     spec["Tyssue"]["config"]["eptm"] = "crypt_cylinder.hf5"
+    spec["Tyssue"]["config"]["settings"].update(
+        {
+            "radius": 2.5,
+            "axis": "z"
+        }
+    )
     spec["Tyssue"]["config"]["geom"] = "VesselGeometry"
-    spec["Tyssue"]["config"]["effectors"] = ["FaceAreaElasticity", "PerimeterElasticity", "LineTension"]
+    spec["Tyssue"]["config"]["factory"] = "model_factory_vessel"
+    spec["Tyssue"]["config"]["effectors"] = ["FaceAreaElasticity", "PerimeterElasticity", "LineTension", "VesselSurfaceElasticity"]
+    spec["Tyssue"]["config"]["parameters"]["vert_df"]["viscosity"] = 0.05
+    spec["Tyssue"]["config"]["parameters"]["vert_df"]["surface_elasticity"] = 0.1
 
     gillespie_spec = base_gillespie_spec(interval=interval)
     spec.update(gillespie_spec)
     return spec
 
-def run_test_gillespie(core, config = None, tf=20, dt=0.1, tau=1.0, sigma=1.0):
+def run_test_gillespie(core, config = None, tf=10, dt=0.005, tau=1.0, sigma=1.0):
     spec = get_test_gillespie_spec(interval=dt, config=config, tau=tau, sigma=sigma)
-    spec["emitter"] = test_emitter
+    spec["emitter"] = emitter_from_wires({
+        "global_time": ["global_time"],
+        "behaviors": ["Behaviors"],
+})
     sim = Composite(
         {
             "state": spec,
@@ -404,7 +420,7 @@ if __name__ == "__main__":
     from vivarium_tyssue.processes import register_processes, EulerSolver
 
     from tyssue import config
-    from tyssue.draw import create_gif
+    from tyssue.draw import create_gif, create_gif_3d
 
     # create the core object
     core = allocate_core()
@@ -421,10 +437,11 @@ if __name__ == "__main__":
     # history.update_datasets()
     draw_specs = config.draw.sheet_spec()
     draw_specs["face"]["visible"] = True
-    draw_specs["face"]["visible"] = True
     draw_specs["face"]["alpha"] = 1
     draw_specs["face"]["color"] = "blue"
     draw_specs["edge"]["color"] = "black"
+    draw_specs["edge"]["width"] = 0.5
+    draw_specs["edge"]["alpha"] = 0.8
     # create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
 
     # start = time.time()
@@ -490,7 +507,19 @@ if __name__ == "__main__":
     # history.update_datasets()
     # create_gif(history, output="test_anisotropic_behavior.gif", coords = ["x", "y"], **draw_specs, num_frames=200)
 
-    results4, sim4 = run_test_gillespie(core, config=get_test_config(), tf=40, dt=0.1, tau=0.2, sigma=0.1)
+    results4, sim4 = run_test_gillespie(core, config=get_test_config(), tf=72, dt=0.005, tau=0.02, sigma=0.01)
     history = sim4.state["Tyssue"]["instance"].history
     history.update_datasets()
-    create_gif(history, output="test_gillespie.gif", coords = ["x", "z"], **draw_specs, num_frames=200)
+    history.to_archive("gillespie_history.hf5")
+    # create_gif_3d(
+    #     history,
+    #     output="test_gillespie.gif",
+    #     **draw_specs,
+    #     num_frames=144,
+    #     coords=['x', 'y', 'z'],
+    #     dynamic_draw_kwds= [
+    #         crypt_cell_type_kwds
+    #     ],
+    #     legend = CELL_TYPE_COLORS,
+    #     cull_back_edges=True
+    # )
