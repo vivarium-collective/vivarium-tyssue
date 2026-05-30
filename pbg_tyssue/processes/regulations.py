@@ -7,7 +7,6 @@ from process_bigraph import Process, Step
 from pbg_tyssue.maps import *
 
 from tyssue import config
-from tyssue.draw import create_gif
 
 
 def linear_gradient(x, m, c):
