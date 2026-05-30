@@ -1,5 +1,6 @@
 from pprint import pprint
 import time
+import cProfile
 
 from process_bigraph import Process, Composite, Step
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
@@ -25,52 +26,6 @@ def reg_pol(x, K, k):
 
     return y
 
-def f_rates_max(face_df, rates_max, valid_types=None):
-    # Precompute total max rate per cell type
-    rate_per_type = {
-        ct: sum(transitions.values())
-        for ct, transitions in rates_max.items()
-    }
-
-    cell_types = face_df["cell_type"].to_numpy()
-
-    if valid_types is not None:
-        valid_types = set(valid_types)
-
-    rates = np.array([
-        rate_per_type.get(ct, 0.0) if (valid_types is None or ct in valid_types) else 0.0
-        for ct in cell_types
-    ], dtype=float)
-
-    return rates
-
-def f_rate(face_df, cell_uid, cell_type, jump):
-    """
-    Parameters:
-    cell: cell index
-    jump:
-    """
-    rate_max = rates_max[cell_type][jump]
-    rate = rate_max
-    if regulations[cell_type]:
-        regulators = regulations[cell_type][jump]
-        loc = face_df.loc[cell_uid]["y"]
-
-        for regulator, regulation in regulators.items():
-            if (jump + "_" + regulator in K[cell_type]) & (jump + "_" + regulator in k[cell_type]):
-                K_j = K[cell_type][jump + "_" + regulator]
-                k_j = k[cell_type][jump + "_" + regulator]
-                if regulation == "positive":
-                    regulation_function = regulations_map[regulator]
-                    regulation_term = reg_pol(regulation_function(loc), K_j, k_j)
-                    rate *= regulation_term
-                if regulation == "negative":
-                    regulation_function = regulations_map[regulator]
-                    regulation_term = 1 - reg_pol(regulation_function(loc), K_j, k_j)
-                    rate *= regulation_term
-
-    return rate
-
 class Gillespie(Process):
 
     config_schema = {
@@ -84,6 +39,8 @@ class Gillespie(Process):
         "shrink_rate": "float",
         "division_crit": "float",
         "apoptosis_crit": "float",
+        "regulations": "map[map[map[string]]]",
+        "regulation_loc": "map[string]"
     }
 
     def initialize(self, config):
@@ -97,20 +54,70 @@ class Gillespie(Process):
         self.shrink_rate = config["shrink_rate"]
         self.division_crit = config["division_crit"]
         self.apoptosis_crit = config["apoptosis_crit"]
+        self.regulations = config["regulations"]
+        self.regulation_loc = config["regulation_loc"]
+
+    def f_rates_max(self, face_df, valid_types=None):
+        # Precompute total max rate per cell type
+        rate_per_type = {
+            ct: sum(transitions.values())
+            for ct, transitions in self.rates_max.items()
+        }
+
+        cell_types = face_df["cell_type"].to_numpy()
+
+        if valid_types is not None:
+            valid_types = set(valid_types)
+
+        rates = np.array([
+            rate_per_type.get(ct, 0.0) if (valid_types is None or ct in valid_types) else 0.0
+            for ct in cell_types
+        ], dtype=float)
+
+        return rates
 
     def calculate_timestep(self, interval, state):
         # calculate next time-step
         face_df = state["datasets"]["face_df"]
         u0 = np.random.random_sample()
-        max_rates = f_rates_max(face_df, rates_max, valid_types=self.cell_types)
+        max_rates = self.f_rates_max(face_df, valid_types=self.cell_types)
         face_df["max_rate"] = max_rates
         max_total = sum(max_rates)
         time_interval = -np.log(u0) / max_total
         return time_interval
 
+    def f_rate(self, face_df, cell_uid, cell_type, jump):
+        """
+        Parameters:
+        cell: cell index
+        jump:
+        """
+        rate_max = self.rates_max[cell_type][jump]
+        rate = rate_max
+        if self.regulations[cell_type]:
+            regulators = regulations[cell_type][jump]
+            for regulator, regulation in regulators.items():
+                loc = dict(face_df.loc[face_df["unique_id"] == cell_uid][["x", "y", "z"]])
+                kwargs = {}
+                if regulator in self.regulation_loc.keys():
+                    kwargs["axis"] = self.regulation_loc[regulator]
+                if (jump + "_" + regulator in K[cell_type]) & (jump + "_" + regulator in k[cell_type]):
+                    K_j = K[cell_type][jump + "_" + regulator]
+                    k_j = k[cell_type][jump + "_" + regulator]
+                    if regulation == "positive":
+                        regulation_function = regulations_map[regulator]
+                        regulation_term = reg_pol(regulation_function(face_df, cell_uid, **kwargs), K_j, k_j)
+                        rate *= regulation_term
+                    if regulation == "negative":
+                        regulation_function = regulations_map[regulator]
+                        regulation_term = 1 - reg_pol(regulation_function(face_df, cell_uid, **kwargs), K_j, k_j)
+                        rate *= regulation_term
+        return rate
+
     def inputs(self):
         return {
             "datasets": "tyssue_data",
+            "behaviors": "list[node]",
             "global_time": "float",
         }
 
@@ -123,7 +130,7 @@ class Gillespie(Process):
     def update(self, inputs, interval):
         #calculate next time-step
         face_df = inputs["datasets"]["face_df"]
-        max_rates = f_rates_max(face_df, rates_max, valid_types=self.cell_types)
+        max_rates = self.f_rates_max(face_df, valid_types=self.cell_types)
         face_df["max_rate"] = max_rates
         max_total = sum(max_rates)
         # time_interval = _time_interval - interval
@@ -132,9 +139,16 @@ class Gillespie(Process):
         probability = np.divide(max_rates, max_total)
         n_cells = len(face_df)
 
-        #pick cell
-        cell_id = np.random.choice(np.arange(0, n_cells), 1, p=probability)[0]
-        cell_uid = int(face_df.loc[cell_id]["unique_id"])
+        #gather cells already picked for events
+        existing_uids = []
+        if len(inputs["behaviors"]) > 0:
+            existing_uids = {d["cell_uid"] for d in inputs["behaviors"] if "cell_uid" in d.keys()}
+
+        while True:
+            cell_id = np.random.choice(list(face_df.index), 1, p=probability)[0]
+            cell_uid = int(face_df.loc[cell_id, "unique_id"])
+            if (cell_uid not in existing_uids) and (face_df.loc[cell_id]["cell_type"] in self.cell_types):
+                break
         cell_type = face_df.loc[cell_id]["cell_type"]
 
         #pick event
@@ -143,7 +157,7 @@ class Gillespie(Process):
         jump = np.random.choice(jumps, 1, p=proba_j)[0]
 
         #calculate rate of picked event for picked cell
-        rate_event = f_rate(face_df, cell_uid, cell_type, jump)
+        rate_event = self.f_rate(face_df, cell_uid, cell_type, jump)
 
         u1 = np.random.random_sample()
 
