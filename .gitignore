@@ -1,0 +1,15 @@
+
+# Added by pbg-superpowers in-place scaffolder
+.venv/
+.pbg/*
+!.pbg/schemas/
+investigations/*/runs.db
+investigations/*/viz/
+investigations/*/.run.lock
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+reports/assets/*
+!reports/assets/.keep
+.superpowers/brainstorm/

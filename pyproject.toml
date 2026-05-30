@@ -1,0 +1,37 @@
+[project]
+name = "tyssue"
+version = "0.0.0"
+description = "Process-bigraph research workspace"
+requires-python = ">=3.11"
+dependencies = [
+    "process-bigraph",
+    "bigraph-schema",
+    "bigraph-viz>=2.0.3",
+    "pyyaml>=6.0",
+    "jsonschema[format-nongpl]>=4.21",
+    "jinja2>=3.1",
+    "pypdf>=4.0",
+    "matplotlib",
+    "plotly",
+    # Web-based workspace dashboard (server + templates + assets + lib helpers).
+    # Extracted from pbg-template as of v0.5.0; provides the `vivarium-dashboard
+    # serve` CLI invoked by scripts/serve.sh.
+    "vivarium-dashboard",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=7.4"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+# This is a research workspace, not a distributable Python package.
+# bypass-selection skips hatchling's package-discovery step so `pip install -e .`
+# only installs the dependencies above and doesn't try to package the workspace's
+# top-level dirs (datasets/, docs/, models/, …) as Python modules.
+[tool.hatch.build.targets.wheel]
+bypass-selection = true
+
+[tool.uv.sources]
+vivarium-dashboard = { path = "/Users/eranagmon/code/vivarium-dashboard", editable = true }
