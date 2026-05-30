@@ -1,7 +1,7 @@
 [project]
-name = "tyssue"
+name = "pbg-tyssue"
 version = "0.0.0"
-description = "Process-bigraph research workspace"
+description = "Process-bigraph research workspace wrapping the tyssue vertex-model simulator"
 requires-python = ">=3.11"
 dependencies = [
     "process-bigraph",
@@ -13,6 +13,17 @@ dependencies = [
     "pypdf>=4.0",
     "matplotlib",
     "plotly",
+    # Science deps for the tyssue vertex-model processes (EulerSolver, Gillespie, …).
+    # tyssue pulls these transitively but does not declare them all, so pin them
+    # explicitly: scikit-image + vispy (tyssue.draw import chain), quantities
+    # (tyssue.dynamics), tables (HDF5 .hf5 mesh loading via pandas.HDFStore).
+    "tyssue",
+    "pandas",
+    "numpy",
+    "scikit-image",
+    "vispy",
+    "quantities",
+    "tables",
     # Web-based workspace dashboard (server + templates + assets + lib helpers).
     # Extracted from pbg-template as of v0.5.0; provides the `vivarium-dashboard
     # serve` CLI invoked by scripts/serve.sh.
@@ -21,17 +32,22 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4"]
+# Optional viewer stack for the faithful 3D crypt animation (tyssue.draw.create_gif_3d
+# uses ipyvolume). Without it, TissueCryptGif3D falls back to a matplotlib 3D mesh.
+viz3d = ["ipyvolume"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# This is a research workspace, not a distributable Python package.
-# bypass-selection skips hatchling's package-discovery step so `pip install -e .`
-# only installs the dependencies above and doesn't try to package the workspace's
-# top-level dirs (datasets/, docs/, models/, …) as Python modules.
+# The workspace ships one real Python package, pbg_tyssue/, holding the tyssue
+# processes, types, composites and visualizations. Naming it explicitly keeps
+# hatchling from trying to package the other top-level dirs (datasets/, docs/,
+# notes/, …) while still installing pbg_tyssue so bigraph-schema auto-discovery
+# (which keys off importlib.metadata) can find its Process/Step/Visualization
+# subclasses on `allocate_core()`.
 [tool.hatch.build.targets.wheel]
-bypass-selection = true
+packages = ["pbg_tyssue"]
 
 [tool.uv.sources]
 vivarium-dashboard = { path = "/Users/eranagmon/code/vivarium-dashboard", editable = true }
