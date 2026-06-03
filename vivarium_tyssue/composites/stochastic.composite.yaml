@@ -13,6 +13,15 @@ requires:
   types:
   - tyssue_data
   - behaviors
+emitters:
+- address: local:DataFrameParquetEmitter
+  config:
+    out_dir: out/parquet
+  paths:
+  - Datasets/vert_df
+  - Datasets/face_df
+  - Datasets/edge_df
+  - Datasets/cell_df
 parameters:
   interval:
     type: float

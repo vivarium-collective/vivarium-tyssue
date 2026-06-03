@@ -13,3 +13,4 @@ __pycache__/
 workspace/reports/assets/*
 !workspace/reports/assets/.keep
 .superpowers/brainstorm/
+out/

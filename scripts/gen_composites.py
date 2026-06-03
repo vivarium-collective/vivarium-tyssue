@@ -124,6 +124,23 @@ def write(name, *, description, tags, processes, state, parameters=None):
         "description": description,
         "tags": tags,
         "requires": {"processes": processes, "types": ["tyssue_data", "behaviors"]},
+        # Composite default-emitter convention (pbg_superpowers.composite_generator
+        # emitter_defaults / install_default_emitters): ship every tyssue composite
+        # with the DataFrameParquetEmitter sink instead of relying on the dashboard's
+        # RAM/SQLite injection. tyssue's per-tick observables are whole pandas
+        # DataFrames (Datasets/{vert,face,edge,cell}_df) — the JSON SQLiteEmitter
+        # chokes on their numpy.int64 keys and the generic ParquetEmitter can't write
+        # the Object columns; DataFrameParquetEmitter streams each as a long Arrow
+        # table. The runner layers a per-run out_dir + experiment_id partition over
+        # the base config below.
+        "emitters": [{
+            "address": "local:DataFrameParquetEmitter",
+            "config": {"out_dir": "out/parquet"},
+            # The four tyssue dataframe stores. cell_df is absent/empty on plain
+            # Sheets — the emitter simply skips empty/non-DataFrame ports.
+            "paths": ["Datasets/vert_df", "Datasets/face_df",
+                      "Datasets/edge_df", "Datasets/cell_df"],
+        }],
         "parameters": parameters or {"interval": {"type": "float", "default": 0.1, "description": "Solver / step interval (dt)."}},
         "state": state,
     }

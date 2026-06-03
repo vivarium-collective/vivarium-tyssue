@@ -33,6 +33,10 @@ dependencies = [
     # a PEP 508 direct URL is honored by pip, `uv pip install` and `uv sync`
     # alike (the scaffold's machine-local `[tool.uv.sources]` path broke CI).
     "vivarium-dashboard @ git+https://github.com/vivarium-collective/vivarium-dashboard.git",
+    # ParquetEmitter — the workspace's default emitter (see workspace.yaml
+    # runtime.default_emitter and vivarium_tyssue.core). The [parquet] extra pulls
+    # polars/pyarrow/duckdb/fsspec. Not on PyPI; reference the repo directly.
+    "pbg-emitters[parquet] @ git+https://github.com/vivarium-collective/pbg-emitters.git",
 ]
 
 [project.optional-dependencies]

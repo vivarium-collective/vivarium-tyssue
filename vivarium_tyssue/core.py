@@ -22,6 +22,20 @@ def build_core():
     from vivarium_tyssue.data_types import register_types
     core = register_types(core)
 
+    # DataFrameParquetEmitter — the workspace's default emitter. tyssue's per-tick
+    # observables are whole pandas DataFrames (Datasets/vert_df|face_df|edge_df|
+    # cell_df); this table-oriented emitter streams each to its own hive-partitioned
+    # parquet dataset via Arrow, instead of the generic ParquetEmitter's row/flatten
+    # model (which can't write the DataFrame Object columns). Registered so
+    # `local:DataFrameParquetEmitter` resolves when the composite default-emitter
+    # convention installs it. Degrade gracefully if the parquet stack is absent.
+    try:
+        from vivarium_tyssue.emitters import DataFrameParquetEmitter
+        if "DataFrameParquetEmitter" not in core.link_registry:
+            core.register_link("DataFrameParquetEmitter", DataFrameParquetEmitter)
+    except Exception as exc:  # noqa: BLE001
+        print(f"vivarium_tyssue.core: DataFrameParquetEmitter not registered ({type(exc).__name__}: {exc})")
+
     # Simulator processes (EulerSolver, TestRegulations, StochasticLineTension,
     # CellJamming, ParameterGradient, AnisotropicTension, Gillespie). These import
     # tyssue; degrade gracefully if that stack isn't installed.

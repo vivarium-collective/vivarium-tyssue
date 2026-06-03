@@ -40,5 +40,13 @@ simulations: []
 datasets: []
 
 references_bib: workspace/references/papers.bib
+
+# Runtime defaults read by the dashboard. default_emitter selects the emitter the
+# dashboard injects for composite/study runs and reads back for charts. 'parquet'
+# -> ParquetEmitter (pbg-emitters), writing hive-partitioned parquet under
+# <study>/parquet-runs/. Registered in vivarium_tyssue.core.build_core().
+runtime:
+  default_emitter: parquet
+
 server:
   enabled: false
