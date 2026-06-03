@@ -2,7 +2,7 @@
 
 The get_test_*_spec / run_test_* helpers below used to assemble each scenario's
 Composite procedurally. Those scenarios are now declared as data in
-pbg_tyssue/composites/*.composite.yaml (regenerate with
+vivarium_tyssue/composites/*.composite.yaml (regenerate with
 `python scripts/gen_composites.py`) and exercised by tests/test_composites.py.
 This file is kept only as historical reference for the original wiring + the
 __main__ visualization recipes that became the TissueSheetGif / TissueCryptGif3D
@@ -20,9 +20,9 @@ from jupyterlab_server import spec
 from process_bigraph import Step, Process, Composite
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
-from pbg_tyssue.models.crypt_gillespie.crypt_params import *
-from pbg_tyssue.models.crypt_gillespie.jump_rates import *
-from pbg_tyssue.draw import *
+from vivarium_tyssue.models.crypt_gillespie.crypt_params import *
+from vivarium_tyssue.models.crypt_gillespie.jump_rates import *
+from vivarium_tyssue.draw import *
 
 
 def get_test_config():
@@ -426,8 +426,8 @@ if __name__ == "__main__":
     from matplotlib import pyplot as plt
 
     from bigraph_viz import plot_bigraph
-    from pbg_tyssue.data_types import register_types
-    from pbg_tyssue.processes import register_processes, EulerSolver
+    from vivarium_tyssue.data_types import register_types
+    from vivarium_tyssue.processes import register_processes, EulerSolver
 
     from tyssue import config
     from tyssue.draw import create_gif, create_gif_3d

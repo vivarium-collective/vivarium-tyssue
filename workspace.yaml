@@ -2,7 +2,7 @@ schema_version: 2
 name: tyssue
 created: "2026-05-30"
 plugin_version: 0.8.1
-package_path: pbg_tyssue
+package_path: vivarium_tyssue
 
 # The four arrays below start empty; the dashboard populates them as you
 # work. Hand-editing is fine for small adds, but the dashboard's writers

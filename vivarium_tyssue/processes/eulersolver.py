@@ -10,8 +10,8 @@ from bigraph_schema.schema import get_frame_schema
 from process_bigraph import Process, Composite
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
-from pbg_tyssue.maps import *
-from pbg_tyssue.core_maps import GEOMETRY_MAP
+from vivarium_tyssue.maps import *
+from vivarium_tyssue.core_maps import GEOMETRY_MAP
 
 from tyssue.behaviors.event_manager import EventManager
 from tyssue.behaviors.sheet.basic_events import reconnect
@@ -227,8 +227,8 @@ class EulerSolver(Process):
         }
 
 if __name__ == "__main__":
-    from pbg_tyssue.data_types import register_types
-    from pbg_tyssue.processes import register_processes
+    from vivarium_tyssue.data_types import register_types
+    from vivarium_tyssue.processes import register_processes
     import pandas as pd
     from matplotlib import pyplot as plt
     # create the core object

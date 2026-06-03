@@ -5,8 +5,8 @@ import cProfile
 from process_bigraph import Process, Composite, Step
 from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
-from pbg_tyssue.models.crypt_gillespie.crypt_params import *
-from pbg_tyssue.models.crypt_gillespie.jump_rates import *
+from vivarium_tyssue.models.crypt_gillespie.crypt_params import *
+from vivarium_tyssue.models.crypt_gillespie.jump_rates import *
 
 test_rates_max = rates_max.copy()
 del test_rates_max["dcs"]

@@ -1,5 +1,5 @@
 [project]
-name = "pbg-tyssue"
+name = "vivarium-tyssue"
 version = "0.0.0"
 description = "Process-bigraph research workspace wrapping the tyssue vertex-model simulator"
 requires-python = ">=3.11"
@@ -49,11 +49,11 @@ build-backend = "hatchling.build"
 [tool.hatch.metadata]
 allow-direct-references = true
 
-# The workspace ships one real Python package, pbg_tyssue/, holding the tyssue
+# The workspace ships one real Python package, vivarium_tyssue/, holding the tyssue
 # processes, types, composites and visualizations. Naming it explicitly keeps
 # hatchling from trying to package the other top-level dirs (datasets/, docs/,
-# notes/, …) while still installing pbg_tyssue so bigraph-schema auto-discovery
+# notes/, …) while still installing vivarium_tyssue so bigraph-schema auto-discovery
 # (which keys off importlib.metadata) can find its Process/Step/Visualization
 # subclasses on `allocate_core()`.
 [tool.hatch.build.targets.wheel]
-packages = ["pbg_tyssue"]
+packages = ["vivarium_tyssue"]

@@ -1,4 +1,4 @@
-"""Tissue animation Visualization Steps for pbg-tyssue.
+"""Tissue animation Visualization Steps for vivarium-tyssue.
 
 These replace the ``create_gif`` / ``create_gif_3d`` calls that used to live in
 ``tests/tests.py`` ``__main__``. Each scenario there drew the evolving tyssue
@@ -31,7 +31,7 @@ from pathlib import Path
 
 from pbg_superpowers.visualization import Visualization
 
-# Crypt cell-type palette (inlined from pbg_tyssue.draw.kwd_functions so this
+# Crypt cell-type palette (inlined from vivarium_tyssue.draw.kwd_functions so this
 # module doesn't import the tyssue-dependent draw package at discovery time).
 CELL_TYPE_COLORS = {
     "sc": "#DE8968",
@@ -273,7 +273,7 @@ def _tyssue_gif(frames: list[dict], *, coords: list[str], num_frames: int,
             kwargs = dict(output=out_path, num_frames=num_frames, coords=coords,
                           cull_back_edges=cull_back_edges, **draw_specs)
             if crypt:
-                from pbg_tyssue.draw.kwd_functions import crypt_cell_type_kwds
+                from vivarium_tyssue.draw.kwd_functions import crypt_cell_type_kwds
                 kwargs["dynamic_draw_kwds"] = [crypt_cell_type_kwds]
                 kwargs["legend"] = CELL_TYPE_COLORS
             create_gif_3d(history, **kwargs)

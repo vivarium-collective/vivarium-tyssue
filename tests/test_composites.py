@@ -2,7 +2,7 @@
 
 This is the declarative replacement for the procedural ``get_test_*_spec`` /
 ``run_test_*`` helpers in ``tests/tests.py``: the composites now live as
-``pbg_tyssue/composites/*.composite.yaml`` and are exercised here.
+``vivarium_tyssue/composites/*.composite.yaml`` and are exercised here.
 
   - every composite spec parses + loads
   - the workspace core registers all processes, types and visualizations
@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
-COMPOSITES = sorted((ROOT / "pbg_tyssue" / "composites").glob("*.composite.yaml"))
+COMPOSITES = sorted((ROOT / "vivarium_tyssue" / "composites").glob("*.composite.yaml"))
 ALL_NAMES = {"base_solver", "regulation", "stochastic", "jamming", "gradient", "anisotropic", "gillespie"}
 
 
@@ -36,7 +36,7 @@ def test_composite_spec_loads(path):
 def test_core_registers_everything():
     import sys
     sys.path.insert(0, str(ROOT))
-    from pbg_tyssue.core import build_core
+    from vivarium_tyssue.core import build_core
 
     core = build_core()
     reg = core.link_registry
@@ -55,9 +55,9 @@ def test_anisotropic_runs_end_to_end():
     sys.path.insert(0, str(ROOT))
     pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
     from pbg_superpowers.composite_spec import load_spec, build_composite_from_spec
-    from pbg_tyssue.core import build_core
+    from vivarium_tyssue.core import build_core
 
     core = build_core()
-    spec = load_spec(ROOT / "pbg_tyssue" / "composites" / "anisotropic.composite.yaml")
+    spec = load_spec(ROOT / "vivarium_tyssue" / "composites" / "anisotropic.composite.yaml")
     comp = build_composite_from_spec(spec, overrides={"interval": 0.1}, core=core)
     comp.run(2)  # smoke: a couple of solver steps

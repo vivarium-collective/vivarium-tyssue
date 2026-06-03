@@ -1,6 +1,6 @@
 from tyssue.behaviors.sheet.apoptosis_events import apoptosis
 from tyssue.behaviors.sheet.basic_events import contraction
-from pbg_tyssue.behaviors import *
+from vivarium_tyssue.behaviors import *
 
 BEHAVIOR_MAP = {
     "apoptosis_basic": apoptosis_cell,

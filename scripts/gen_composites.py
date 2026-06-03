@@ -1,11 +1,11 @@
-"""Generate pbg_tyssue/composites/*.composite.yaml from the canonical configs.
+"""Generate vivarium_tyssue/composites/*.composite.yaml from the canonical configs.
 
 This replaces the old `get_test_*_spec()` helpers in tests/tests.py: each scenario
 that used to be assembled procedurally inside a test function is emitted here as a
 declarative `*.composite.yaml` spec the dashboard can discover and run directly.
 
 The gillespie crypt parameters (rates_max / K / k / regulations / regulation_loc)
-are resolved from pbg_tyssue.models.crypt_gillespie.jump_rates so the spec stays a
+are resolved from vivarium_tyssue.models.crypt_gillespie.jump_rates so the spec stays a
 single source of truth with the model code rather than a hand-copied duplicate.
 
 Run:  python scripts/gen_composites.py
@@ -19,12 +19,12 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
-OUT = ROOT / "pbg_tyssue" / "composites"
+OUT = ROOT / "vivarium_tyssue" / "composites"
 OUT.mkdir(parents=True, exist_ok=True)
 
 # Resolve the crypt-model parameter tables straight from the model module.
-from pbg_tyssue.models.crypt_gillespie import jump_rates as jr  # noqa: E402
-from pbg_tyssue.models.crypt_gillespie import crypt_params as cp  # noqa: E402
+from vivarium_tyssue.models.crypt_gillespie import jump_rates as jr  # noqa: E402
+from vivarium_tyssue.models.crypt_gillespie import crypt_params as cp  # noqa: E402
 
 
 # --------------------------------------------------------------------------
@@ -327,4 +327,4 @@ write(
     },
 )
 
-print("\nDone — 7 composite specs written to pbg_tyssue/composites/")
+print("\nDone — 7 composite specs written to vivarium_tyssue/composites/")

@@ -1,4 +1,4 @@
-# pbg-tyssue
+# vivarium-tyssue
 
 A process-bigraph research workspace wrapping the [tyssue](https://github.com/DamCB/tyssue)
 vertex-model simulator. Converted from
@@ -10,7 +10,7 @@ are now **Visualization Steps**. Launches in the vivarium-dashboard.
 ## Layout
 
 ```
-pbg_tyssue/
+vivarium_tyssue/
 ├── core.py                 build_core() — registers processes, types, viz with the core
 ├── data_types.py           custom schema types (tyssue_data, behaviors, tyssue_dset, frame)
 ├── core_maps.py, maps/     geometry / effector / factory / behavior lookups (fork-resilient)
@@ -24,7 +24,7 @@ scripts/gen_composites.py   regenerates composites/ from the canonical configs
 
 ## Composites
 
-| Composite (`pbg_tyssue.composites.*`) | Processes added on the EulerSolver | Mesh / geometry | Runs on stock tyssue? |
+| Composite (`vivarium_tyssue.composites.*`) | Processes added on the EulerSolver | Mesh / geometry | Runs on stock tyssue? |
 |---|---|---|---|
 | `base_solver`  | — (pure mechanical relaxation)        | cylinder · VesselGeometry | ✗ needs fork |
 | `regulation`   | TestRegulations (periodic division)   | cylinder · VesselGeometry | ✗ needs fork |

@@ -19,26 +19,26 @@ def build_core():
     core = allocate_core()
 
     # Custom schema types (tyssue_data, behaviors, tyssue_dset, frame).
-    from pbg_tyssue.data_types import register_types
+    from vivarium_tyssue.data_types import register_types
     core = register_types(core)
 
     # Simulator processes (EulerSolver, TestRegulations, StochasticLineTension,
     # CellJamming, ParameterGradient, AnisotropicTension, Gillespie). These import
     # tyssue; degrade gracefully if that stack isn't installed.
     try:
-        from pbg_tyssue.processes import register_processes
+        from vivarium_tyssue.processes import register_processes
         core = register_processes(core)
     except Exception as exc:  # noqa: BLE001 — best-effort; surface but don't crash
-        print(f"pbg_tyssue.core: tyssue processes not registered ({type(exc).__name__}: {exc})")
+        print(f"vivarium_tyssue.core: tyssue processes not registered ({type(exc).__name__}: {exc})")
 
     # Visualization Steps (TissueSheetGif, TissueCryptGif3D).
     try:
-        from pbg_tyssue import visualizations as _viz
+        from vivarium_tyssue import visualizations as _viz
         for _name in getattr(_viz, "__all__", []):
             _cls = getattr(_viz, _name)
             if _name not in core.link_registry:
                 core.register_link(_name, _cls)
     except Exception as exc:  # noqa: BLE001
-        print(f"pbg_tyssue.core: visualizations not registered ({type(exc).__name__}: {exc})")
+        print(f"vivarium_tyssue.core: visualizations not registered ({type(exc).__name__}: {exc})")
 
     return core

@@ -14,7 +14,7 @@ pbg-superpowers workspace.
 ## What this workspace is
 
 `tyssue` is a pbg-superpowers workspace. The Python package
-lives under `pbg_tyssue/`; investigations live under
+lives under `vivarium_tyssue/`; investigations live under
 `investigations/<slug>/`; per-study YAML + runs live under
 `studies/<slug>/`. See [`README.md`](README.md) and
 [`NEXT_STEPS.md`](NEXT_STEPS.md) for the workspace's purpose + onboarding

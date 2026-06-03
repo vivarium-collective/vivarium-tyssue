@@ -4,7 +4,7 @@ import numpy as np
 
 from process_bigraph import Process, Step
 
-from pbg_tyssue.maps import *
+from vivarium_tyssue.maps import *
 
 from tyssue import config
 

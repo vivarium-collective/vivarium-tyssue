@@ -51,7 +51,7 @@ def crypt_cell_type_kwds(sheet, alpha=1.0):
     return kwds
 
 if __name__ == "__main__":
-    from pbg_tyssue.models.crypt_gillespie.crypt_params import spatial_prob, assign_cell_types
+    from vivarium_tyssue.models.crypt_gillespie.crypt_params import spatial_prob, assign_cell_types
     from tyssue import Sheet
 
     sheet = Sheet("test", load_datasets("test_square.hf5"))
