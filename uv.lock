@@ -1535,64 +1535,6 @@ wheels = [
 ]
 
 [[package]]
-name = "pbg-tyssue"
-version = "0.0.0"
-source = { editable = "." }
-dependencies = [
-    { name = "bigraph-schema" },
-    { name = "bigraph-viz" },
-    { name = "jinja2" },
-    { name = "jsonschema", extra = ["format-nongpl"] },
-    { name = "matplotlib" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "pbg-superpowers" },
-    { name = "plotly" },
-    { name = "process-bigraph" },
-    { name = "pypdf" },
-    { name = "pyyaml" },
-    { name = "quantities" },
-    { name = "scikit-image" },
-    { name = "tables" },
-    { name = "tyssue" },
-    { name = "vispy" },
-    { name = "vivarium-dashboard" },
-]
-
-[package.optional-dependencies]
-dev = [
-    { name = "pytest" },
-]
-viz3d = [
-    { name = "ipyvolume" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "bigraph-schema" },
-    { name = "bigraph-viz", specifier = ">=2.0.3" },
-    { name = "ipyvolume", marker = "extra == 'viz3d'" },
-    { name = "jinja2", specifier = ">=3.1" },
-    { name = "jsonschema", extras = ["format-nongpl"], specifier = ">=4.21" },
-    { name = "matplotlib" },
-    { name = "numpy" },
-    { name = "pandas" },
-    { name = "pbg-superpowers" },
-    { name = "plotly" },
-    { name = "process-bigraph" },
-    { name = "pypdf", specifier = ">=4.0" },
-    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4" },
-    { name = "pyyaml", specifier = ">=6.0" },
-    { name = "quantities" },
-    { name = "scikit-image" },
-    { name = "tables" },
-    { name = "tyssue" },
-    { name = "vispy" },
-    { name = "vivarium-dashboard", editable = "../vivarium-dashboard" },
-]
-provides-extras = ["dev", "viz3d"]
-
-[[package]]
 name = "pexpect"
 version = "4.9.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2817,6 +2759,64 @@ requires-dist = [
     { name = "pyyaml" },
 ]
 provides-extras = ["viz", "dev"]
+
+[[package]]
+name = "vivarium-tyssue"
+version = "0.0.0"
+source = { editable = "." }
+dependencies = [
+    { name = "bigraph-schema" },
+    { name = "bigraph-viz" },
+    { name = "jinja2" },
+    { name = "jsonschema", extra = ["format-nongpl"] },
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pbg-superpowers" },
+    { name = "plotly" },
+    { name = "process-bigraph" },
+    { name = "pypdf" },
+    { name = "pyyaml" },
+    { name = "quantities" },
+    { name = "scikit-image" },
+    { name = "tables" },
+    { name = "tyssue" },
+    { name = "vispy" },
+    { name = "vivarium-dashboard" },
+]
+
+[package.optional-dependencies]
+dev = [
+    { name = "pytest" },
+]
+viz3d = [
+    { name = "ipyvolume" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "bigraph-schema" },
+    { name = "bigraph-viz", specifier = ">=2.0.3" },
+    { name = "ipyvolume", marker = "extra == 'viz3d'" },
+    { name = "jinja2", specifier = ">=3.1" },
+    { name = "jsonschema", extras = ["format-nongpl"], specifier = ">=4.21" },
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "pbg-superpowers" },
+    { name = "plotly" },
+    { name = "process-bigraph" },
+    { name = "pypdf", specifier = ">=4.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.4" },
+    { name = "pyyaml", specifier = ">=6.0" },
+    { name = "quantities" },
+    { name = "scikit-image" },
+    { name = "tables" },
+    { name = "tyssue" },
+    { name = "vispy" },
+    { name = "vivarium-dashboard", editable = "../vivarium-dashboard" },
+]
+provides-extras = ["dev", "viz3d"]
 
 [[package]]
 name = "wcwidth"

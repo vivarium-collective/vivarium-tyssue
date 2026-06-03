@@ -24,7 +24,7 @@ state:
     address: local:EulerSolver
     config:
       name: Test Cylinder
-      eptm: datasets/test_cylinder.hf5
+      eptm: workspace/datasets/test_cylinder.hf5
       tissue_type: Sheet
       parameters:
         face_df:

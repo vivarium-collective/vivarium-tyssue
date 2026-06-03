@@ -35,7 +35,7 @@ from vivarium_tyssue.models.crypt_gillespie import crypt_params as cp  # noqa: E
 def cylinder_config():
     return {
         "name": "Test Cylinder",
-        "eptm": "datasets/test_cylinder.hf5",
+        "eptm": "workspace/datasets/test_cylinder.hf5",
         "tissue_type": "Sheet",
         "parameters": {
             "face_df": {
@@ -67,7 +67,7 @@ def cylinder_config():
 def flat_config():
     return {
         "name": "Test Square",
-        "eptm": "datasets/test_square.hf5",
+        "eptm": "workspace/datasets/test_square.hf5",
         "tissue_type": "Sheet",
         "parameters": {
             "face_df": {
@@ -265,7 +265,7 @@ write(
 
 # --- 7. gillespie crypt model ------------------------------------------------
 gillespie_cfg = cylinder_config()
-gillespie_cfg["eptm"] = "datasets/crypt_cylinder.hf5"
+gillespie_cfg["eptm"] = "workspace/datasets/crypt_cylinder.hf5"
 gillespie_cfg["settings"].update({"radius": 2.5, "axis": "z"})
 gillespie_cfg["geom"] = "VesselGeometry"
 gillespie_cfg["factory"] = "model_factory_vessel"

@@ -25,7 +25,7 @@ state:
     address: local:EulerSolver
     config:
       name: Test Square
-      eptm: datasets/test_square.hf5
+      eptm: workspace/datasets/test_square.hf5
       tissue_type: Sheet
       parameters:
         face_df:

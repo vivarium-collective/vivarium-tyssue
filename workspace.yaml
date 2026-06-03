@@ -4,6 +4,20 @@ created: "2026-05-30"
 plugin_version: 0.8.1
 package_path: vivarium_tyssue
 
+# Directory layout — relocate the pbg-template research dirs under a single
+# top-level workspace/ dir. Any logical key omitted here falls back to its flat
+# default (so .pbg/, scripts/, tests/, docs/ stay at the repo root, and the
+# Python package stays at package_path above). Resolved by
+# pbg_superpowers.workspace_paths.WorkspacePaths / `paths --env`.
+layout:
+  studies: workspace/studies
+  investigations: workspace/investigations
+  references: workspace/references
+  datasets: workspace/datasets
+  notes: workspace/notes
+  experiments: workspace/experiments
+  reports: workspace/reports
+
 # The four arrays below start empty; the dashboard populates them as you
 # work. Hand-editing is fine for small adds, but the dashboard's writers
 # also keep cross-references (studies, runs, viz wiring) consistent.
@@ -25,6 +39,6 @@ simulations: []
 # the Inputs tab "Attach dataset" action.
 datasets: []
 
-references_bib: references/papers.bib
+references_bib: workspace/references/papers.bib
 server:
   enabled: false

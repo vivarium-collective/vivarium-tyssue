@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Stage 5: add a BibTeX reference + claim mapping.
-# Prompts for a BibTeX entry, validates the key is unique, writes to references/papers.bib.
-# Optionally maps the key to one or more claim IDs in references/claims.yaml.
+# Prompts for a BibTeX entry, validates the key is unique, writes to the workspace's
+# references dir (resolved from workspace.yaml `layout:`, default `references/`):
+# papers.bib for the entry and claims.yaml for the key->claim mapping.
 set -euo pipefail
 
 WS_ROOT="$(pwd)"
@@ -25,10 +26,12 @@ print(m.group(1))
 echo "extracted key: $BIB_KEY"
 
 python3 -c "
-import re, sys
+import re, sys, yaml
 from pathlib import Path
 ws_root = Path('$WS_ROOT')
-bib_path = ws_root / 'references' / 'papers.bib'
+_cfg = yaml.safe_load((ws_root / 'workspace.yaml').read_text()) or {}
+_refs = ws_root / ((_cfg.get('layout') or {}).get('references') or 'references')
+bib_path = _refs / 'papers.bib'
 existing = bib_path.read_text() if bib_path.exists() else ''
 existing_keys = set(re.findall(r'@\w+\{([A-Za-z0-9_:-]+),', existing))
 if '$BIB_KEY' in existing_keys:
@@ -48,7 +51,9 @@ if [ -n "$CLAIMS" ]; then
 import yaml
 from pathlib import Path
 ws_root = Path('$WS_ROOT')
-yp = ws_root / 'references' / 'claims.yaml'
+_cfg = yaml.safe_load((ws_root / 'workspace.yaml').read_text()) or {}
+_refs = ws_root / ((_cfg.get('layout') or {}).get('references') or 'references')
+yp = _refs / 'claims.yaml'
 data = yaml.safe_load(yp.read_text()) or {'claims': {}}
 for c in [s.strip() for s in '$CLAIMS'.split(',') if s.strip()]:
     existing = data['claims'].get(c)
