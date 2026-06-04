@@ -14,3 +14,5 @@ workspace/reports/assets/*
 !workspace/reports/assets/.keep
 .superpowers/brainstorm/
 out/
+
+.DS_Store
