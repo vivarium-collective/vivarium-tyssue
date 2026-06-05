@@ -1,0 +1,112 @@
+name: Build and Push Workspace Image
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          submodules: recursive
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Lowercase image name
+        id: img
+        run: echo "name=${IMAGE_NAME,,}" >> "$GITHUB_OUTPUT"
+
+      - name: Extract metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ steps.img.outputs.name }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-,format=short
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # Sync GHCR package visibility to match the source repo. GHCR defaults
+      # new packages to private even when the source repo is public, which
+      # blocks anonymous `docker pull`. This step PATCHes the package once
+      # the image is published so the package's visibility tracks the repo's.
+      # Skipped on pull_request (no push happened) and on the very first push
+      # before the package exists (the API returns 404, which we treat as
+      # "package not yet registered, try again next run" rather than failing).
+      - name: Sync GHCR package visibility to repo visibility
+        if: ${{ github.event_name != 'pull_request' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_VISIBILITY: ${{ github.event.repository.visibility }}
+          OWNER_TYPE: ${{ github.repository_owner_type }}
+          OWNER: ${{ github.repository_owner }}
+          IMAGE: ${{ steps.img.outputs.name }}
+        run: |
+          set -euo pipefail
+          # Image name from metadata is "<owner>/<repo>"; the package name is
+          # just "<repo>".
+          PKG="${IMAGE##*/}"
+          # Pick endpoint by owner type. User and Organization differ.
+          if [ "$OWNER_TYPE" = "Organization" ]; then
+            ENDPOINT="/orgs/${OWNER}/packages/container/${PKG}/visibility"
+          else
+            ENDPOINT="/user/packages/container/${PKG}/visibility"
+          fi
+          echo "syncing ghcr.io/${IMAGE} visibility to '${REPO_VISIBILITY}' via ${ENDPOINT}"
+          # 204 = success (gh exits 0).
+          # 404 = package doesn't exist yet (first push race) — treat as soft success.
+          # 403 = token lacks admin:packages on this owner's packages — warn but don't
+          # fail; the maintainer can flip visibility manually one time, then the next
+          # run's PATCH will be a no-op (already at target visibility).
+          if RESULT=$(gh api -X PATCH "${ENDPOINT}" \
+              -f visibility="${REPO_VISIBILITY}" \
+              -H "Accept: application/vnd.github+json" \
+              --silent 2>&1); then
+            echo "ok: visibility synced"
+          else
+            case "$RESULT" in
+              *"Not Found"*|*"404"*)
+                echo "package not registered yet (first run?); skipping" ;;
+              *"admin:packages"*|*"403"*)
+                echo "::warning::GITHUB_TOKEN lacks admin:packages for this owner; visibility not synced (toggle once via GitHub UI)" ;;
+              *)
+                echo "::warning::unexpected error: ${RESULT}" ;;
+            esac
+          fi

@@ -1,3 +1,13 @@
+"""LEGACY — superseded by declared composites.
+
+The get_test_*_spec / run_test_* helpers below used to assemble each scenario's
+Composite procedurally. Those scenarios are now declared as data in
+vivarium_tyssue/composites/*.composite.yaml (regenerate with
+`python scripts/gen_composites.py`) and exercised by tests/test_composites.py.
+This file is kept only as historical reference for the original wiring + the
+__main__ visualization recipes that became the TissueSheetGif / TissueCryptGif3D
+Visualization Steps. It is not part of the workspace's test suite.
+"""
 import numpy as np
 import time
 from pprint import pprint

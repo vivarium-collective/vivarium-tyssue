@@ -17,7 +17,6 @@ from tyssue.behaviors.event_manager import EventManager
 from tyssue.behaviors.sheet.basic_events import reconnect
 from tyssue.core.history import History
 from tyssue.io.hdf5 import load_datasets
-from tyssue.draw import create_gif
 from tyssue import config
 
 log = logging.getLogger(__name__)
