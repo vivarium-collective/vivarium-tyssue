@@ -40,6 +40,9 @@ CELL_TYPE_COLORS = {
     "gc": "#45B53E",
     "extruding": "#000000",
     "dividing": "#feeda3",
+    "healthy": "#4a90d9",   # blue — normal epithelium
+    "tumor": "#c0392b",     # red — tumor cells
+    "stem": "#8e44ad",      # purple — cancer stem cells
 }
 
 
