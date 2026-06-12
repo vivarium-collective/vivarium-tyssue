@@ -89,6 +89,23 @@ class EulerSolver(Process):
             self.bounds = self.config["bounds"]
         else:
             self.bounds = None
+        # Normalize any StringDtype columns from parameter assignment (pandas 3.0).
+        self._coerce_string_columns()
+
+    def _coerce_string_columns(self):
+        """pandas 3.0 gives scalar-string column assignments (e.g. ``cell_type``)
+        a ``StringDtype``, which bigraph-schema's ``get_frame_schema`` can't
+        introspect ('StringDtype' object has no attribute 'fields'). Coerce any
+        such columns back to plain object dtype on the live epithelium dataframes
+        so both ``outputs()`` (schema) and emission work."""
+        import pandas as pd
+        for df_name in ("vert_df", "edge_df", "face_df", "cell_df"):
+            df = getattr(self.eptm, df_name, None)
+            if df is None or isinstance(df, dict):
+                continue
+            for col in df.columns:
+                if isinstance(df[col].dtype, pd.StringDtype):
+                    df[col] = df[col].astype(object)
 
     def output_dfs(self):
         output_columns = self.config.get("output_columns", {})
@@ -215,6 +232,10 @@ class EulerSolver(Process):
             network_changed = False
 
         self.eptm.network_changed = False
+
+        # Behaviors (differentiation, division) may re-introduce StringDtype
+        # cell_type columns under pandas 3.0; coerce before schema/emission.
+        self._coerce_string_columns()
 
         self.record(inputs["global_time"])
 

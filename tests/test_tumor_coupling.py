@@ -88,7 +88,9 @@ def test_seed_step_differentiates_focus():
     assert new_types.count("tumor") == 2 and new_types.count("stem") == 1
 
 
-def test_flux_step_fires_division_and_apoptosis():
+def test_flux_step_relabel_default():
+    # Default (fixed-topology fate) mode: tumor birth relabels a stem cell -> tumor,
+    # healthy death relabels a healthy cell -> dead. All behaviors are differentiations.
     np.random.seed(0)
     proc = _make_proc()
     proc._seeded = True  # skip seeding
@@ -96,9 +98,26 @@ def test_flux_step_fires_division_and_apoptosis():
     fluxes = {"T_birth": 1.0, "H_death": 1.0, "T_death": 0.0,
               "H_birth": 0.0, "C_birth": 0.0, "C_death": 0.0}
     out = proc.update({"fluxes": fluxes, "datasets": ds, "global_time": 5.0}, 1.0)
+    funcs = [b["func"] for b in out["behaviors"]]
+    new_types = sorted(b["new_type"] for b in out["behaviors"])
+    assert all(f == "differentiation" for f in funcs)
+    assert new_types == ["dead", "tumor"]  # healthy->dead, stem->tumor (C->T)
+    assert out["healthy_deaths"] == 1.0 and out["tumor_births"] == 1.0
+    assert out["tumor_count"] == 2.0 and out["healthy_count"] == 2.0 and out["dead_count"] == 0.0
+
+
+def test_flux_step_topology_mode_fires_real_ops():
+    # topology_ops=True uses the real tyssue cell_division / remove_face behaviors.
+    np.random.seed(0)
+    proc = _make_proc()
+    proc.topology_ops = True
+    proc._seeded = True
+    ds = _datasets(["tumor", "tumor", "healthy", "healthy", "stem"])
+    fluxes = {"T_birth": 1.0, "H_death": 1.0, "T_death": 0.0,
+              "H_birth": 0.0, "C_birth": 0.0, "C_death": 0.0}
+    out = proc.update({"fluxes": fluxes, "datasets": ds, "global_time": 5.0}, 1.0)
     funcs = sorted(b["func"] for b in out["behaviors"])
-    # one tumor birth (divide_crypt or differentiation of stem) + one healthy death
-    assert "apoptosis_extrusion" in funcs
+    assert "apoptosis_extrusion" in funcs  # real extrusion (remove_face)
     assert out["healthy_deaths"] == 1.0 and out["tumor_births"] == 1.0
     assert out["tumor_count"] == 2.0 and out["healthy_count"] == 2.0
 

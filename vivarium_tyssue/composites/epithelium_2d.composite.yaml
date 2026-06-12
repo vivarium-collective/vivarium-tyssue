@@ -10,15 +10,10 @@ requires:
   types:
   - tyssue_data
   - behaviors
-emitters:
-- address: local:DataFrameParquetEmitter
-  config:
-    out_dir: out/parquet
-  paths:
-  - Datasets/vert_df
-  - Datasets/face_df
-  - Datasets/edge_df
-  - Datasets/cell_df
+# No DataFrameParquetEmitter (pyarrow can't merge the object-dtype cell_type
+# column across frames). Study viz read runs.db (SQLite, injected by the
+# dashboard), so parquet isn't needed.
+emitters: []
 parameters:
   interval:
     type: float
@@ -38,6 +33,7 @@ state:
           prefered_area: 1.0
           perimeter_elasticity: 0.1
           prefered_perimeter: 3.6
+          cell_type: healthy
           is_alive: 1.0
         edge_df:
           line_tension: 0.0

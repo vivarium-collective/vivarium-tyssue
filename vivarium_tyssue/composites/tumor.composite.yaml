@@ -12,24 +12,20 @@ requires:
   processes:
   - EulerSolver
   - TumorCoupling
-  - CopasiUTCProcess
   types:
   - tyssue_data
   - behaviors
-emitters:
-- address: local:DataFrameParquetEmitter
-  config:
-    out_dir: out/parquet
-  paths:
-  - Datasets/vert_df
-  - Datasets/face_df
-  - Datasets/edge_df
-  - Datasets/cell_df
+# No DataFrameParquetEmitter here: pyarrow 24 can't merge the object-dtype
+# cell_type column across frames (large_string vs string). The study viz read
+# runs.db (SQLite), which the dashboard injects at run time, so parquet isn't
+# needed. Leaving emitters empty keeps standalone runs clean.
+emitters: []
 parameters:
   interval:
     type: float
-    default: 1.0
-    description: Solver / coupling step (dt).
+    default: 0.1
+    description: Solver / coupling step (dt). 0.1 keeps the vertex-model mechanics
+      stable (larger steps overflow); COPASI advances by this dt each step.
 state:
   Tyssue:
     _type: process
@@ -44,6 +40,7 @@ state:
           prefered_area: 1.0
           perimeter_elasticity: 0.1
           prefered_perimeter: 3.6
+          cell_type: healthy
           is_alive: 1.0
         edge_df:
           line_tension: 0.0
@@ -60,7 +57,7 @@ state:
       factory: model_factory
       settings:
         threshold_length: 0.03
-      auto_reconnect: false
+      auto_reconnect: true
       bounds: {}
       output_columns: {}
       maps: {}
@@ -77,26 +74,15 @@ state:
       behaviors_update:
       - Behaviors
     interval: ${interval}
-  Copasi:
-    _type: process
-    address: local:CopasiUTCProcess
-    config:
-      model_source: workspace/datasets/BIOMD0000000903.xml
-      time: 1.0
-      intervals: 10
-    inputs: {}
-    outputs:
-      fluxes:
-      - Fluxes
-      species_concentrations:
-      - Species
-      time:
-      - SbmlTime
-    interval: ${interval}
   TumorCoupling:
     _type: process
     address: local:TumorCoupling
     config:
+      # COPASI is owned internally (model_source); see the process docstring for
+      # why fluxes aren't passed through a shared store.
+      model_source: workspace/datasets/BIOMD0000000903.xml
+      copasi_time: 1.0
+      copasi_intervals: 10
       birth_fluxes:
         tumor: Induction of tumor cell
         healthy: Increase in the healthy cell in the system
@@ -105,13 +91,15 @@ state:
         tumor: Removal of tumor cell y immune cell and other immune response
         healthy: Decrase of healthy cell due to cancer
         stem: Removal of stem cell from the system
+      # scales convert SBML fluxes (O(1e3-1e7)) into mesh events at interval=0.1;
+      # tuned so tumor expands and healthy declines on a watchable cadence.
       scales:
-        tumor_births: 1.0e-6
-        tumor_deaths: 1.0e-6
-        healthy_births: 1.0e-7
-        healthy_deaths: 3.0e-8
-        stem_births: 3.0e-7
-        stem_deaths: 1.0e-4
+        tumor_births: 2.0e-6
+        tumor_deaths: 8.0e-7
+        healthy_births: 6.0e-8
+        healthy_deaths: 1.2e-7
+        stem_births: 6.0e-7
+        stem_deaths: 2.0e-5
       geom: SheetGeometry
       dt: 1.0
       growth_rate: 0.1
@@ -119,11 +107,9 @@ state:
       division_crit: 0.5
       apoptosis_crit: 2.0
       seed:
-        tumor: 3
-        stem: 1
+        tumor: 8
+        stem: 2
     inputs:
-      fluxes:
-      - Fluxes
       datasets:
       - Datasets
       global_time:
@@ -149,12 +135,11 @@ state:
       - healthy_count
       stem_count:
       - stem_count
+      dead_count:
+      - dead_count
     interval: ${interval}
   Network Changed: false
   Behaviors: {}
-  Fluxes: {}
-  Species: {}
-  SbmlTime: []
   tumor_births: 0.0
   tumor_deaths: 0.0
   healthy_births: 0.0
@@ -164,3 +149,4 @@ state:
   tumor_count: 0.0
   healthy_count: 0.0
   stem_count: 0.0
+  dead_count: 0.0

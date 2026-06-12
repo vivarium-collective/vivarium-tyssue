@@ -916,9 +916,9 @@ state:
         edge_df: {line_tension: 0.0, is_active: 1.0}
         vert_df: {viscosity: 1.0, is_alive: 1.0}
       geom: SheetGeometry
-      effectors: [FaceAreaElasticity, PerimeterElasticity]
+      effectors: [LineTension, FaceAreaElasticity, PerimeterElasticity]
       ref_effector: FaceAreaElasticity
-      factory: model_factory_bound
+      factory: model_factory
       settings: {threshold_length: 0.03}
       auto_reconnect: true
       bounds: {}
@@ -936,7 +936,7 @@ state:
   Behaviors: {}
 ```
 
-> Copy the `emitters:` and `parameters:` blocks verbatim from `stochastic.composite.yaml`. Drop `LineTension` from `effectors` since there's no stochastic tension driver (keep area + perimeter elasticity).
+> **IMPORTANT (verified):** use `factory: model_factory` and `effectors: [LineTension, FaceAreaElasticity, PerimeterElasticity]` / `ref_effector: FaceAreaElasticity` — this exactly mirrors `anisotropic.composite.yaml`, the one composite the existing suite runs end-to-end. Do NOT use `model_factory_bound` (it is not registered in the installed tyssue — `stochastic` fails with `KeyError: 'model_factory_bound'`). Copy the `emitters:` block verbatim from `stochastic.composite.yaml`. `line_tension` defaults to 0.0 so the LineTension effector is inert (pure area+perimeter mechanics).
 
 - [ ] **Step 4: Run, expect pass**
 
@@ -1008,9 +1008,9 @@ state:
         edge_df: {line_tension: 0.0, is_active: 1.0}
         vert_df: {viscosity: 1.0, is_alive: 1.0}
       geom: SheetGeometry
-      effectors: [FaceAreaElasticity, PerimeterElasticity]
+      effectors: [LineTension, FaceAreaElasticity, PerimeterElasticity]
       ref_effector: FaceAreaElasticity
-      factory: model_factory_bound
+      factory: model_factory
       settings: {threshold_length: 0.03}
       auto_reconnect: true
       bounds: {}

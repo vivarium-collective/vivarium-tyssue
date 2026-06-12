@@ -6,7 +6,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SPECS = ROOT / "vivarium_tyssue" / "composites"
 
 
-def _run(spec_name, steps, interval=1.0):
+def _run(spec_name, steps, interval=0.1):  # 0.1 keeps the vertex mechanics stable
     import sys
     sys.path.insert(0, str(ROOT))
     pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
@@ -20,12 +20,25 @@ def _run(spec_name, steps, interval=1.0):
     return comp
 
 
+def _cell_type_counts(comp):
+    from collections import Counter
+    face_df = comp.state["Tyssue"]["instance"].eptm.face_df
+    return Counter(face_df["cell_type"])
+
+
 def test_baseline_runs_without_behaviors():
-    comp = _run("epithelium_2d", 3)
-    assert comp is not None  # smoke: flat-sheet mechanics complete
+    comp = _run("epithelium_2d", 5)
+    # Mechanics-only: every cell stays healthy (no births/deaths).
+    counts = _cell_type_counts(comp)
+    assert set(counts) == {"healthy"}
 
 
-def test_tumor_composite_runs_end_to_end():
-    # Smoke: COPASI + TumorCoupling + EulerSolver step together without error.
-    comp = _run("tumor", 6)
-    assert comp is not None
+def test_tumor_composite_drives_cell_fate():
+    # COPASI fluxes drive tumor invasion: after a short run the mesh carries tumor
+    # cells (and some dead) that the baseline never produces.
+    import numpy as np
+    np.random.seed(0)
+    comp = _run("tumor", 25)
+    counts = _cell_type_counts(comp)
+    assert counts.get("tumor", 0) > 0, dict(counts)
+    assert counts.get("healthy", 0) < 206, dict(counts)  # some healthy were consumed

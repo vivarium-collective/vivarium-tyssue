@@ -43,6 +43,7 @@ CELL_TYPE_COLORS = {
     "healthy": "#4a90d9",   # blue — normal epithelium
     "tumor": "#c0392b",     # red — tumor cells
     "stem": "#8e44ad",      # purple — cancer stem cells
+    "dead": "#2b2b2b",      # near-black — cells killed under SBML control
 }
 
 

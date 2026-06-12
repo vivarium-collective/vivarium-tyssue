@@ -157,6 +157,32 @@ Compare on four metrics (drive the verdict + charts):
 Feature branch `feat/tumor-tyssue-investigation` → **draft PR**. (PR base —
 `vivarium-tyssue` working branch vs `master` — to be confirmed at PR time.)
 
+## Implementation note — environment constraint (added during execution)
+
+The COPASI/SBML stack hard-forces `numpy~=2.2` (libroadrunner) and `pandas>=3.0`
+(pint-pandas). tyssue 1.1.0 — the latest release — is incompatible with those for
+its **topology operations**: `cell_division` and `remove_face` (the Gillespie
+behaviors we planned to use for births/deaths) crash under pandas 3.0 / numpy 2.x
+(read-only arrays, multi-column assignment). Downpinning is impossible (the SBML
+deps forbid it) and no pandas-3-compatible tyssue exists.
+
+Resolution (approved): the coupling defaults to a **fixed-topology cell-fate**
+model rather than physical division/extrusion. `TumorCoupling` drives cell-type
+changes on a mesh of constant topology — a birth relabels a source cell into the
+target type (stem→tumor realizes C→T; healthy→stem; dead→healthy regenerates),
+a death relabels a cell to `dead`. Composition still evolves under SBML control
+and every visualization (snapshots, gif, births/deaths/composition timeseries)
+works off `cell_type`. A `topology_ops: true` config flag selects the real
+`divide_crypt`/`apoptosis_extrusion` behaviors for when a pandas-3-compatible
+tyssue is available (covered by a unit test). Compatibility shims also fixed three
+other tyssue/numpy-2.x/pandas-3.0 issues (StringDtype schema coercion in
+EulerSolver, read-only `shuffle` in `merge_vertices`). The default interval is
+`0.1` (larger steps overflow the vertex mechanics).
+
+This keeps the **honest framing** above intact and arguably sharpens it: the demo
+is a qualitative SBML-driven cell-fate model on an epithelial sheet, not a
+quantitatively validated spatial vertex-model tumor.
+
 ## Decisions locked in brainstorming
 
 - Coupling rule: **proportional Δ + fractional accumulator**, flux-based (births
