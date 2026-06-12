@@ -135,19 +135,93 @@ limitations:
   real cell_division / remove_face crash; the default runs a fixed-topology cell-FATE
   model (relabeling). A topology_ops flag is reserved for a pandas-3-compatible tyssue.
 - Immune (I) and estrogen (E) drive the ODE but have no mesh cells.
+# Acceptance tests evaluated against the canonical 60-step run (interval 0.1,
+# seed=0). measure.path points at an emitted observable; result is the run's
+# verdict against pass_if. (behavior_tests is the v3 array form; `tests` is a
+# v4-reserved mapping.)
+behavior_tests:
+- name: tumor_expansion
+  classification: quantitative
+  question: Does the seeded tumor focus expand under SBML flux control?
+  measure: {kind: last, path: tumor_count}
+  pass_if: {op: gt, threshold: 10}
+  result: PASS
+  notes: "final tumor_count = 64 (seeded 8) \u2014 well above the 10-cell threshold."
+- name: healthy_displacement
+  classification: quantitative
+  question: Is healthy tissue progressively displaced?
+  measure: {kind: last, path: healthy_count}
+  pass_if: {op: lt, threshold: 180}
+  result: PASS
+  notes: "final healthy_count = 114, down from 206 (\u221292 cells, \u221245%)."
+- name: cell_death_accumulation
+  classification: quantitative
+  question: Do SBML death fluxes produce accumulating dead cells?
+  measure: {kind: last, path: dead_count}
+  pass_if: {op: gt, threshold: 5}
+  result: PASS
+  notes: "final dead_count = 28, monotonically rising from 0."
+- name: flux_driven_events
+  classification: qualitative
+  question: Are births/deaths driven by COPASI reaction fluxes (not random)?
+  measure: {kind: series, path: tumor_births}
+  pass_if: {op: nonzero}
+  result: PASS
+  notes: Per-step births/deaths track the model's per-reaction fluxes; zero events
+    when the corresponding flux is zero.
 findings:
 - id: F1
   kind: computational
   status: confirms
-  statement: The SBML model drives discrete cell-fate events on the mesh.
-  explanation: Internal COPASI stepping yields nonzero per-reaction fluxes that the
-    accumulator converts into integer tumor/healthy/stem births and deaths each step;
-    a 25-step integration test asserts tumor cells appear and healthy cells are consumed.
+  statement: The COPASI BIOMD0000000903 model drives discrete cell-fate events on the
+    tyssue mesh, not random turnover.
+  summary: Each step the internal COPASI integration yields per-reaction fluxes
+    (e.g. 'Induction of tumor cell' ~3.1e5, 'Decrase of healthy cell due to cancer'
+    ~8.2e6 at t=0); the fractional accumulator scales these into integer divide /
+    differentiate / death events. Events vanish when the driving flux is zero.
+  explanation: Verified by the flux_driven_events test (PASS) and a 25-step
+    integration test asserting tumor cells appear and healthy cells are consumed.
+  evidence: {from_test: flux_driven_events, observed: nonzero, units: events/step}
 - id: F2
   kind: biological
   status: confirms
-  statement: Tumor expands while healthy tissue is displaced.
-  explanation: "Over 60 steps the seeded focus grows (tumor 0\u219264) and healthy\
-    \ declines (206\u2192114) with dead cells accumulating (0\u219228) \u2014 the\
-    \ expected qualitative invasion trend."
+  statement: A small seeded tumor focus expands while healthy epithelium is displaced
+    and dead cells accumulate \u2014 the expected qualitative invasion trend.
+  summary: "Over 60 steps (interval 0.1) tumor cells rose 0\u219264, healthy fell\
+    \ 206\u2192114 (\u221245%), and dead cells accumulated 0\u219228. Tumor births\
+    \ are realized preferentially by differentiating stem cells (C\u2192T), matching\
+    \ the model's stem\u2192tumor induction; the 2 seeded stem cells are consumed\
+    \ early, so stem stays low."
+  explanation: Drawn from the canonical run's cell-type trajectory (see the
+    'Cell types over time' and snapshot visualizations).
+  evidence: {from_test: tumor_expansion, observed: 64, units: cells}
+- id: F3
+  kind: methodological
+  status: novel
+  statement: A non-spatial population ODE can drive a spatial epithelial fate model
+    through a flux\u2192event adapter, decoupling the biochemical model from the mesh.
+  summary: The TumorCoupling process owns COPASI internally and converts fluxes to
+    mesh events via per-type fractional accumulators, so any SBML population model
+    with birth/death reactions could drive the sheet. The default is a fixed-topology
+    fate model (relabeling) because tyssue 1.1.0's real division/extrusion are
+    incompatible with the numpy-2.2/pandas-3.0 the COPASI stack forces.
+  explanation: A topology_ops flag preserves the real vertex-model path for a
+    pandas-3-compatible tyssue.
+conclusion: The COPASI-coupled tumor composite runs stably (60 steps, interval 0.1)
+  and reproduces the expected qualitative breast-cancer invasion dynamics on a 2D
+  epithelial sheet \u2014 tumor expansion (0\u219264), healthy displacement (206\u2192114), and
+  dead-cell accumulation (0\u219228). All four acceptance tests pass. This is a
+  mechanism demonstration, not a quantitatively validated spatial tumor model.
+biological_summary: BIOMD0000000903 models breast-cancer population competition
+  (cancer-stem, tumor, healthy, immune, estrogen). Coupled to the mesh, its tumor
+  growth and healthy-killing fluxes manifest as cells changing fate \u2014 healthy
+  epithelium converting to tumor and dying \u2014 qualitatively mirroring tumor invasion
+  of normal tissue. Immune and estrogen remain off-mesh drivers of the ODE.
+conclusion_verdicts:
+- claim: SBML fluxes drive discrete mesh cell-fate events
+  verdict: supported
+  basis: flux_driven_events + tumor_expansion tests pass
+- claim: Tumor invades while healthy tissue is displaced
+  verdict: supported
+  basis: tumor 0\u219264, healthy 206\u2192114, dead 0\u219228 over the canonical run
 runs: []

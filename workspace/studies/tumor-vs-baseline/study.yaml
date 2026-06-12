@@ -78,12 +78,64 @@ limitations:
   the forced numpy-2.2 / pandas-3.0 stack).
 - Morphology/area comparison is coarse since the mesh topology is fixed in the default
   fate mode.
+# Both arms run 60 steps (interval 0.1) on the same flat SheetGeometry sheet.
+behavior_tests:
+- name: baseline_stays_uniform
+  classification: quantitative
+  question: Does the mechanics-only baseline stay 100% healthy (no births/deaths)?
+  measure: {kind: last, path: healthy_count}
+  pass_if: {op: eq, threshold: 206}
+  result: PASS
+  notes: "baseline final healthy_count = 206 (0 tumor, 0 dead) — uniform control."
+- name: tumor_arm_diverges
+  classification: quantitative
+  question: Does the tumor arm diverge from baseline (tumor cells appear)?
+  measure: {kind: last, path: tumor_count}
+  pass_if: {op: gt, threshold: 10}
+  result: PASS
+  notes: "tumor arm final tumor_count = 64 vs baseline 0."
+- name: healthy_survival_gap
+  classification: quantitative
+  question: Is healthy survival lower in the tumor arm than baseline?
+  measure: {kind: last, path: healthy_count}
+  pass_if: {op: lt, threshold: 206}
+  result: PASS
+  notes: "tumor arm healthy_count = 114 vs baseline 206 — a 92-cell (45%) survival gap."
 findings:
 - id: F1
   kind: computational
   status: confirms
-  statement: Tumor coupling shifts composition away from a uniform-healthy baseline.
-  explanation: >-
-    The baseline integration test asserts the sheet stays 100% healthy; the tumor
-    composite produces tumor and dead cells with declining healthy — a clear,
-    controlled divergence attributable to the SBML coupling.
+  statement: With tumor coupling off, the sheet stays uniformly healthy; with it on,
+    composition shifts toward tumor and dead — a clean, controlled divergence.
+  summary: "Cell-type composition over 60 steps — baseline: 206 healthy throughout\
+    \ (0 tumor, 0 dead); tumor arm: 114 healthy / 64 tumor / 28 dead. The only\
+    \ difference between the arms is the COPASI coupling, so the divergence is\
+    \ attributable to the SBML-driven cell-fate events."
+  explanation: See the 'Cell-type counts — tumor vs baseline' overlay and the
+    side-by-side snapshot panels.
+  evidence: {from_test: tumor_arm_diverges, observed: 64, units: cells}
+- id: F2
+  kind: biological
+  status: confirms
+  statement: The tumor model displaces ~45% of healthy tissue relative to the
+    untreated baseline over the run.
+  summary: Healthy-cell survival diverges from 206 (baseline) to 114 (tumor arm) —
+    a 92-cell loss driven by the model's tumor-kills-healthy and stem→tumor fluxes,
+    against a baseline where healthy tissue is fully preserved.
+  evidence: {from_test: healthy_survival_gap, observed: 114, units: cells}
+conclusion: The controlled comparison isolates the tumor coupling's effect — the
+  mechanics-only baseline stays 100% healthy across all 60 steps, while the
+  COPASI-coupled arm shifts to 114 healthy / 64 tumor / 28 dead. All three
+  acceptance tests pass. Morphology is comparable (fixed topology in the default
+  fate mode); the divergence is in composition and healthy-cell survival.
+biological_summary: The baseline represents undisturbed epithelium; the tumor arm
+  adds BIOMD0000000903's population dynamics. The 45% healthy-tissue loss in the
+  tumor arm, absent in the baseline, is the spatial read-out of the model's
+  tumor-versus-healthy competition.
+conclusion_verdicts:
+- claim: Baseline epithelium remains uniformly healthy
+  verdict: supported
+  basis: baseline_stays_uniform test passes (206 healthy, 0 tumor/dead)
+- claim: Tumor coupling causes composition shift + healthy-tissue loss
+  verdict: supported
+  basis: tumor_arm_diverges + healthy_survival_gap tests pass
