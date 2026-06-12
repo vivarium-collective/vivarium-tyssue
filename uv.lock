@@ -3609,7 +3609,6 @@ dependencies = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
-    { name = "pbg-biomodels" },
     { name = "pbg-copasi" },
     { name = "pbg-emitters", extra = ["parquet"] },
     { name = "pbg-superpowers" },
@@ -3629,6 +3628,9 @@ dependencies = [
 dev = [
     { name = "pytest" },
 ]
+fetch = [
+    { name = "pbg-biomodels" },
+]
 viz3d = [
     { name = "ipyvolume" },
 ]
@@ -3643,7 +3645,7 @@ requires-dist = [
     { name = "matplotlib" },
     { name = "numpy" },
     { name = "pandas" },
-    { name = "pbg-biomodels", git = "https://github.com/vivarium-collective/pbg-biomodels.git" },
+    { name = "pbg-biomodels", marker = "extra == 'fetch'", git = "https://github.com/vivarium-collective/pbg-biomodels.git" },
     { name = "pbg-copasi", git = "https://github.com/vivarium-collective/pbg-copasi.git" },
     { name = "pbg-emitters", extras = ["parquet"], git = "https://github.com/vivarium-collective/pbg-emitters.git" },
     { name = "pbg-superpowers", git = "https://github.com/vivarium-collective/pbg-superpowers.git" },
@@ -3659,7 +3661,7 @@ requires-dist = [
     { name = "vispy" },
     { name = "vivarium-dashboard", git = "https://github.com/vivarium-collective/vivarium-dashboard.git" },
 ]
-provides-extras = ["dev", "viz3d"]
+provides-extras = ["dev", "viz3d", "fetch"]
 
 [[package]]
 name = "wcwidth"

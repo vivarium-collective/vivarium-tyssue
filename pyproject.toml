@@ -41,12 +41,14 @@ dependencies = [
     # runtime.default_emitter and vivarium_tyssue.core). The [parquet] extra pulls
     # polars/pyarrow/duckdb/fsspec. Not on PyPI; reference the repo directly.
     "pbg-emitters[parquet] @ git+https://github.com/vivarium-collective/pbg-emitters.git",
-    # COPASI process (CopasiUTCProcess) wrapping basico/COPASI for the SBML tumor
-    # model, and the BioModels loader (load_biomodel) used to fetch + cache
-    # BIOMD0000000903. Not on PyPI — resolved via [tool.uv.sources] + override-dependencies
-    # below (same workaround as vivarium-dashboard; see that section for details).
+    # COPASI process (CopasiUTCProcess) wrapping basico/COPASI — runs the cached SBML
+    # tumor model. Not on PyPI — resolved via [tool.uv.sources] + override-dependencies
+    # below. pbg-biomodels (the BioModels *fetcher*) is NOT a runtime dep: it pulls
+    # pbg-tellurium -> tellurium -> libroadrunner, which has no linux/arm64 wheel and
+    # breaks the multi-arch Docker build. The model is already cached at
+    # workspace/datasets/BIOMD0000000903.xml, so fetching is a one-off — see the
+    # `fetch` extra below.
     "pbg-copasi",
-    "pbg-biomodels @ git+https://github.com/vivarium-collective/pbg-biomodels.git",
 ]
 
 [project.optional-dependencies]
@@ -54,6 +56,11 @@ dev = ["pytest>=7.4"]
 # Optional viewer stack for the faithful 3D crypt animation (tyssue.draw.create_gif_3d
 # uses ipyvolume). Without it, TissueCryptGif3D falls back to a matplotlib 3D mesh.
 viz3d = ["ipyvolume"]
+# One-off model fetching (scripts/fetch_tumor_biomodel.py). Pulls the tellurium /
+# libroadrunner SBML stack (no linux/arm64 wheel), so it is opt-in and kept out of
+# the default install + Docker image. The fetched model is committed, so this is
+# rarely needed.
+fetch = ["pbg-biomodels @ git+https://github.com/vivarium-collective/pbg-biomodels.git"]
 
 [build-system]
 requires = ["hatchling"]
