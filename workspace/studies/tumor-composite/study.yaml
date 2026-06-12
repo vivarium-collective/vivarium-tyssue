@@ -1,0 +1,82 @@
+schema_version: 3
+name: tumor-composite
+created: "2026-06-12"
+status: in-progress
+phase: Simulate
+design_status: approved
+implementation_status: complete
+simulation_status: ran
+evaluation_status: not_evaluated
+objective: >-
+  Build the COPASI-coupled tumor composite and demonstrate, through five
+  visualizations, that BIOMD0000000903 drives discrete cell-fate dynamics on a
+  tyssue 2D epithelial sheet.
+hypothesis: >-
+  Under flux-driven coupling, a small seeded tumor focus expands while healthy cells
+  are progressively converted/killed, producing a clear shift in cell-type composition
+  over the run.
+description: >-
+  The `tumor` composite wires CopasiUTCProcess(BIOMD0000000903) — owned internally by
+  TumorCoupling — to the EulerSolver tyssue process on a flat SheetGeometry sheet
+  (test_square, ~206 cells). Each step the adapter scales the model's birth/death
+  reaction fluxes into fractional accumulators and emits cell-fate events: tumor birth
+  relabels a stem (C→T) or healthy cell to tumor, healthy/stem births relabel sources,
+  and deaths relabel cells to "dead". Default interval 0.1 keeps the vertex mechanics
+  stable.
+baseline:
+- name: tumor
+  composite: vivarium_tyssue.composites.tumor
+  description: COPASI BIOMD0000000903 coupled to the flat 2D tyssue sheet.
+observables:
+- {name: tumor_births,   store_path: tumor_births,   units: events/step, description: Tumor cell-fate births this step}
+- {name: healthy_births, store_path: healthy_births, units: events/step, description: Healthy regeneration events this step}
+- {name: stem_births,    store_path: stem_births,    units: events/step, description: Stem cell-fate births this step}
+- {name: tumor_deaths,   store_path: tumor_deaths,   units: events/step, description: Tumor cell deaths this step}
+- {name: healthy_deaths, store_path: healthy_deaths, units: events/step, description: Healthy cell deaths this step}
+- {name: stem_deaths,    store_path: stem_deaths,    units: events/step, description: Stem cell deaths this step}
+- {name: tumor_count,    store_path: tumor_count,    units: cells, description: Tumor cells on the mesh}
+- {name: healthy_count,  store_path: healthy_count,  units: cells, description: Healthy cells on the mesh}
+- {name: stem_count,     store_path: stem_count,     units: cells, description: Stem cells on the mesh}
+- {name: dead_count,     store_path: dead_count,     units: cells, description: Dead cells on the mesh}
+visualizations:
+- name: Tumor sheet snapshots
+  address: local:TissueSheetSnapshots
+  config: {title: Tumor sheet snapshots, coords: [x, y], n_panels: 6}
+- name: Tumor sheet animation
+  address: local:TissueSheetGif
+  config: {title: Tumor sheet animation, coords: [x, y], num_frames: 60}
+- name: Cell births over time
+  address: local:TimeSeriesFromObservables
+  config: {title: Cell births over time, observables: [tumor_births, healthy_births, stem_births]}
+- name: Cell deaths over time
+  address: local:TimeSeriesFromObservables
+  config: {title: Cell deaths over time, observables: [tumor_deaths, healthy_deaths, stem_deaths]}
+- name: Cell types over time
+  address: local:TimeSeriesFromObservables
+  config: {title: Cell types over time, observables: [tumor_count, healthy_count, stem_count, dead_count]}
+expected_behavior:
+- Seeded focus (8 tumor, 2 stem) expands while healthy tissue declines and dead cells
+  accumulate.
+- 60-step probe (interval 0.1) observed healthy 206→114, tumor 0→64, dead 0→28.
+limitations:
+- Qualitative coupling, not a quantitatively validated spatial tumor model.
+- The COPASI/SBML stack forces numpy 2.2 / pandas 3.0, under which tyssue 1.1.0's real
+  cell_division / remove_face crash; the default runs a fixed-topology cell-FATE model
+  (relabeling). A topology_ops flag is reserved for a pandas-3-compatible tyssue.
+- Immune (I) and estrogen (E) drive the ODE but have no mesh cells.
+findings:
+- id: F1
+  kind: computational
+  status: confirms
+  statement: The SBML model drives discrete cell-fate events on the mesh.
+  explanation: >-
+    Internal COPASI stepping yields nonzero per-reaction fluxes that the accumulator
+    converts into integer tumor/healthy/stem births and deaths each step; a 25-step
+    integration test asserts tumor cells appear and healthy cells are consumed.
+- id: F2
+  kind: biological
+  status: confirms
+  statement: Tumor expands while healthy tissue is displaced.
+  explanation: >-
+    Over 60 steps the seeded focus grows (tumor 0→64) and healthy declines (206→114)
+    with dead cells accumulating (0→28) — the expected qualitative invasion trend.

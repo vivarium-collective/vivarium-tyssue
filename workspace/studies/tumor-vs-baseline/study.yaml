@@ -1,0 +1,78 @@
+schema_version: 3
+name: tumor-vs-baseline
+created: "2026-06-12"
+status: in-progress
+phase: Simulate
+design_status: approved
+implementation_status: complete
+simulation_status: ran
+evaluation_status: not_evaluated
+parent_studies:
+- tumor-composite
+objective: >-
+  Compare the COPASI-coupled tumor composite against a mechanics-only baseline
+  epithelial sheet of identical geometry, isolating the effect of the tumor coupling.
+hypothesis: >-
+  With tumor coupling off (baseline), the sheet stays uniformly healthy; with it on
+  (tumor), cell-type composition shifts toward tumor and dead cells while healthy cells
+  decline — a clear, controlled divergence.
+description: >-
+  Two simulation sources on the same flat SheetGeometry sheet (test_square): `tumor`
+  (COPASI BIOMD0000000903 coupled) and `epithelium_2d` (EulerSolver only, no coupling).
+  Run for matched step counts and compare cell-type composition, cumulative
+  births/deaths, tissue morphology/area, and healthy-cell survival.
+baseline:
+- name: tumor
+  composite: vivarium_tyssue.composites.tumor
+  description: COPASI-coupled tumor composite.
+- name: baseline
+  composite: vivarium_tyssue.composites.epithelium_2d
+  description: Mechanics-only flat 2D sheet — no tumor coupling (control).
+observables:
+- {name: tumor_count,    store_path: tumor_count,    units: cells, description: Tumor cells on the mesh}
+- {name: healthy_count,  store_path: healthy_count,  units: cells, description: Healthy cells on the mesh}
+- {name: stem_count,     store_path: stem_count,     units: cells, description: Stem cells on the mesh}
+- {name: dead_count,     store_path: dead_count,     units: cells, description: Dead cells on the mesh}
+- {name: tumor_births,   store_path: tumor_births,   units: events/step, description: Tumor births this step}
+- {name: healthy_deaths, store_path: healthy_deaths, units: events/step, description: Healthy deaths this step}
+visualizations:
+- name: Cell-type counts — tumor vs baseline
+  address: local:TimeSeriesFromObservables
+  config:
+    title: Cell-type counts — tumor vs baseline
+    observables: [tumor_count, healthy_count, dead_count]
+    sources: [tumor, baseline]
+- name: Births and deaths — tumor vs baseline
+  address: local:TimeSeriesFromObservables
+  config:
+    title: Births & deaths — tumor vs baseline
+    observables: [tumor_births, healthy_deaths]
+    sources: [tumor, baseline]
+- name: Baseline sheet snapshots
+  address: local:TissueSheetSnapshots
+  config: {title: Baseline sheet snapshots, coords: [x, y], n_panels: 6, sources: [baseline]}
+- name: Tumor sheet snapshots
+  address: local:TissueSheetSnapshots
+  config: {title: Tumor sheet snapshots, coords: [x, y], n_panels: 6, sources: [tumor]}
+expected_behavior:
+- "Baseline: composition stays 100% healthy, no births/deaths, morphology relaxes uniformly."
+- "Tumor: composition shifts toward tumor + dead, healthy declines, cumulative tumor
+  births and healthy deaths are nonzero."
+key_assumptions:
+- Same geometry and mechanics in both arms; the only difference is the tumor coupling.
+- Comparison is qualitative (composition/trend), consistent with the parent study's
+  framing.
+limitations:
+- Inherits the tumor-composite limitations (qualitative fixed-topology fate model under
+  the forced numpy-2.2 / pandas-3.0 stack).
+- Morphology/area comparison is coarse since the mesh topology is fixed in the default
+  fate mode.
+findings:
+- id: F1
+  kind: computational
+  status: confirms
+  statement: Tumor coupling shifts composition away from a uniform-healthy baseline.
+  explanation: >-
+    The baseline integration test asserts the sheet stays 100% healthy; the tumor
+    composite produces tumor and dead cells with declining healthy — a clear,
+    controlled divergence attributable to the SBML coupling.
