@@ -1,0 +1,166 @@
+name: tumor
+description: Breast-cancer population ODE (BIOMD0000000903 in COPASI) coupled to a
+  flat 2D tyssue sheet — per-step birth/death fluxes drive discrete division /
+  apoptosis / differentiation on the mesh (tumor / healthy / stem cell types).
+tags:
+- tissue
+- multi-cell
+- cells
+- tumor
+- sbml
+requires:
+  processes:
+  - EulerSolver
+  - TumorCoupling
+  - CopasiUTCProcess
+  types:
+  - tyssue_data
+  - behaviors
+emitters:
+- address: local:DataFrameParquetEmitter
+  config:
+    out_dir: out/parquet
+  paths:
+  - Datasets/vert_df
+  - Datasets/face_df
+  - Datasets/edge_df
+  - Datasets/cell_df
+parameters:
+  interval:
+    type: float
+    default: 1.0
+    description: Solver / coupling step (dt).
+state:
+  Tyssue:
+    _type: process
+    address: local:EulerSolver
+    config:
+      name: Tumor Epithelium 2D
+      eptm: workspace/datasets/test_square.hf5
+      tissue_type: Sheet
+      parameters:
+        face_df:
+          area_elasticity: 1.0
+          prefered_area: 1.0
+          perimeter_elasticity: 0.1
+          prefered_perimeter: 3.6
+          is_alive: 1.0
+        edge_df:
+          line_tension: 0.0
+          is_active: 1.0
+        vert_df:
+          viscosity: 1.0
+          is_alive: 1.0
+      geom: SheetGeometry
+      effectors:
+      - LineTension
+      - FaceAreaElasticity
+      - PerimeterElasticity
+      ref_effector: FaceAreaElasticity
+      factory: model_factory
+      settings:
+        threshold_length: 0.03
+      auto_reconnect: false
+      bounds: {}
+      output_columns: {}
+      maps: {}
+    inputs:
+      behaviors:
+      - Behaviors
+      global_time:
+      - global_time
+    outputs:
+      datasets:
+      - Datasets
+      network_changed:
+      - Network Changed
+      behaviors_update:
+      - Behaviors
+    interval: ${interval}
+  Copasi:
+    _type: process
+    address: local:CopasiUTCProcess
+    config:
+      model_source: workspace/datasets/BIOMD0000000903.xml
+      time: 1.0
+      intervals: 10
+    inputs: {}
+    outputs:
+      fluxes:
+      - Fluxes
+      species_concentrations:
+      - Species
+      time:
+      - SbmlTime
+    interval: ${interval}
+  TumorCoupling:
+    _type: process
+    address: local:TumorCoupling
+    config:
+      birth_fluxes:
+        tumor: Induction of tumor cell
+        healthy: Increase in the healthy cell in the system
+        stem: Formation of Stem cell
+      death_fluxes:
+        tumor: Removal of tumor cell y immune cell and other immune response
+        healthy: Decrase of healthy cell due to cancer
+        stem: Removal of stem cell from the system
+      scales:
+        tumor_births: 1.0e-6
+        tumor_deaths: 1.0e-6
+        healthy_births: 1.0e-7
+        healthy_deaths: 3.0e-8
+        stem_births: 3.0e-7
+        stem_deaths: 1.0e-4
+      geom: SheetGeometry
+      dt: 1.0
+      growth_rate: 0.1
+      shrink_rate: 0.1
+      division_crit: 0.5
+      apoptosis_crit: 2.0
+      seed:
+        tumor: 3
+        stem: 1
+    inputs:
+      fluxes:
+      - Fluxes
+      datasets:
+      - Datasets
+      global_time:
+      - global_time
+    outputs:
+      behaviors:
+      - Behaviors
+      tumor_births:
+      - tumor_births
+      tumor_deaths:
+      - tumor_deaths
+      healthy_births:
+      - healthy_births
+      healthy_deaths:
+      - healthy_deaths
+      stem_births:
+      - stem_births
+      stem_deaths:
+      - stem_deaths
+      tumor_count:
+      - tumor_count
+      healthy_count:
+      - healthy_count
+      stem_count:
+      - stem_count
+    interval: ${interval}
+  Network Changed: false
+  Behaviors: {}
+  Fluxes: {}
+  Species: {}
+  SbmlTime: []
+  tumor_births: 0.0
+  tumor_deaths: 0.0
+  healthy_births: 0.0
+  healthy_deaths: 0.0
+  stem_births: 0.0
+  stem_deaths: 0.0
+  tumor_count: 0.0
+  healthy_count: 0.0
+  stem_count: 0.0

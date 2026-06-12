@@ -35,11 +35,15 @@ def fractional_events(
     return counts, new_acc
 
 
-def _rows(face_df: dict) -> list[tuple[int, str]]:
-    """[(unique_id, cell_type)] from a face_df-as-dict-of-lists (or empty)."""
-    uids = face_df.get("unique_id") or []
-    types = face_df.get("cell_type") or []
-    return [(int(u), str(t)) for u, t in zip(uids, types)]
+def _rows(face_df) -> list[tuple[int, str]]:
+    """[(unique_id, cell_type)] from a face_df (dict-of-lists, pandas DataFrame, or empty)."""
+    uids = face_df.get("unique_id")
+    if uids is None:
+        return []
+    types = face_df.get("cell_type")
+    uids_list = list(uids)  # works for list, np.array, pd.Series
+    types_list = list(types) if types is not None else ["?"] * len(uids_list)
+    return [(int(u), str(t)) for u, t in zip(uids_list, types_list)]
 
 
 def select_uids(face_df: dict, cell_type: str, n: int, *, exclude: set, rng_pick) -> list:
