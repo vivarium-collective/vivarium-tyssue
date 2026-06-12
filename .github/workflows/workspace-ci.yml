@@ -20,6 +20,11 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    # COPASI/basico (pbg-copasi dep) resets LC_CTYPE to "C" on import, which makes
+    # locale-default file reads (composite/study YAML via read_text()) crash on the
+    # non-ASCII em-dash in generated YAML comments. Force Python UTF-8 mode globally.
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -36,7 +41,7 @@ jobs:
           ls -la external/ 2>&1 || true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Install uv
         run: pip install uv
       - name: Set up venv and install
