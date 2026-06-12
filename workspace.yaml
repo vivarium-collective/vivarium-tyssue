@@ -1,7 +1,7 @@
 schema_version: 2
 name: tyssue
 created: "2026-05-30"
-plugin_version: 0.8.1
+plugin_version: 0.14.0
 package_path: vivarium_tyssue
 
 # Directory layout — relocate the pbg-template research dirs under a single

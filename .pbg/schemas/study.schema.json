@@ -190,30 +190,78 @@
       }
     },
     "tests": {
-      "type": "object",
-      "description": "Test configuration block. Usually auto-managed.",
-      "additionalProperties": true,
-      "properties": {
-        "auto_discover": {"type": "boolean"},
-        "data_source": {
-          "type": "string",
-          "description": "Where the dashboard reads test inputs from. Common values: runs_db, emitter, file, latest_run. Free-form for forward compat across dashboard versions."
-        },
-        "pytest_args": {
-          "type": "array",
-          "items": {"type": "string"}
-        },
-        "last_results": {
-          "type": ["object", "null"],
+      "description": "Either a test-configuration block (auto_discover, data_source, pytest_args — usually auto-managed) or a v4 per-test item array (the band/pass_if shape used by dnaa-style studies). Both forms keep additionalProperties:true for forward compat.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Test configuration block. Usually auto-managed.",
           "additionalProperties": true,
           "properties": {
-            "passed": {"type": "integer"},
-            "failed": {"type": "integer"},
-            "errors": {"type": "integer"},
-            "timestamp": {"type": "string"}
+            "auto_discover": {"type": "boolean"},
+            "data_source": {
+              "type": "string",
+              "description": "Where the dashboard reads test inputs from. Common values: runs_db, emitter, file, latest_run. Free-form for forward compat across dashboard versions."
+            },
+            "pytest_args": {
+              "type": "array",
+              "items": {"type": "string"}
+            },
+            "last_results": {
+              "type": ["object", "null"],
+              "additionalProperties": true,
+              "properties": {
+                "passed": {"type": "integer"},
+                "failed": {"type": "integer"},
+                "errors": {"type": "integer"},
+                "timestamp": {"type": "string"}
+              }
+            }
+          }
+        },
+        {
+          "type": "array",
+          "description": "v4 per-test items (the band/pass_if shape used by dnaa-style studies). Each item declares a named test with a measure, acceptance criterion, and optional citation.",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "properties": {
+              "name": {"type": "string"},
+              "classification": {
+                "type": "string",
+                "description": "Common values: primary, secondary, supporting, diagnostic. Free-form for forward compat."
+              },
+              "question": {"type": "string"},
+              "measure": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "kind": {"type": "string"},
+                  "path": {"type": "string"}
+                }
+              },
+              "pass_if": {
+                "type": "object",
+                "additionalProperties": true,
+                "properties": {
+                  "op": {"type": "string"},
+                  "low": {"type": "number"},
+                  "high": {"type": "number"},
+                  "threshold": {"type": "number"},
+                  "tolerance": {"type": "number"}
+                }
+              },
+              "status": {"type": "string"},
+              "result": {"type": "string"},
+              "notes": {"type": "string"},
+              "cites": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "bib_keys (in references/papers.bib) sourcing the acceptance band or criterion for this test."
+              }
+            }
           }
         }
-      }
+      ]
     },
     "references": {
       "description": "References supporting this study. May be an object (keyed sections) or an array of {file, section?} items.",
@@ -671,24 +719,31 @@
     },
     "readouts": {
       "type": "array",
-      "description": "Section 5 of the canonical 8-section structure. Replaces v3 observables. Each readout declares what is collected from a simulation run and from where, plus its availability status.",
+      "description": "Section 5 of the canonical 8-section structure. Replaces v3 observables. Each readout declares what is collected from a simulation run and from where, plus its availability status. Canonical new studies use index_by + optional aggregate; older studies may use identifier or store_path (both tolerated via additionalProperties:true).",
       "items": {
         "type": "object",
         "additionalProperties": true,
         "properties": {
           "name": {"type": "string"},
           "description": {"type": "string"},
-          "store_path": {"type": "string"},
+          "store_path": {
+            "type": "string",
+            "description": "DEPRECATED (tolerated for back-compat). Dotted store path to the observable. Use index_by for new readouts. Common values: 'bulk.ID[c]', 'listeners.path.to.field', 'derived'."
+          },
+          "identifier": {
+            "type": "string",
+            "description": "DEPRECATED (tolerated for back-compat). Free-text identifier string (dnaa-style). Parsed by readout_resolver into a canonical selector. Common forms: 'listeners.path[int]', 'bulk ID[c]', 'bulk A[c] / (B[c] + C[c])'. Use index_by for new readouts."
+          },
           "index_by": {
             "type": "object",
             "required": ["type", "value"],
             "additionalProperties": true,
-            "description": "Identifier-system lookup for store_path. `type` names the catalog (bulk_id, rna_id, monomer_id, tf_id, literal_index, ...); `value` is the key into that catalog. Extra fields allowed for workspace-specific dialects.",
+            "description": "Canonical selector: identifier-system lookup. `type` names the catalog; `value` is the key. New readouts should use this form. Extra fields allowed for workspace-specific dialects.",
             "properties": {
               "type": {
                 "type": "string",
-                "description": "Identifier catalog name. Common values: bulk_id, rna_id, monomer_id, tf_id, literal_index. Free-form for workspace-specific catalogs.",
-                "examples": ["bulk_id", "rna_id", "monomer_id", "tf_id", "literal_index"]
+                "description": "Identifier catalog name. Canonical enum: bulk_id | monomer_id | listener_id | literal_index. Free-form for workspace-specific catalogs (additionalProperties:true).",
+                "examples": ["bulk_id", "monomer_id", "listener_id", "literal_index", "rna_id", "tf_id"]
               },
               "value": {
                 "description": "String for symbolic IDs (e.g. 'PD03831[c]'), integer for literal_index lookups.",
@@ -699,16 +754,43 @@
               }
             }
           },
+          "aggregate": {
+            "type": "object",
+            "description": "Optional aggregation operator applied to the selected series before evaluation. Only set this when the study explicitly requires an aggregation; do NOT infer it from prose annotations. Evaluator (#6) applies this after selecting the observable.",
+            "additionalProperties": true,
+            "required": ["op"],
+            "properties": {
+              "op": {
+                "type": "string",
+                "enum": ["sum", "mean", "max", "min"],
+                "description": "Aggregation operation. sum | mean | max | min."
+              },
+              "over": {
+                "type": "array",
+                "description": "Optional list of observable IDs to aggregate over (for multi-observable sums).",
+                "items": {"type": "string"}
+              }
+            }
+          },
           "units": {"type": "string"},
           "status": {
             "type": "string",
             "pattern": "^[a-z][a-z0-9-]*$",
-            "examples": ["available", "derived-needed", "aspirational"],
-            "description": "Availability of this readout in the current workspace. Common values: available (plumbed today), derived-needed (requires a new listener/derived value), aspirational (planned, deferred to a later study). Kebab-case enforced via pattern; values are free-form for forward compat."
+            "examples": ["primary", "measured", "available", "derived-needed", "aspirational"],
+            "description": "Availability/classification of this readout. Common values: primary (main observable for this study), measured (supporting observable), available (plumbed today), derived-needed (needs a listener), aspirational (deferred). Kebab-case enforced via pattern; values are free-form for forward compat."
           },
           "blocked_by_requirements": {
             "type": "array",
             "items": {"type": "string"}
+          },
+          "notes": {
+            "type": "string",
+            "description": "Human-readable notes about this readout (biological context, data source, etc.)."
+          },
+          "cites": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "bib_keys (in references/papers.bib) sourcing the acceptance band or observable value for this readout."
           }
         }
       }

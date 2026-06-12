@@ -71,6 +71,26 @@
           "description": "Which renderer the dashboard uses for composite wiring. Default 'loom-explore' (interactive React Flow). Set to 'bigraph-viz' to fall back to the legacy static SVG render."
         }
       }
+    },
+    "layout": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Optional per-directory layout overrides (workspace-root-relative paths). Any key omitted defaults to the conventional flat name (e.g. 'studies' -> 'studies'), so omitting this block keeps the classic top-level layout and existing workspaces are unaffected. Set values to relocate, e.g. 'workspace/studies', to group research dirs under a tidier subtree. Tooling resolves these via the WorkspacePaths resolver.",
+      "properties": {
+        "studies": {"type": "string"},
+        "investigations": {"type": "string"},
+        "composites": {"type": "string"},
+        "references": {"type": "string"},
+        "datasets": {"type": "string"},
+        "notes": {"type": "string"},
+        "experiments": {"type": "string"},
+        "reports": {"type": "string"},
+        "pbg": {"type": "string"},
+        "scripts": {"type": "string"},
+        "tests": {"type": "string"},
+        "docs": {"type": "string"},
+        "package": {"type": "string"}
+      }
     }
   },
   "definitions": {

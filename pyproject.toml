@@ -8,8 +8,12 @@ dependencies = [
     "bigraph-schema",
     "bigraph-viz>=2.0.3",
     # Provides pbg_superpowers.visualization.Visualization (the base class the
-    # workspace's Visualization Steps subclass) + the composite_spec loader.
-    "pbg-superpowers",
+    # workspace's Visualization Steps subclass) + the composite_spec loader, plus
+    # the investigation-spine modules (study_outcomes, finding_observations,
+    # study_verdict, report_linter, linkage_index, …). The spine landed on main
+    # (0.14.0) and is not yet on PyPI (tops out at 0.13.0), so reference the repo
+    # directly — same git+https pattern as vivarium-dashboard / pbg-emitters below.
+    "pbg-superpowers @ git+https://github.com/vivarium-collective/pbg-superpowers.git",
     "pyyaml>=6.0",
     "jsonschema[format-nongpl]>=4.21",
     "jinja2>=3.1",
