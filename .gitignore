@@ -22,3 +22,6 @@ workspace/studies/*/runs.db
 workspace/studies/*/runs.db-shm
 workspace/studies/*/runs.db-wal
 workspace/studies/*/sims/
+
+# Generated viz HTML (regenerate via scripts/render_study_viz.py)
+workspace/studies/*/viz/
