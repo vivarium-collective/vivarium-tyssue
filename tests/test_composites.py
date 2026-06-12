@@ -15,7 +15,8 @@ import pytest
 
 ROOT = Path(__file__).resolve().parent.parent
 COMPOSITES = sorted((ROOT / "vivarium_tyssue" / "composites").glob("*.composite.yaml"))
-ALL_NAMES = {"base_solver", "regulation", "stochastic", "jamming", "gradient", "anisotropic", "gillespie"}
+ALL_NAMES = {"base_solver", "regulation", "stochastic", "jamming", "gradient",
+             "anisotropic", "gillespie", "epithelium_2d", "tumor"}
 
 
 def test_all_composites_present():
