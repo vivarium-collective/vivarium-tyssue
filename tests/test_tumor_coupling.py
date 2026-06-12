@@ -1,4 +1,6 @@
-from vivarium_tyssue.processes.tumor_coupling import fractional_events, select_uids
+import numpy as np
+from vivarium_tyssue.processes.tumor_coupling import fractional_events, select_uids, TumorCoupling
+from vivarium_tyssue.core import build_core
 
 
 def test_accumulator_fires_when_crossing_one():
@@ -53,3 +55,57 @@ def test_select_uids_excludes_already_chosen():
     fdf = _face_df([(1, "healthy"), (2, "healthy")])
     picked = select_uids(fdf, "healthy", 1, exclude={1}, rng_pick=lambda items, k: items[:k])
     assert picked == [2]
+
+
+def _make_proc(seed_tumor=0, seed_stem=0, scales=None):
+    config = {
+        "birth_fluxes": {"tumor": "T_birth", "healthy": "H_birth", "stem": "C_birth"},
+        "death_fluxes": {"tumor": "T_death", "healthy": "H_death", "stem": "C_death"},
+        "scales": scales or {
+            "tumor_births": 1.0, "tumor_deaths": 1.0,
+            "healthy_births": 1.0, "healthy_deaths": 1.0,
+            "stem_births": 1.0, "stem_deaths": 1.0,
+        },
+        "geom": "SheetGeometry",
+        "dt": 1.0, "growth_rate": 0.1, "shrink_rate": 0.1,
+        "division_crit": 0.5, "apoptosis_crit": 2.0,
+        "seed": {"tumor": seed_tumor, "stem": seed_stem},
+    }
+    return TumorCoupling(config=config, core=build_core())
+
+
+def _datasets(types):
+    return {"face_df": {"unique_id": list(range(len(types))), "cell_type": list(types)}}
+
+
+def test_seed_step_differentiates_focus():
+    proc = _make_proc(seed_tumor=2, seed_stem=1)
+    ds = _datasets(["healthy"] * 10)
+    out = proc.update({"fluxes": {}, "datasets": ds, "global_time": 0.0}, 1.0)
+    funcs = [b["func"] for b in out["behaviors"]]
+    new_types = [b["new_type"] for b in out["behaviors"]]
+    assert funcs == ["differentiation"] * 3
+    assert new_types.count("tumor") == 2 and new_types.count("stem") == 1
+
+
+def test_flux_step_fires_division_and_apoptosis():
+    np.random.seed(0)
+    proc = _make_proc()
+    proc._seeded = True  # skip seeding
+    ds = _datasets(["tumor", "tumor", "healthy", "healthy", "stem"])
+    fluxes = {"T_birth": 1.0, "H_death": 1.0, "T_death": 0.0,
+              "H_birth": 0.0, "C_birth": 0.0, "C_death": 0.0}
+    out = proc.update({"fluxes": fluxes, "datasets": ds, "global_time": 5.0}, 1.0)
+    funcs = sorted(b["func"] for b in out["behaviors"])
+    # one tumor birth (divide_crypt or differentiation of stem) + one healthy death
+    assert "apoptosis_extrusion" in funcs
+    assert out["healthy_deaths"] == 1.0 and out["tumor_births"] == 1.0
+    assert out["tumor_count"] == 2.0 and out["healthy_count"] == 2.0
+
+
+def test_counts_reported_each_step():
+    proc = _make_proc()
+    proc._seeded = True
+    ds = _datasets(["tumor", "healthy", "healthy", "stem"])
+    out = proc.update({"fluxes": {}, "datasets": ds, "global_time": 3.0}, 1.0)
+    assert out["tumor_count"] == 1.0 and out["healthy_count"] == 2.0 and out["stem_count"] == 1.0
