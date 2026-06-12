@@ -10,10 +10,18 @@ Usage: python scripts/render_study_viz.py [study-slug ...]   (default: all)
 """
 from __future__ import annotations
 
+import re
 import sys
 from pathlib import Path
 
 import yaml
+
+
+def _slug(name: str) -> str:
+    """Filename slug — the dashboard's static server 404s filenames with spaces,
+    so the report can't fetch+inline them. Keep it ASCII/space-free."""
+    s = re.sub(r"[^A-Za-z0-9._-]+", "_", name.strip())
+    return s.strip("_") or "viz"
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -49,12 +57,14 @@ def render_study(slug: str) -> None:
     study_yaml = str(sdir / "study.yaml")
     viz_dir = sdir / "viz"
     viz_dir.mkdir(parents=True, exist_ok=True)
+    for old in viz_dir.glob("*.html"):  # clear stale (incl. space-named) files
+        old.unlink()
     n = 0
     for v in (spec.get("visualizations") or []):
         if not isinstance(v, dict) or not v.get("name"):
             continue
         html = _render_one(v.get("address", ""), v.get("config", {}), runs_db, study_yaml)
-        (viz_dir / f"{v['name']}.html").write_text(html, encoding="utf-8")
+        (viz_dir / f"{_slug(v['name'])}.html").write_text(html, encoding="utf-8")
         ok = ("data:image" in html) or ("Plotly.newPlot" in html)
         print(f"  {v['name']}: {'OK' if ok else 'placeholder'} ({len(html)} bytes)")
         n += 1
