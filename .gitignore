@@ -16,3 +16,9 @@ workspace/reports/assets/*
 out/
 
 .DS_Store
+
+# Generated simulation data — regenerate via scripts/run_study_sims.py
+workspace/studies/*/runs.db
+workspace/studies/*/runs.db-shm
+workspace/studies/*/runs.db-wal
+workspace/studies/*/sims/

@@ -35,6 +35,17 @@ observables:
 - {name: dead_count,     store_path: dead_count,     units: cells, description: Dead cells on the mesh}
 - {name: tumor_births,   store_path: tumor_births,   units: events/step, description: Tumor births this step}
 - {name: healthy_deaths, store_path: healthy_deaths, units: events/step, description: Healthy deaths this step}
+# readouts[].store_path drives the run emitter (collect_emit_paths_from_spec).
+readouts:
+- {name: tumor_count,    store_path: tumor_count,    units: cells}
+- {name: healthy_count,  store_path: healthy_count,  units: cells}
+- {name: stem_count,     store_path: stem_count,     units: cells}
+- {name: dead_count,     store_path: dead_count,     units: cells}
+- {name: tumor_births,   store_path: tumor_births,   units: events/step}
+- {name: healthy_deaths, store_path: healthy_deaths, units: events/step}
+- {name: vert_df, store_path: Datasets/vert_df, description: mesh vertices}
+- {name: edge_df, store_path: Datasets/edge_df, description: mesh edges}
+- {name: face_df, store_path: Datasets/face_df, description: cells (cell_type)}
 visualizations:
 - name: Cell-type counts — tumor vs baseline
   address: local:TimeSeriesFromObservables

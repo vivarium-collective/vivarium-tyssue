@@ -1,7 +1,23 @@
 <!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><title>tyssue:tumor-tyssue</title>
-<link rel="stylesheet" href="assets/style.css?v=1780541800_1780541800">
+<link rel="stylesheet" href="assets/style.css?v=1781294558_1781294558">
+<link rel="stylesheet" href="assets/snapshot-readonly.css">
+<script>
+// Per-workspace branding (rail logo, title, brand text) is resolved
+// server-side at GET / and is NOT re-applied by any client script. The
+// cross-workspace switcher navigates between dashboard ports with a full
+// location.assign(), so a round-trip switch (workspace A -> B -> A) relies on
+// the browser actually re-running GET / for A to restore A's custom branding.
+// Modern browsers instead restore A from the back/forward cache (bfcache) — a
+// frozen DOM snapshot served WITHOUT a new server render — so A's branding can
+// come back stale (the Vivarium default that was showing when A was frozen).
+// `Cache-Control: no-store` on sub-resources does not disable page bfcache.
+// Force a real reload on bfcache restore so branding is always re-rendered.
+window.addEventListener('pageshow', function (e) {
+  if (e.persisted) { window.location.reload(); }
+});
+</script>
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
 <style>
 /* Modal overlay */
@@ -48,6 +64,14 @@
   border-radius: 4px; cursor: pointer; font-size: 0.88em;
 }
 .action-btn:hover { background: #bbdefb; }
+/* Emitter-type pills for the Simulations DB table */
+.emitter-pill {
+  display: inline-block; padding: 2px 8px; border-radius: 10px;
+  font-size: 12px; font-weight: 500; white-space: nowrap;
+}
+.emitter-sqlite  { background: #e5e7eb; color: #374151; }   /* gray  */
+.emitter-parquet { background: #fef3c7; color: #92400e; }   /* amber */
+.emitter-xarray  { background: #ccfbf1; color: #0f766e; }   /* teal  */
 .action-btn--secondary {
   margin-top: 10px; padding: 5px 12px;
   border: 1px solid #b91c1c; background: #fef2f2;
@@ -292,9 +316,9 @@
   <!-- LEFT RAIL -->
   <aside id="viv-rail" class="viv-rail">
 
-    <!-- Brand + workspace switcher -->
+    <!-- Brand: fixed Vivarium logo + name (no per-workspace icon/name override). -->
     <div class="viv-rail-header">
-      <img class="viv-rail-logo" src="assets/vivarium-logo.png" alt="Vivarium" loading="lazy">
+      <img class="viv-rail-logo" src="assets/vivarium-logo.png?v=1781294558_1781294558" alt="Vivarium" loading="lazy">
       <div class="viv-rail-brand">
         <strong>Vivarium</strong>
         <small>dashboard</small>
@@ -310,6 +334,11 @@
         <span class="viv-arrow">▾</span>
       </button>
     </div>
+    <!-- Snapshot mode: static repo label replaces the switcher dropdown. -->
+    <div class="viv-repo-label" id="snapshot-repo-label" style="display:none">
+      <span class="viv-workspace-switcher-glyph">●</span>
+      <strong>tyssue</strong>
+    </div>
 
     <!-- Primary nav -->
     <nav class="viv-rail-section" role="tablist">
@@ -323,7 +352,7 @@
             <rect x="12" y="4" width="10" height="16" rx="1"/>
           </svg>
         </span>
-        <span class="viv-rail-link-label">Inputs</span>
+        <span class="viv-rail-link-label">Sources</span>
       </a>
       <!-- Registry: 3×2 grid of stores — the type catalog. Top row of
            circles (continuous-type stores) over a bottom row of squares
@@ -369,7 +398,7 @@
             <path d="M8.5 12L16 19"/>
           </svg>
         </span>
-        <span class="viv-rail-link-label">Investigation</span>
+        <span class="viv-rail-link-label">Investigations</span>
       </a>
       <a href="#simulations"       class="viv-rail-link menu-link" data-page="simulations">
         <span class="viv-rail-link-icon">
@@ -401,7 +430,7 @@
             <circle cx="19" cy="10" r="1.05" fill="currentColor" stroke="none"/>
           </svg>
         </span>
-        <span class="viv-rail-link-label">Visualizations</span>
+        <span class="viv-rail-link-label">Analyses</span>
       </a>
       <!-- Branch: workspace branch + remote (formerly "GitHub"). The icon
            is a branch-and-node glyph; renaming the label to "Branch"
@@ -424,7 +453,7 @@
     </nav>
 
     <!-- Studies of the active investigation, dependency-ordered. -->
-    <div class="viv-rail-section">
+    <div class="viv-rail-section" id="viv-rail-studies-section">
       <div class="viv-rail-section-label">Studies</div>
       <div id="viv-rail-investigations">
         <p class="viv-rail-empty" style="font-size:0.85em;color:#9ca3af;padding:4px 12px">Loading…</p>
@@ -468,74 +497,26 @@
   <!-- MAIN: topbar + content -->
   <div class="viv-main">
 
-    <header class="viv-topbar">
-      <nav class="viv-topbar-breadcrumbs" id="viv-breadcrumbs">
-        <span>tyssue:tumor-tyssue dashboard</span>
-      </nav>
-      <div class="viv-topbar-actions" id="viv-topbar-actions">
-        <!-- Git status strip + Open-PR button were here; moved into the
-             GitHub tab (Workspace → GitHub) for a cleaner topbar. The JS
-             (_refreshGitStatus) still targets #viv-git-status by id and
-             populates it wherever it lives. -->
-        <span class="viv-btn viv-tooltip" data-tooltip="Coming soon — share workspace link">Share</span>
-        <span class="viv-kebab viv-tooltip" data-tooltip="Workspace settings — coming soon">⋯</span>
-        
-        
-        <a class="viv-avatar viv-avatar-topbar viv-avatar-link"
-           href="https://github.com/eagmon"
-           target="_blank" rel="noopener"
-           title="eagmon · agmon.eran@gmail.com">EA</a>
-        
-      </div>
-    </header>
+    <!-- Read-only snapshot banner — hidden in local mode; shown when body.snapshot is set. -->
+    <div id="snapshot-banner">
+      <span>Read-only view &mdash; a full interactive version is available.</span>
+      <a id="snapshot-interactive-link" target="_blank" rel="noopener">Open interactive version</a>
+    </div>
+
+    <!-- Top banner removed — was a non-functional breadcrumb + "Coming soon" Share/settings placeholders + a decorative avatar. -->
 
     <main class="viv-content pages" id="viv-content">
 
 <!-- ===== PAGE: WORKSPACE INPUTS ===== -->
 <section id="page-workspace-inputs" class="page" data-page="workspace-inputs">
-  <h2 class="page-title">Inputs</h2>
-  <p class="page-lead">External resources you bring into the workspace. Datasets feed validation, references and expert docs anchor the science. Simulation modules (the Python packages providing Processes/Steps) live in the <a href="#registry">Registry</a> tab.</p>
+  <h2 class="page-title">Sources</h2>
+  <p class="page-lead">The loaded investigation's sources come first &mdash; the datasets, references, and expert docs it owns. Below them are the repo-wide / shared data sources every investigation can draw on (imported source packages plus shared datasets and references). Simulation modules (the Python packages providing Processes/Steps) live in the <a href="#registry">Registry</a> tab.</p>
 
-  <!-- Datasets panel -->
-  <div class="panel">
-    <h3>Datasets</h3>
-    <p class="panel-lead">Register datasets your model will compare against. Each entry maps to specific model claims it supports.</p>
-    
-    <p style="color:#888;font-style:italic">No datasets registered yet.</p>
-    
-    <button class="action-btn" onclick="openModal('modal-dataset')">+ Add dataset</button>
-  </div>
-
-  <!-- Expert knowledge panel — card layout (replaces cramped 5-column table) -->
-  <div class="panel">
-    <h3>Expert knowledge</h3>
-    <p class="panel-lead">Curated expert documents &mdash; PDFs, lab notes, expert review docs &mdash; that aren&rsquo;t formal publications but capture domain knowledge driving the model. Linked to the claims they support.</p>
-    
-    <p style="color:#888;font-style:italic">No expert documents registered yet.</p>
-    
-    <button class="action-btn" onclick="openModal('modal-expert-doc')">+ Add expert document</button>
-  </div>
-
-  <!-- References panel — papers.bib explorer + PDF status + add-reference action -->
-  <div class="panel">
-    <h3>References <span class="muted" style="font-size:0.75em;font-weight:normal">(0 entries, 0 PDFs in references/papers.bib)</span></h3>
-    <p class="panel-lead">Formal publications cited across the studies, plus the PDFs committed alongside them. Click any card to expand its details; click <em>Open ↗</em> to access the paper. Reading notes (if present) live at <code>references/notes/&lt;bib-key&gt;.md</code>. Adds entries to <code>references/papers.bib</code> and <code>references/claims.yaml</code>.</p>
-
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px">
-      <input type="search" id="bib-filter" placeholder="Filter by key, title, author, year…"
-             style="flex:1;min-width:240px;max-width:480px;padding:6px 10px;border:1px solid #cbd5e1;border-radius:4px;font-size:0.9em"
-             oninput="_filterBibEntries(this.value)">
-      <button class="action-btn" onclick="openModal('modal-reference')">+ Add reference (PDF)</button>
-    </div>
-
-    
-    
-
-    
-
-    
-    <p style="color:#888;font-style:italic">No bibliography entries yet. Add some to <code>references/papers.bib</code>.</p>
-    
+  <!-- Investigation-first inputs, rendered client-side from /api/inputs.
+       Single source of truth for the datasets/references/expert-docs lists;
+       the management panels below provide the add/edit actions + bib explorer. -->
+  <div id="inputs-api-render" class="panel">
+    <p class="muted" style="font-style:italic">Loading inputs…</p>
   </div>
 
 </section>
@@ -570,34 +551,21 @@
 
 </section>
 
-<!-- ===== PAGE: VISUALIZATIONS ===== -->
+<!-- ===== PAGE: ANALYSES ===== -->
 <section id="page-visualizations" class="page" data-page="visualizations">
-  <h2 class="page-title">Visualizations</h2>
-  <p class="page-lead">Charts rendered from observable trajectories. Either configure a registered class with specific settings, or describe what to plot in natural language and let <code>/pbg-viz</code> generate the function.</p>
+  <h2 class="page-title">Analyses</h2>
+  <p class="page-lead">Analysis scripts and visualization classes available in this workspace. <strong>Analyses</strong> are v2ecoli <code>Analysis</code> steps (registered in <code>ANALYSIS_REGISTRY</code>) that post-process simulation output. <strong>Visualizations</strong> are chart classes (subclasses of <code>pbg_superpowers.visualization.Visualization</code>) that render observable trajectories — configure one with specific settings or generate a new one with <code>/pbg-viz</code>.</p>
 
 
-  <!-- Workspace visualizations (workspace.yaml-driven, primary panel) -->
+  <!-- Available Analysis + Visualization classes (catalog) -->
   <div class="panel">
-    <h3>Workspace visualizations</h3>
-    <p class="panel-lead">Configured visualizations registered in <code>workspace.yaml</code>. <strong>Class-backed</strong> entries are ready to use immediately in investigations. <strong>Description-only</strong> entries follow the Create/Add/Commit lifecycle to generate code via <code>/pbg-viz</code>.</p>
-    <div style="margin-bottom:8px">
-      <button class="action-btn" onclick="_openWorkspaceVizModal()">+ Add visualization</button>
-      <button class="action-btn" onclick="_vizCommitAll()">Commit all staged</button>
-    </div>
-    
-    <p style="color:#888;font-style:italic">No visualizations registered yet.</p>
-    
-  </div>
-
-  <!-- Available Visualization classes (registry-driven, secondary catalog) -->
-  <div class="panel">
-    <h3>Available Visualization classes <span id="viz-count" class="count-badge"></span></h3>
-    <p class="panel-lead">Visualization classes discovered from <code>core.link_registry</code> (subclasses of <code>pbg_superpowers.visualization.Visualization</code> from any installed pbg-* package). Click <strong>Preview</strong> to see a demo render; <strong>Use</strong> to register it as a Workspace visualization. <span class="muted">Workspace classes listed first; environment-only classes follow.</span> Need a new one? Run <code>/pbg-viz &lt;name&gt; &lt;description&gt;</code> in Claude Code.</p>
-    <input type="search" id="viz-catalog-search" placeholder="Search Visualization classes by name or doc…"
+    <h3>Available classes <span id="viz-count" class="count-badge"></span></h3>
+    <p class="panel-lead">Classes discovered from the installed environment. Analyses are <code>v2ecoli</code> <code>ANALYSIS_REGISTRY</code> entries; Visualizations are <code>pbg_superpowers.visualization.Visualization</code> subclasses. Click <strong>Preview</strong> (Visualizations only) to see a demo render; <strong>Use</strong> to register a Visualization in this workspace. Need a new visualization? Run <code>/pbg-viz &lt;name&gt; &lt;description&gt;</code> in Claude Code.</p>
+    <input type="search" id="viz-catalog-search" placeholder="Search classes by name or doc…"
            style="width:100%;padding:6px;margin-bottom:8px;font-size:0.9em"
            oninput="_filterVizCatalog(this.value)">
     <div id="viz-picker-container">
-      <p class="empty-state">Discovering Visualization classes&hellip; <span class="muted">First load walks every installed pbg-* package and can take a few seconds; subsequent loads are cached for 30 s.</span></p>
+      <p class="empty-state">Discovering classes&hellip; <span class="muted">First load walks the installed environment and can take a few seconds; subsequent loads are cached for 30 s.</span></p>
     </div>
   </div>
 
@@ -611,6 +579,18 @@
     <div id="viz-preview-source-row" style="margin-bottom:8px;font-size:0.9em;color:#555"></div>
     <iframe id="viz-preview-iframe" style="width:100%;height:480px;border:1px solid #ddd;background:#fff"></iframe>
     <div id="viz-preview-notes" style="margin-top:8px;font-size:0.85em;color:#666"></div>
+  </div>
+</div>
+
+<!-- Data-source file preview modal (repo-wide data sources, Inputs tab) -->
+<div id="modal-ds-preview" class="modal-overlay">
+  <div class="modal-box" style="max-width:900px">
+    <button class="modal-close" onclick="closeModal('modal-ds-preview')">&times;</button>
+    <h3 style="margin-bottom:8px">Data source: <code id="ds-preview-title" style="font-size:0.85em"></code></h3>
+    <div style="margin-bottom:8px">
+      <a id="ds-preview-download" class="action-btn" download>Download</a>
+    </div>
+    <pre id="ds-preview-body" style="max-height:560px;overflow:auto;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:6px;font-size:0.8em;line-height:1.4;white-space:pre;margin:0"></pre>
   </div>
 </div>
 
@@ -682,13 +662,13 @@
 <!-- ===== PAGE: STUDIES ===== -->
 <section id="page-investigations" class="page" data-page="investigations">
   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px">
-    <h2 class="page-title" style="margin:0">Investigation</h2>
+    <h2 class="page-title" style="margin:0">Investigations</h2>
     <div style="display:flex;gap:8px;align-items:center">
       <!-- "Switch investigation" + "+ New Investigation" actions now live in
            the left-rail investigation switcher dropdown (top of the rail). -->
     </div>
   </div>
-  <p class="page-lead" id="investigation-page-lead">The active investigation. Click a node in the DAG to open a study. Use the investigation switcher at the top of the left rail to switch active investigation or start a new one.</p>
+  <p class="page-lead" id="investigation-page-lead">All investigations in this repo. Select one to open it — its studies appear in the left rail. Merged investigations are preserved as artifacts; in-progress ones live on their branch/PR.</p>
 
   <!-- List view: investigation cards. -->
   <div id="investigations-list" class="investigations-list-grid" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap:12px;">
@@ -771,6 +751,8 @@
 
   <!-- Detail view: one investigation's DAG. Toggled on click. -->
   <div id="investigation-detail-view" style="display:none; margin-top:8px">
+    <button class="iset-back-link" onclick="_showInvestigationList()" title="Back to all investigations"
+            style="background:none; border:none; padding:0; margin:0 0 4px; color:#64748b; font-size:0.82em; cursor:pointer; display:inline-flex; align-items:center; gap:4px">&larr; All investigations</button>
     <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
       <h3 id="investigation-detail-title" style="margin:0; flex:1"></h3>
       <span id="investigation-detail-status" class="status-pill planned" style="font-size:0.85em"></span>
@@ -789,20 +771,26 @@
       <!-- At-a-glance grid: one tile per study with a one-line role. Populated by JS. -->
       <div id="investigation-at-a-glance" class="inv-at-a-glance" style="display:none"></div>
       <!-- How to read this: ordered list of usage tips for the evaluator. -->
-      <div id="investigation-how-to-read" class="inv-how-to-read" style="display:none">
-        <strong>How to read this</strong>
+      <details id="investigation-how-to-read" class="inv-how-to-read" style="display:none">
+        <summary>How to read this</summary>
         <ol></ol>
-      </div>
+      </details>
       <!-- Glossary: collapsible. -->
       <details id="investigation-glossary" class="inv-glossary" style="display:none">
         <summary>Glossary</summary>
         <dl></dl>
       </details>
       <!-- Biology story (free-form prose). Hidden if the yaml omits it. -->
-      <div id="investigation-biology-story" class="inv-bio-story" style="display:none">
-        <strong class="inv-bio-story-label">Biology story</strong>
+      <details id="investigation-biology-story" class="inv-bio-story" style="display:none">
+        <summary class="inv-bio-story-label">Biology — the mechanism this investigation models</summary>
         <div id="investigation-biology-story-text" class="inv-bio-story-text"></div>
-      </div>
+      </details>
+    </div>
+    <!-- Discourse-graph framing: studies as knowledge-producing operations. -->
+    <div id="investigation-dag-lead" style="margin: 4px 0 8px; font-size: 0.88em; color: #475569; line-height: 1.4;">
+      <strong>Investigation graph</strong> — each study is a knowledge-producing operation that
+      builds understanding of the mechanism. Each node shows the <em>question</em> it asks and
+      the <em>evidence</em> it produced; edges show what a result leads to.
     </div>
     <div id="investigation-dag-shell"
          style="position: relative; border: 1px solid #e2e8f0; border-radius: 6px; background: #fafafa;
@@ -1007,53 +995,60 @@
 <section id="page-simulations" class="page" data-page="simulations">
   <h2 class="page-title">Simulations DB</h2>
   <p class="page-lead">
-    All persisted runs across this workspace, gathered from
-    <code>.pbg/composite-runs.db</code> and every
-    <code>studies/&lt;name&gt;/runs.db</code>. Delete a row to remove its
-    DB rows, run artifacts, and any Study references.
+    Every persisted run across this workspace, tagged by investigation and
+    study, gathered from each <code>studies/&lt;name&gt;/runs.db</code>.
+    Defaults to the current investigation — toggle to see all.
   </p>
 
-  <div style="margin: 8px 0 12px; display: flex; gap: 8px; align-items: center;">
-    <input id="sim-filter" type="search" placeholder="Filter by composite, investigation, study, or label…"
-           style="flex: 1; max-width: 480px; padding: 6px 10px; font-size: 14px;
-                  border: 1px solid #d1d5db; border-radius: 4px;" />
+  <div style="margin: 8px 0 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+      <input id="sim-all-toggle" type="checkbox" /> All investigations
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+      Study
+      <select id="sim-study-filter" style="padding:4px 8px; font-size:13px;
+              border:1px solid #d1d5db; border-radius:4px;">
+        <option value="">All</option>
+      </select>
+    </label>
+    <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
+      Emitter
+      <select id="sim-emitter-filter" style="padding:4px 8px; font-size:13px;
+              border:1px solid #d1d5db; border-radius:4px;">
+        <option value="">All</option>
+      </select>
+    </label>
     <button id="sim-refresh" class="action-btn">Refresh</button>
   </div>
 
   <div id="sim-loading" style="color: #6b7280; padding: 12px;">Loading simulations…</div>
   <div id="sim-empty"   style="color: #6b7280; padding: 12px; display: none;">
-    No simulations yet. Run a composite from the
-    <a href="#composite-explore">Composite Explorer</a> or from a
-    <a href="#studies">Study</a> to see entries here.
+    No simulation runs found.
   </div>
 
   <table id="sim-table" style="width:100%; border-collapse: collapse; font-size: 13px; display: none;">
     <thead>
       <tr style="background:#f3f4f6;">
-        <th style="text-align:left; padding:6px 8px;">Composite</th>
         <th style="text-align:left; padding:6px 8px;">Investigation</th>
-        <th style="text-align:left; padding:6px 8px;">Studies</th>
+        <th style="text-align:left; padding:6px 8px;">Study</th>
+        <th style="text-align:left; padding:6px 8px;">Run</th>
+        <th style="text-align:left; padding:6px 8px; width:90px;">Emitter</th>
+        <th style="text-align:left; padding:6px 8px; width:140px;">Time</th>
         <th style="text-align:left; padding:6px 8px; width:90px;">Status</th>
-        <th style="text-align:left; padding:6px 8px; width:80px;">Emitter</th>
-        <th style="text-align:left; padding:6px 8px; width:80px;">Steps</th>
-        <th style="text-align:left; padding:6px 8px;">Label</th>
-        <th style="text-align:left; padding:6px 8px; width:120px;">Started</th>
-        <th style="text-align:left; padding:6px 8px; width:80px;">Run</th>
-        <th style="text-align:left; padding:6px 8px; width:60px;"></th>
+        <th style="text-align:center; padding:6px 8px; width:120px;">Actions</th>
       </tr>
     </thead>
     <tbody id="sim-tbody"></tbody>
   </table>
 
-  <!-- Delete confirmation dialog -->
+  <!-- Confirmation dialog for full simulation delete -->
   <div id="sim-delete-dialog" style="display:none; position:fixed; inset:0;
-                                      background:rgba(0,0,0,0.45); z-index:1000;
-                                      align-items:center; justify-content:center;">
-    <div style="background:#fff; max-width:560px; padding:20px; border-radius:6px;
-                 box-shadow:0 4px 16px rgba(0,0,0,0.2);">
+       background:rgba(0,0,0,0.4); align-items:center; justify-content:center; z-index:1000;">
+    <div style="background:#fff; border-radius:8px; padding:20px; max-width:520px;
+         width:90%; box-shadow:0 10px 40px rgba(0,0,0,0.2);">
       <h3 style="margin:0 0 12px;">Delete simulation?</h3>
-      <div id="sim-delete-body" style="font-size:14px; color:#374151;"></div>
-      <div style="text-align:right; margin-top:16px;">
+      <div id="sim-delete-body" style="font-size:13px; color:#374151;"></div>
+      <div style="margin-top:16px; display:flex; gap:8px; justify-content:flex-end;">
         <button id="sim-delete-cancel" class="action-btn">Cancel</button>
         <button id="sim-delete-confirm" class="action-btn"
                 style="background:#dc2626; color:#fff;">Delete</button>
@@ -1531,11 +1526,17 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
   </div>
 </div>
 
+<!-- DataSource layer (client-fetch seam, sub-project #1).
+     __DASH_CONFIG__ sets the data-source mode; data-source.js exposes the
+     DataSource global that renderers call to fetch narrative data.
+     local-server mode (default) fetches from the same-origin /api/* endpoints.
+     Hosted mode (sub-projects #2/#3) will set a different config here. -->
+<script>window.__DASH_CONFIG__ = { mode: "local-server" };</script>
+<script src="assets/data-source.js"></script>
 <script src="assets/render-helpers.js"></script>
 <script src="assets/client.js" onerror="/* live mode unavailable */"></script>
-<script src="assets/walkthrough.js?v=1780541800_1780541800" onerror="/* walkthrough unavailable */"></script>
-<script src="assets/github-login.js?v=1780541800_1780541800" onerror="/* github-login unavailable */"></script>
-<script src="assets/investigations.js" onerror="/* investigations unavailable */"></script>
+<script src="assets/walkthrough.js?v=1781294558_1781294558" onerror="/* walkthrough unavailable */"></script>
+<script src="assets/github-login.js?v=1781294558_1781294558" onerror="/* github-login unavailable */"></script>
 <!-- workspace-switcher.js is intentionally not loaded: the left-rail dropdown
      it used to drive has been repurposed into the investigation switcher
      (investigation-switcher.js). The /api/workspaces endpoints remain available
