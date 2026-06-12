@@ -1,4 +1,4 @@
-from vivarium_tyssue.processes.tumor_coupling import fractional_events
+from vivarium_tyssue.processes.tumor_coupling import fractional_events, select_uids
 
 
 def test_accumulator_fires_when_crossing_one():
@@ -27,3 +27,29 @@ def test_negative_and_missing_flux_clamped_to_zero():
     assert n["x"] == 0 and acc["x"] == 0.0
     n, acc = fractional_events({}, {"x": 0.1}, {"x": 0.0}, dt=1.0)
     assert n["x"] == 0
+
+
+def _face_df(uids_types):
+    # Minimal face_df-as-dict-of-lists, like the emitted tyssue datasets.
+    return {
+        "unique_id": [u for u, _ in uids_types],
+        "cell_type": [t for _, t in uids_types],
+    }
+
+
+def test_select_uids_picks_matching_type():
+    fdf = _face_df([(1, "tumor"), (2, "healthy"), (3, "tumor")])
+    picked = select_uids(fdf, "tumor", 2, exclude=set(), rng_pick=lambda items, k: items[:k])
+    assert set(picked) == {1, 3}
+
+
+def test_select_uids_caps_to_available():
+    fdf = _face_df([(1, "tumor")])
+    picked = select_uids(fdf, "tumor", 5, exclude=set(), rng_pick=lambda items, k: items[:k])
+    assert picked == [1]  # capped
+
+
+def test_select_uids_excludes_already_chosen():
+    fdf = _face_df([(1, "healthy"), (2, "healthy")])
+    picked = select_uids(fdf, "healthy", 1, exclude={1}, rng_pick=lambda items, k: items[:k])
+    assert picked == [2]

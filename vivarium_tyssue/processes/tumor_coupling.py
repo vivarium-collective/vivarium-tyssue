@@ -33,3 +33,22 @@ def fractional_events(
         counts[key] = fired
         new_acc[key] = total - fired
     return counts, new_acc
+
+
+def _rows(face_df: dict) -> list[tuple[int, str]]:
+    """[(unique_id, cell_type)] from a face_df-as-dict-of-lists (or empty)."""
+    uids = face_df.get("unique_id") or []
+    types = face_df.get("cell_type") or []
+    return [(int(u), str(t)) for u, t in zip(uids, types)]
+
+
+def select_uids(face_df: dict, cell_type: str, n: int, *, exclude: set, rng_pick) -> list:
+    """Choose up to ``n`` unique_ids of cells whose type is ``cell_type``,
+    skipping any in ``exclude``. Caps to availability. ``rng_pick(items, k)``
+    selects k items from a list (injected for deterministic tests; the process
+    passes a numpy-random sampler)."""
+    candidates = [u for (u, t) in _rows(face_df) if t == cell_type and u not in exclude]
+    if n <= 0 or not candidates:
+        return []
+    k = min(n, len(candidates))
+    return list(rng_pick(candidates, k))
