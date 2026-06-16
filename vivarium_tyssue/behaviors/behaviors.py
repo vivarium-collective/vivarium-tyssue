@@ -93,7 +93,14 @@ def divide_crypt(
         geometry = GEOMETRY_MAP[geom]
     else:
         geometry = geom
-    cell_id = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
+    # The cell may have been extruded (apoptosis_extrusion) between when the
+    # coupling queued this division and when the manager runs it — its unique_id
+    # is then gone. Skip gracefully, matching apoptosis_extrusion's guard.
+    match = sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index
+    if len(match) == 0:
+        print("Cell not found, skipping division")
+        return
+    cell_id = int(match[0])
     sheet.face_df.loc[cell_id, "cell_type"] = "dividing"
     if sheet.face_df.loc[cell_id, "area"] > crit_area:
         # restore prefered_area

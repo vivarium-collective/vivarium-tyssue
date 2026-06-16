@@ -99,6 +99,11 @@ def run_study(study: str, sim_name: str, composite_yaml: str, steps: int,
         state = {"global_time": gt}
         for t in _TYPES:
             state[f"{t}_count"] = float(counts.get(t, 0))
+        # total_count = tissue size (grows under topology_ops as cells divide);
+        # healthy_fraction = displaced-tissue signal robust to division-driven growth.
+        total = sum(float(counts.get(t, 0)) for t in _TYPES)
+        state["total_count"] = total
+        state["healthy_fraction"] = float(counts.get("healthy", 0)) / total if total else 0.0
         # births/deaths: per-step delta of the accumulating coupling stores
         for k in _EVENTS:
             cur = float(comp.state.get(k, 0.0) or 0.0)

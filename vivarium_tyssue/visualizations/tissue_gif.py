@@ -50,9 +50,16 @@ CELL_TYPE_COLORS = {
 # --------------------------------------------------------------------------
 # runs.db reading (Path C) — shared by both viz classes.
 # --------------------------------------------------------------------------
-def _load_frames(runs_db_path: str | None) -> list[dict]:
-    """Return [{t: float, datasets: {vert_df, edge_df, face_df, cell_df}}] for the
-    most recent run in runs.db. Empty list when unavailable.
+def _load_frames(runs_db_path: str | None, source: str | None = None) -> list[dict]:
+    """Return [{t: float, datasets: {vert_df, edge_df, face_df, cell_df}}] for a
+    single simulation in runs.db. Empty list when unavailable.
+
+    A runs.db may hold several simulations (e.g. the tumor-vs-baseline study keys
+    ``tumor__tumor`` and ``epithelium_2d__baseline`` in one db). ``source`` picks
+    which one: a simulation_id whose suffix matches ``__<source>`` (or an exact id).
+    Without ``source``, the most recently written simulation is used. Loading frames
+    across simulations (the old fall-through) interleaves two runs by step and must
+    be avoided.
     """
     if not runs_db_path:
         return []
@@ -70,19 +77,31 @@ def _load_frames(runs_db_path: str | None) -> list[dict]:
         ).fetchone()
         if not has_history:
             return []
-        # Pick the most recent run if a run_id column exists; otherwise take all.
         cols = {r["name"] for r in conn.execute("PRAGMA table_info(history)").fetchall()}
-        if "run_id" in cols:
-            last = conn.execute(
-                "SELECT run_id FROM history ORDER BY rowid DESC LIMIT 1"
-            ).fetchone()
-            rows = conn.execute(
-                "SELECT global_time, state FROM history WHERE run_id=? ORDER BY step ASC",
-                (last["run_id"],),
-            ).fetchall()
-        else:
+        # The id column is 'simulation_id' (run_study_sims schema) or legacy 'run_id'.
+        id_col = "simulation_id" if "simulation_id" in cols else (
+            "run_id" if "run_id" in cols else None)
+        if id_col is None:
             rows = conn.execute(
                 "SELECT global_time, state FROM history ORDER BY step ASC"
+            ).fetchall()
+        else:
+            sim_ids = [r[0] for r in conn.execute(
+                f"SELECT DISTINCT {id_col} FROM history").fetchall()]
+            chosen = None
+            if source:
+                matches = [s for s in sim_ids
+                           if s == source or str(s).endswith(f"__{source}")]
+                chosen = matches[0] if matches else None
+            if chosen is None:
+                # Most recently written simulation (max rowid).
+                last = conn.execute(
+                    f"SELECT {id_col} FROM history ORDER BY rowid DESC LIMIT 1"
+                ).fetchone()
+                chosen = last[id_col] if last else None
+            rows = conn.execute(
+                f"SELECT global_time, state FROM history WHERE {id_col}=? ORDER BY step ASC",
+                (chosen,),
             ).fetchall()
     except sqlite3.OperationalError:
         return []
@@ -254,6 +273,72 @@ def _matplotlib_gif(frames: list[dict], coords: list[str], *, edge_color: str,
     return data
 
 
+def _sheet_view_gif(frames: list[dict], *, coords: list[str]) -> bytes | None:
+    """Animate the sheet by drawing each frame with tyssue's sheet_view, faces
+    colored by cell_type — the SAME renderer as TissueSheetSnapshots, so the movie
+    and the stills are visually consistent. Returns GIF bytes, or None on failure.
+
+    Preferred over tyssue's create_gif here because create_gif reconstructs a
+    History (which our emitted-datasets replay doesn't satisfy — KeyError 'vert'),
+    whereas this rebuilds a Sheet per frame, which is exactly what the snapshots do.
+    """
+    import numpy as np
+    from matplotlib.colors import to_rgba
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    from tyssue import SheetGeometry
+    from tyssue.draw import sheet_view
+
+    # Stable axis limits across frames (the mesh grows, so span all frames' verts).
+    xs, ys = [], []
+    a, b = coords[0], coords[1]
+    for fr in frames:
+        vd = fr["datasets"].get("vert_df") or {}
+        if vd.get(a) is not None and vd.get(b) is not None:
+            xs += list(vd[a]); ys += list(vd[b])
+    if not xs:
+        return None
+    xpad = 0.05 * (max(xs) - min(xs) + 1e-9); ypad = 0.05 * (max(ys) - min(ys) + 1e-9)
+    xlim = (min(xs) - xpad, max(xs) + xpad); ylim = (min(ys) - ypad, max(ys) + ypad)
+
+    import tempfile
+    from PIL import Image
+    images = []
+    for fr in frames:
+        try:
+            sheet = _build_sheet(fr["datasets"])
+            SheetGeometry.update_all(sheet)
+        except Exception:  # noqa: BLE001 — skip an unbuildable frame
+            continue
+        ctypes = list(sheet.face_df.get("cell_type", ["?"] * sheet.Nf))
+        cols = np.array([to_rgba(CELL_TYPE_COLORS.get(str(t), "#9aa0a6")) for t in ctypes])
+        fig, ax = plt.subplots(figsize=(4, 4))
+        try:
+            sheet_view(sheet, coords=coords, ax=ax,
+                       face={"visible": True, "color": cols, "alpha": 0.9},
+                       edge={"visible": True, "color": "#333333", "width": 0.3, "alpha": 0.7})
+            ax.set_xlim(*xlim); ax.set_ylim(*ylim); ax.set_aspect("equal"); ax.set_axis_off()
+            ax.set_title(f"t = {fr['t']:.2f}", fontsize=9)
+            buf = io.BytesIO(); fig.savefig(buf, format="png", dpi=90, bbox_inches="tight")
+            buf.seek(0); images.append(Image.open(buf).convert("RGB"))
+        finally:
+            plt.close(fig)
+    if not images:
+        return None
+    with tempfile.NamedTemporaryFile(suffix=".gif", delete=False) as tmp:
+        out_path = tmp.name
+    try:
+        images[0].save(out_path, save_all=True, append_images=images[1:],
+                       duration=100, loop=0, optimize=True)
+        return Path(out_path).read_bytes()
+    finally:
+        try:
+            Path(out_path).unlink()
+        except OSError:
+            pass
+
+
 def _tyssue_gif(frames: list[dict], *, coords: list[str], num_frames: int,
                 face_color: str, edge_color: str, alpha: float,
                 threed: bool, crypt: bool, cull_back_edges: bool) -> bytes | None:
@@ -321,7 +406,8 @@ class TissueSheetGif(Visualization):
 
     def _render_html(self) -> str:
         cfg = getattr(self, "config", None) or {}
-        frames = _load_frames(cfg.get("_runs_db_path") or "")
+        source = (cfg.get("sources") or [None])[0]
+        frames = _load_frames(cfg.get("_runs_db_path") or "", source)
         if not frames:
             return _empty_html(
                 "no tissue datasets found in runs.db (the run must emit the "
@@ -336,19 +422,17 @@ class TissueSheetGif(Visualization):
         div_id = self.stable_div_id(title)
 
         sampled = _subsample(frames, num_frames)
-        # 1. Faithful tyssue render.
+        # 1. Primary: sheet_view per frame, faces colored by cell_type — matches the
+        #    snapshot stills exactly (same renderer).
         try:
-            gif = _tyssue_gif(sampled, coords=coords, num_frames=num_frames,
-                              face_color=face_color, edge_color=edge_color,
-                              alpha=alpha, threed=False, crypt=False,
-                              cull_back_edges=False)
+            gif = _sheet_view_gif(sampled, coords=coords)
             if gif:
-                return _gif_html(gif, f"{title} — {len(frames)} steps (tyssue create_gif)", div_id)
+                return _gif_html(gif, f"{title} — {len(frames)} steps (tyssue sheet_view, "
+                                 f"colored by cell type)", div_id)
+            fallback_note = "sheet_view produced no frames; using matplotlib mesh."
         except Exception as exc:  # noqa: BLE001 — fall through to matplotlib
-            fallback_note = f"tyssue render unavailable ({type(exc).__name__}); using matplotlib mesh."
-        else:
-            fallback_note = "tyssue render returned no frames; using matplotlib mesh."
-        # 2. matplotlib fallback.
+            fallback_note = f"sheet_view unavailable ({type(exc).__name__}); using matplotlib mesh."
+        # 2. matplotlib mesh fallback (dependency-light, no face color).
         gif = _matplotlib_gif(sampled, coords, edge_color=edge_color,
                               face_color=face_color, alpha=alpha, threed=False)
         if gif:

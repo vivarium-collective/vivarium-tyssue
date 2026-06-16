@@ -29,24 +29,46 @@ sys.path.insert(0, str(ROOT))
 STUDIES = ROOT / "workspace" / "studies"
 
 
+def _with_caption(html: str, caption: str) -> str:
+    """Append a reviewer-facing explanatory note below a rendered viz.
+
+    The dashboard embeds these viz/*.html files verbatim into the investigation
+    report (server.py Source 1), so an explanatory <div> here travels with the
+    chart — the place to answer 'explain better what is going on'."""
+    if not caption:
+        return html
+    return (
+        html
+        + '<div style="font-family:system-ui;font-size:0.85rem;line-height:1.4;'
+        'color:#374151;background:#f9fafb;border-left:3px solid #6366f1;'
+        'padding:0.6rem 0.8rem;margin-top:0.5rem;border-radius:0 4px 4px 0">'
+        f"{caption}</div>"
+    )
+
+
 def _render_one(address: str, config: dict, runs_db: str, study_yaml: str) -> str:
     cfg = dict(config or {})
     cfg["_runs_db_path"] = runs_db
     cfg["_study_yaml_path"] = study_yaml
+    caption = cfg.get("caption") or ""
+    # A study's runs.db may hold several simulations; sources[0] selects which one
+    # the mesh viz (snapshots/gif) should read. Timeseries handles sources itself.
+    source = (cfg.get("sources") or [None])[0]
     name = address.split(":", 1)[-1]
     if name == "TissueSheetSnapshots":
         from vivarium_tyssue.visualizations.tissue_snapshots import _panels_html, _load_frames
-        frames = _load_frames(runs_db)
-        return _panels_html(frames, list(cfg.get("coords") or ["x", "y"]),
+        frames = _load_frames(runs_db, source)
+        html = _panels_html(frames, list(cfg.get("coords") or ["x", "y"]),
                             int(cfg.get("n_panels") or 6), cfg.get("title") or "snapshots")
+        return _with_caption(html, caption)
     if name == "TissueSheetGif":
         from vivarium_tyssue.visualizations.tissue_gif import TissueSheetGif
         v = TissueSheetGif.__new__(TissueSheetGif)
         v.config = cfg
-        return v._render_html()
+        return _with_caption(v._render_html(), caption)
     if name == "TimeSeriesFromObservables":
         from pbg_superpowers.visualizations.timeseries_from_observables import _render_html
-        return _render_html(cfg)
+        return _with_caption(_render_html(cfg), caption)
     return f'<div>unsupported viz address: {address}</div>'
 
 

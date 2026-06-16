@@ -13,13 +13,47 @@ objective: Build the COPASI-coupled tumor composite and demonstrate, through fiv
 hypothesis: Under flux-driven coupling, a small seeded tumor focus expands while healthy
   cells are progressively converted/killed, producing a clear shift in cell-type composition
   over the run.
-description: "The `tumor` composite wires CopasiUTCProcess(BIOMD0000000903) \u2014\
-  \ owned internally by TumorCoupling \u2014 to the EulerSolver tyssue process on\
-  \ a flat SheetGeometry sheet (test_square, ~206 cells). Each step the adapter scales\
-  \ the model's birth/death reaction fluxes into fractional accumulators and emits\
-  \ cell-fate events: tumor birth relabels a stem (C\u2192T) or healthy cell to tumor,\
-  \ healthy/stem births relabel sources, and deaths relabel cells to \"dead\". Default\
-  \ interval 0.1 keeps the vertex mechanics stable."
+study_card:
+  title: COPASI tumor ODE driving real cell division/extrusion on a 2D epithelium
+  verdict: mechanism-demonstrated
+  confidence: medium
+  evidence_quality: qualitative
+  purpose: >-
+    Show that a non-spatial breast-cancer population ODE (BIOMD0000000903, run in COPASI)
+    can drive discrete, real cell-fate mechanics — division and apoptotic extrusion — on a
+    tyssue vertex-model epithelial sheet, rather than abstract counts.
+  background: >-
+    BIOMD0000000903 (Solís-Pérez et al., 2019) is a fractional ODE over five populations
+    (cancer-stem C, tumor T, healthy H, immune I, estrogen E). The TumorCoupling process
+    integrates the model each step, scales its per-reaction birth/death fluxes through
+    fractional accumulators, and fires integer cell-fate events on a flat SheetGeometry
+    sheet. Real vertex-model topology (cell_division / apoptosis_extrusion) runs on the
+    pandas-3-compatible tyssue fork (vivatyssue).
+  conclusion: >-
+    Over a 150-step run the sheet grows 206→308 cells via 176 real cell divisions, the
+    tumor clone expands 0→117, the healthy fraction falls 1.00→0.62, and 68 apoptotic
+    cells extrude. All five acceptance tests pass.
+  main_insight: Births add faces and deaths remove them — tumor invasion manifests as
+    genuine tissue growth and remodeling, not relabeling.
+  caveat: Qualitative coupling (scales tuned, not fit); requires the tyssue fork; final
+    counts vary by a few cells run-to-run.
+  key_metrics:
+  - {label: total cells, value: "206 → 308", status: pass}
+  - {label: tumor cells, value: "0 → 117", status: pass}
+  - {label: healthy fraction, value: "1.00 → 0.62", status: pass}
+  - {label: cell divisions, value: "176 events", status: pass}
+  - {label: apoptotic extrusions, value: "68 events", status: pass}
+description: >-
+  The `tumor` composite wires CopasiUTCProcess(BIOMD0000000903) \u2014 owned internally
+  by TumorCoupling \u2014 to the EulerSolver tyssue process on a flat SheetGeometry sheet
+  (test_square, 206 cells). Each step the adapter scales the model's birth/death
+  reaction fluxes into fractional accumulators and fires discrete vertex-model events
+  on the mesh. With topology_ops=true (the default now that the workspace runs the
+  pandas-3-compatible tyssue fork), a birth is a real tyssue cell_division (the cell
+  splits, the mesh gains a face) and a death is a real apoptosis_extrusion (the cell
+  shrinks and is removed via remove_face) \u2014 so the tissue genuinely grows and remodels,
+  not just recolors. Tumor births preferentially differentiate a free stem cell (C\u2192T),
+  else divide an existing tumor cell. Interval 0.1 keeps the vertex mechanics stable.
 baseline:
 - name: tumor
   composite: vivarium_tyssue.composites.tumor
@@ -64,7 +98,17 @@ observables:
 - name: dead_count
   store_path: dead_count
   units: cells
-  description: Dead cells on the mesh
+  description: Dead cells on the mesh (0 under topology_ops — apoptotic cells are
+    extruded/removed, not relabeled "dead"; see *_deaths for the extrusion events)
+- name: total_count
+  store_path: total_count
+  units: cells
+  description: Total live cells on the mesh — grows as cells divide (real topology)
+- name: healthy_fraction
+  store_path: healthy_fraction
+  units: fraction
+  description: Healthy cells / total — the displacement signal robust to division-driven
+    tissue growth (absolute healthy count barely falls when the sheet is proliferating)
 # readouts[].store_path is what the run handler emits to runs.db (via
 # collect_emit_paths_from_spec). The scalar stores feed TimeSeriesFromObservables;
 # the Datasets/* dataframes feed the snapshots + gif (which read vert/edge/face).
@@ -79,6 +123,8 @@ readouts:
 - {name: healthy_count,  store_path: healthy_count,  units: cells}
 - {name: stem_count,     store_path: stem_count,     units: cells}
 - {name: dead_count,     store_path: dead_count,     units: cells}
+- {name: total_count,    store_path: total_count,    units: cells}
+- {name: healthy_fraction, store_path: healthy_fraction, units: fraction}
 - {name: vert_df, store_path: Datasets/vert_df, description: mesh vertices (geometry)}
 - {name: edge_df, store_path: Datasets/edge_df, description: mesh edges (geometry)}
 - {name: face_df, store_path: Datasets/face_df, description: cells (cell_type/area)}
@@ -91,6 +137,12 @@ visualizations:
     - x
     - y
     n_panels: 6
+    caption: >-
+      Six stills from the run, faces colored by cell type and drawn with tyssue's
+      own sheet_view (the same renderer as the animation, so stills and movie agree).
+      The seeded tumor focus (red) expands into clonal patches while the sheet itself
+      grows — there are visibly more cells at t=125 than at t=0 because births are real
+      cell divisions that add faces to the mesh, not recolorings.
 - name: Tumor sheet animation
   address: local:TissueSheetGif
   config:
@@ -99,46 +151,71 @@ visualizations:
     - x
     - y
     num_frames: 60
+    caption: >-
+      The full run animated from the same tyssue mesh history. Watch the tissue gain
+      cells (cell_division) and tumor patches spread; transient black cells are mid-
+      extrusion (apoptosis_extrusion) before they are removed from the sheet.
 - name: Cell births over time
   address: local:TimeSeriesFromObservables
   config:
-    title: Cell births over time
+    title: Cell births over time (real cell-division events)
     observables:
     - tumor_births
     - healthy_births
     - stem_births
+    caption: >-
+      Each point is the count of discrete birth events fired that step, driven by the
+      COPASI model's per-reaction fluxes (e.g. "Induction of tumor cell") scaled through
+      a fractional accumulator. Under topology_ops every birth is a real tyssue
+      cell_division — the cell splits and the mesh gains a face. Over the 150-step run
+      these sum to 176 divisions (173 tumor, 2 healthy, 1 stem); the trace is spiky
+      because events are integer and fire only when a flux's accumulator crosses 1.0.
 - name: Cell deaths over time
   address: local:TimeSeriesFromObservables
   config:
-    title: Cell deaths over time
+    title: Cell deaths over time (apoptosis_extrusion events)
     observables:
     - tumor_deaths
     - healthy_deaths
     - stem_deaths
+    caption: >-
+      Per-step death events under flux control. Each is a real apoptosis_extrusion: the
+      cell shrinks to a critical area and is removed from the sheet via remove_face
+      (68 extrusions over the run — 61 tumor, 7 healthy). Because extruded cells leave
+      the mesh entirely, deaths show up here as events, not as a "dead" cell count.
 - name: Cell types over time
   address: local:TimeSeriesFromObservables
   config:
-    title: Cell types over time
+    title: Cell composition and tissue size over time
     observables:
+    - total_count
     - tumor_count
     - healthy_count
-    - stem_count
-    - dead_count
+    - healthy_fraction
+    caption: >-
+      total_count rises 206→308 as the tumor proliferates — direct evidence of real
+      division-driven growth. Healthy absolute count barely falls (206→191) because the
+      epithelium itself keeps dividing, so the displacement signal is the healthy
+      FRACTION, which drops 1.00→0.62. dead_count is omitted: it is identically 0 under
+      topology_ops (apoptotic cells extrude rather than becoming a "dead" type).
 expected_behavior:
-- Seeded focus (8 tumor, 2 stem) expands while healthy tissue declines and dead cells
-  accumulate.
-- "60-step probe (interval 0.1) observed healthy 206\u2192114, tumor 0\u219264, dead\
-  \ 0\u219228."
+- Seeded focus (8 tumor, 2 stem) expands by real cell division; the tissue grows and
+  tumor patches spread while apoptotic cells extrude from the sheet.
+- "150-step run (interval 0.1, seed 0): total cells 206\u2192308, tumor 0\u2192117, healthy
+  fraction 1.00\u21920.62; 176 cell-division and 68 apoptosis-extrusion events."
 limitations:
-- Qualitative coupling, not a quantitatively validated spatial tumor model.
-- The COPASI/SBML stack forces numpy 2.2 / pandas 3.0, under which tyssue 1.1.0's
-  real cell_division / remove_face crash; the default runs a fixed-topology cell-FATE
-  model (relabeling). A topology_ops flag is reserved for a pandas-3-compatible tyssue.
+- Qualitative coupling, not a quantitatively validated spatial tumor model \u2014 flux\u2192event
+  scales are tuned for a watchable cadence, not fit to data.
+- Real vertex-model topology (cell_division / apoptosis_extrusion) requires the
+  pandas-3-compatible tyssue fork (vivatyssue); stock PyPI tyssue 1.1.0 crashes on
+  these ops under the numpy-2/pandas-3 the COPASI stack forces.
+- Reproducibility is approximate \u2014 cell selection is stochastic (seeded) and rare
+  topology edge cases (dividing a since-extruded cell) are skipped, so final counts
+  vary by a few cells run-to-run (~115\u2013120 tumor); the qualitative trend is stable.
 - Immune (I) and estrogen (E) drive the ODE but have no mesh cells.
-# Acceptance tests evaluated against the canonical 60-step run (interval 0.1,
-# seed=0). measure.path points at an emitted observable; result is the run's
-# verdict against pass_if. (behavior_tests is the v3 array form; `tests` is a
-# v4-reserved mapping.)
+# Acceptance tests evaluated against the canonical 150-step run (interval 0.1,
+# seed=0, topology_ops=true). measure.path points at an emitted observable; result
+# is the run's verdict against pass_if. (behavior_tests is the v3 array form.)
 behavior_tests:
 - name: tumor_expansion
   classification: quantitative
@@ -146,21 +223,32 @@ behavior_tests:
   measure: {kind: last, path: tumor_count}
   pass_if: {op: gt, threshold: 10}
   result: PASS
-  notes: "final tumor_count = 64 (seeded 8) \u2014 well above the 10-cell threshold."
+  notes: "final tumor_count = 117 (seeded 8) \u2014 well above the 10-cell threshold."
+- name: tissue_growth_by_division
+  classification: quantitative
+  question: Does the mesh actually grow \u2014 i.e. are births real cell divisions, not
+    relabelings?
+  measure: {kind: last, path: total_count}
+  pass_if: {op: gt, threshold: 206}
+  result: PASS
+  notes: "total cells 206\u2192308 (+102). Births add faces via tyssue cell_division;
+    a relabeling model would hold total fixed at 206."
 - name: healthy_displacement
   classification: quantitative
-  question: Is healthy tissue progressively displaced?
-  measure: {kind: last, path: healthy_count}
-  pass_if: {op: lt, threshold: 180}
+  question: Is healthy tissue progressively displaced (as a fraction of the sheet)?
+  measure: {kind: last, path: healthy_fraction}
+  pass_if: {op: lt, threshold: 0.8}
   result: PASS
-  notes: "final healthy_count = 114, down from 206 (\u221292 cells, \u221245%)."
-- name: cell_death_accumulation
+  notes: "healthy fraction 1.00\u21920.62. Absolute healthy count barely falls (206\u2192191)
+    because the sheet proliferates, so fraction is the honest displacement signal."
+- name: apoptotic_extrusion
   classification: quantitative
-  question: Do SBML death fluxes produce accumulating dead cells?
-  measure: {kind: last, path: dead_count}
-  pass_if: {op: gt, threshold: 5}
+  question: Do SBML death fluxes produce real apoptosis_extrusion events?
+  measure: {kind: series, path: tumor_deaths}
+  pass_if: {op: nonzero}
   result: PASS
-  notes: "final dead_count = 28, monotonically rising from 0."
+  notes: "68 extrusion events over the run (61 tumor, 7 healthy); each removes a face
+    via remove_face. dead_count stays 0 by construction \u2014 extruded cells leave the mesh."
 - name: flux_driven_events
   classification: qualitative
   question: Are births/deaths driven by COPASI reaction fluxes (not random)?
@@ -173,55 +261,109 @@ findings:
 - id: F1
   kind: computational
   status: confirms
-  statement: The COPASI BIOMD0000000903 model drives discrete cell-fate events on the
-    tyssue mesh, not random turnover.
+  statement: The COPASI BIOMD0000000903 model drives discrete cell-division and
+    cell-extrusion events on the tyssue mesh, not random turnover.
   summary: Each step the internal COPASI integration yields per-reaction fluxes
-    (e.g. 'Induction of tumor cell' ~3.1e5, 'Decrase of healthy cell due to cancer'
-    ~8.2e6 at t=0); the fractional accumulator scales these into integer divide /
-    differentiate / death events. Events vanish when the driving flux is zero.
-  explanation: Verified by the flux_driven_events test (PASS) and a 25-step
-    integration test asserting tumor cells appear and healthy cells are consumed.
-  evidence: {from_test: flux_driven_events, observed: nonzero, units: events/step}
+    (e.g. 'Induction of tumor cell', 'Decrase of healthy cell due to cancer'); the
+    fractional accumulator scales these into integer events. Under topology_ops each
+    birth is a real tyssue cell_division (mesh gains a face) and each death a real
+    apoptosis_extrusion (remove_face). Events vanish when the driving flux is zero,
+    so the cadence tracks the model, not a random timer.
+  explanation: Verified by flux_driven_events (PASS) and tissue_growth_by_division
+    (PASS \u2014 total cells 206\u2192308). The "cell n\u00b0 is born" log lines are tyssue's own
+    cell_division emitting as the mesh grows.
+  evidence: {from_test: tissue_growth_by_division, observed: 308, units: cells}
 - id: F2
   kind: biological
   status: confirms
-  statement: A small seeded tumor focus expands while healthy epithelium is displaced
-    and dead cells accumulate \u2014 the expected qualitative invasion trend.
-  summary: "Over 60 steps (interval 0.1) tumor cells rose 0\u219264, healthy fell\
-    \ 206\u2192114 (\u221245%), and dead cells accumulated 0\u219228. Tumor births\
-    \ are realized preferentially by differentiating stem cells (C\u2192T), matching\
-    \ the model's stem\u2192tumor induction; the 2 seeded stem cells are consumed\
-    \ early, so stem stays low."
-  explanation: Drawn from the canonical run's cell-type trajectory (see the
-    'Cell types over time' and snapshot visualizations).
-  evidence: {from_test: tumor_expansion, observed: 64, units: cells}
+  statement: A seeded tumor focus expands by real cell division \u2014 the tissue grows and
+    tumor patches spread while apoptotic cells extrude \u2014 the expected qualitative
+    invasion trend, now visible as genuine topology change rather than recoloring.
+  summary: "Over 150 steps (interval 0.1) the mesh grew 206\u2192308 cells via 176 cell
+    divisions; tumor rose 0\u2192117 and the healthy fraction fell 1.00\u21920.62, with 68
+    apoptosis-extrusion events removing cells from the sheet. Tumor births preferentially
+    differentiate a free stem cell (C\u2192T) then divide existing tumor cells, matching the
+    model's stem\u2192tumor induction; the 2 seeded stem cells are consumed early."
+  explanation: Drawn from the canonical run's trajectory and the tyssue sheet_view
+    snapshots/animation, which now show the sheet visibly gaining cells and tumor
+    clones spreading \u2014 addressing the prior review that the movie showed only relaxation.
+  evidence: {from_test: tumor_expansion, observed: 117, units: cells}
 - id: F3
   kind: methodological
   status: novel
-  statement: A non-spatial population ODE can drive a spatial epithelial fate model
-    through a flux\u2192event adapter, decoupling the biochemical model from the mesh.
+  statement: A non-spatial population ODE can drive a real spatial vertex model
+    (division + extrusion) through a flux\u2192event adapter, decoupling the biochemical
+    model from the mesh mechanics.
   summary: The TumorCoupling process owns COPASI internally and converts fluxes to
-    mesh events via per-type fractional accumulators, so any SBML population model
-    with birth/death reactions could drive the sheet. The default is a fixed-topology
-    fate model (relabeling) because tyssue 1.1.0's real division/extrusion are
-    incompatible with the numpy-2.2/pandas-3.0 the COPASI stack forces.
-  explanation: A topology_ops flag preserves the real vertex-model path for a
-    pandas-3-compatible tyssue.
-conclusion: The COPASI-coupled tumor composite runs stably (60 steps, interval 0.1)
-  and reproduces the expected qualitative breast-cancer invasion dynamics on a 2D
-  epithelial sheet \u2014 tumor expansion (0\u219264), healthy displacement (206\u2192114), and
-  dead-cell accumulation (0\u219228). All four acceptance tests pass. This is a
-  mechanism demonstration, not a quantitatively validated spatial tumor model.
+    mesh events via per-type fractional accumulators, so any SBML population model with
+    birth/death reactions could drive the sheet. Real topology_ops (cell_division /
+    apoptosis_extrusion) run on the pandas-3-compatible tyssue fork; the fixed-topology
+    relabel path is retained only as a fallback for stock tyssue installs.
+  explanation: The topology_ops flag selects real vertex-model surgery (default true
+    here) vs the relabel fallback, so the same coupling runs on either tyssue build.
+conclusion: The COPASI-coupled tumor composite runs stably for 150 steps (interval 0.1)
+  on the pandas-3 tyssue fork and reproduces breast-cancer invasion dynamics as real
+  vertex-model topology \u2014 the sheet grows 206\u2192308 cells via 176 cell divisions, tumor
+  expands 0\u2192117, the healthy fraction falls to 0.62, and 68 apoptotic cells extrude.
+  All five acceptance tests pass. This is a mechanism demonstration, not a
+  quantitatively validated spatial tumor model.
 biological_summary: BIOMD0000000903 models breast-cancer population competition
-  (cancer-stem, tumor, healthy, immune, estrogen). Coupled to the mesh, its tumor
-  growth and healthy-killing fluxes manifest as cells changing fate \u2014 healthy
-  epithelium converting to tumor and dying \u2014 qualitatively mirroring tumor invasion
-  of normal tissue. Immune and estrogen remain off-mesh drivers of the ODE.
+  (cancer-stem, tumor, healthy, immune, estrogen). Coupled to the mesh, its tumor-growth
+  fluxes drive real cell divisions that expand a tumor clone and grow the tissue, while
+  its death fluxes extrude apoptotic cells from the epithelium \u2014 qualitatively mirroring
+  tumor invasion and remodeling of normal tissue. Immune and estrogen remain off-mesh
+  drivers of the ODE.
 conclusion_verdicts:
-- claim: SBML fluxes drive discrete mesh cell-fate events
-  verdict: supported
-  basis: flux_driven_events + tumor_expansion tests pass
-- claim: Tumor invades while healthy tissue is displaced
-  verdict: supported
-  basis: tumor 0\u219264, healthy 206\u2192114, dead 0\u219228 over the canonical run
+  regression_compatibility:
+    result: PASS
+    basis: Composite runs 150 steps stably on the pandas-3 tyssue fork; all five
+      acceptance tests pass.
+  biological_validation:
+    result: MIXED
+    basis: Qualitative invasion dynamics match the expected trend (division-driven
+      growth 206\u2192308, tumor 0\u2192117, healthy fraction 1.00\u21920.62, 68 extrusions), but the
+      flux\u2192event scales are tuned, not calibrated to data \u2014 so the match is qualitative.
+  explanatory_gain:
+    result: POSITIVE
+    basis: Demonstrated a non-spatial population ODE can drive real vertex-model
+      topology (cell_division + apoptosis_extrusion) through a flux\u2192event adapter.
+# Responses to the 2026-06-15 inline review (Tasnif Rahman). Each reviewer point
+# is paired with the concrete action taken in this revision.
+feedback_responses:
+- ref: finding-F1
+  reviewer: '"Again, this is clearly not happening." (re: discrete flux-driven events)'
+  action: >-
+    Root cause confirmed and fixed. The composite was running topology_ops=false
+    (relabeling on a fixed mesh), so no real divisions/deaths occurred. Switched the
+    workspace to the pandas-3-compatible tyssue fork and enabled topology_ops=true;
+    births are now real tyssue cell_division and deaths real apoptosis_extrusion. The
+    mesh grows 206\u2192308 cells (tissue_growth_by_division test, PASS) \u2014 direct evidence
+    the events fire on the mesh.
+- ref: finding-F2
+  reviewer: '"This does not bear out in the images or the video. There is no actual
+    growth in the video just standard tissue relaxation."'
+  action: >-
+    Correct diagnosis \u2014 relabel mode never changed topology, so the movie showed only
+    mechanical relaxation. With real cell_division the sheet now visibly gains cells
+    over the run (snapshots + animation re-rendered from the same tyssue mesh history).
+    F2 reframed around the honest signal: total cells 206\u2192308, healthy FRACTION
+    1.00\u21920.62 (absolute healthy count barely falls because the epithelium proliferates).
+- ref: study-tumor-composite-embeds
+  reviewer: '"time-step too small"; "Cell divisions and deaths appear to not be
+    happening"; "strange overlapping cells and triangular sections and the color coding
+    does not seem to be capturing cells".'
+  action: >-
+    (1) Divisions/deaths: now real (topology_ops=true) and visible \u2014 see F1/F2 and the
+    new births/deaths captions. (2) Snapshots: replaced the hand-rolled polygon
+    renderer (which grouped edges without ordering the face loop \u2192 self-intersecting
+    "triangular" cells, and mapped colors by positional row \u2192 wrong colors after
+    topology changes) with tyssue's own sheet_view, which orders vertices per face and
+    colors by cell_type with a legend. (3) Time-step: interval 0.1 is the mechanically
+    stable dt; the longer 150-step run gives a clearer trend than the prior 60.
+- ref: study-tumor-composite-summary
+  reviewer: '"The purpose and background section seems empty."'
+  action: >-
+    Added a study_card executive summary (purpose, background, headline metrics) and
+    expanded the description with the real-topology mechanism so the report's
+    purpose/background panel is populated.
 runs: []

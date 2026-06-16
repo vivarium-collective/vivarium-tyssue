@@ -157,6 +157,11 @@ class TumorCoupling(Process):
             out[k] = "float"
         for t in _TYPES + ["dead"]:
             out[f"{t}_count"] = "float"
+        # total_count tracks tissue size (grows under topology_ops as cells
+        # divide); healthy_fraction is the displaced-tissue signal that stays
+        # meaningful when births add cells rather than relabel them.
+        out["total_count"] = "float"
+        out["healthy_fraction"] = "float"
         return out
 
     # -- behavior dict builders (shapes match gillespie.py / behaviors.py) --
@@ -271,4 +276,7 @@ class TumorCoupling(Process):
             result[k] = float(fired[k])
         for t in _TYPES + ["dead"]:
             result[f"{t}_count"] = counts[t]
+        total = sum(counts[t] for t in _TYPES + ["dead"])
+        result["total_count"] = float(total)
+        result["healthy_fraction"] = float(counts["healthy"] / total) if total else 0.0
         return result

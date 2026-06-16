@@ -24,6 +24,11 @@ dependencies = [
     # tyssue pulls these transitively but does not declare them all, so pin them
     # explicitly: scikit-image + vispy (tyssue.draw import chain), quantities
     # (tyssue.dynamics), tables (HDF5 .hf5 mesh loading via pandas.HDFStore).
+    # tyssue resolves to the vivarium-collective *fork* (vivatyssue) via
+    # [tool.uv.sources] — stock PyPI tyssue 1.1.0 crashes on real topology ops
+    # (cell_division/remove_face) under the pandas-3.0/numpy-2.x that the COPASI
+    # stack forces (read-only array in get_opposite). The fork patches that, so
+    # the tumor composite can run topology_ops=true (real divisions/extrusions).
     "tyssue",
     "pandas",
     "numpy",
@@ -31,6 +36,11 @@ dependencies = [
     "vispy",
     "quantities",
     "tables",
+    # ipywidgets is imported at module top by tyssue.draw (plt_draw + ipv_draw),
+    # so tyssue's own sheet_view / create_gif are unimportable without it. The
+    # snapshot + gif visualizations render through tyssue.draw, so this is a
+    # load-bearing runtime dep, not just a notebook nicety.
+    "ipywidgets",
     # Web-based workspace dashboard (server + templates + assets + lib helpers);
     # provides the `vivarium-dashboard serve` CLI invoked by scripts/serve.sh and
     # the Dockerfile CMD. Not published to PyPI — resolved via [tool.uv.sources]
@@ -91,6 +101,10 @@ override-dependencies = [
 # The root-workspace source should in principle override pbg-biomodels' path source,
 # but override-dependencies above is the primary fix; this is belt-and-suspenders.
 [tool.uv.sources]
+# The pandas-3-compatible tyssue fork (adds VesselGeometry/model_factory_* and
+# patches get_opposite so cell_division/remove_face work under read-only pandas-3
+# arrays). Required for the tumor composite's topology_ops=true path.
+tyssue = { git = "https://github.com/vivarium-collective/vivatyssue.git" }
 vivarium-dashboard = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git" }
 pbg-tellurium = { git = "https://github.com/vivarium-collective/pbg-tellurium.git" }
 pbg-simbio = { git = "https://github.com/vivarium-collective/pbg-simbio.git" }

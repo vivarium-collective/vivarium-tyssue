@@ -109,6 +109,11 @@ state:
       seed:
         tumor: 8
         stem: 2
+      # Real vertex-model topology: births split a cell (cell_division), deaths
+      # extrude it (remove_face). Enabled now that the workspace runs the
+      # pandas-3-compatible forked tyssue (vivatyssue src) — stock tyssue 1.1.0
+      # crashes here (read-only array in get_opposite). See README fork caveat.
+      topology_ops: true
     inputs:
       datasets:
       - Datasets
@@ -137,6 +142,10 @@ state:
       - stem_count
       dead_count:
       - dead_count
+      total_count:
+      - total_count
+      healthy_fraction:
+      - healthy_fraction
     interval: ${interval}
   Network Changed: false
   Behaviors: {}
@@ -150,3 +159,5 @@ state:
   healthy_count: 0.0
   stem_count: 0.0
   dead_count: 0.0
+  total_count: 0.0
+  healthy_fraction: 0.0
