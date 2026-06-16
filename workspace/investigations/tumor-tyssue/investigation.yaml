@@ -77,6 +77,9 @@ biological_story: >-
   dying cells. Against an untouched control sheet that merely relaxes mechanically, the
   coupled sheet visibly invades and remodels: tumor patches spread and the healthy
   fraction of the tissue steadily falls.
+studies:
+- tumor-composite
+- tumor-vs-baseline
 acceptance_criteria:
 - study: tumor-composite
   behavior: SBML reaction fluxes drive discrete, real cell-fate mechanics on the mesh —
