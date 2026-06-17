@@ -69,6 +69,11 @@ def _render_one(address: str, config: dict, runs_db: str, study_yaml: str) -> st
     if name == "TimeSeriesFromObservables":
         from pbg_superpowers.visualizations.timeseries_from_observables import _render_html
         return _with_caption(_render_html(cfg), caption)
+    if name in ("TumorCloneGrowth", "CellAreaOverTime"):
+        import vivarium_tyssue.visualizations.tumor_metrics as tm
+        v = getattr(tm, name).__new__(getattr(tm, name))
+        v.config = cfg
+        return _with_caption(v._render_html(), caption)
     return f'<div>unsupported viz address: {address}</div>'
 
 

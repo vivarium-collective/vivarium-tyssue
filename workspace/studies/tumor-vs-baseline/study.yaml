@@ -135,6 +135,17 @@ visualizations:
     caption: >-
       The baseline arm animated for side-by-side comparison — the mesh only relaxes
       mechanically; no cells are added or removed.
+- name: Tumor clone growth (tumor arm)
+  address: local:TumorCloneGrowth
+  config:
+    title: Tumor clone growth — size and outward spread (tumor arm)
+    sources: [tumor]
+    caption: >-
+      The tumor arm's clone quantified: tumor cell count (red) rises 0→112 while the
+      clone spread radius (orange dashed) grows then plateaus — one compact focus
+      expanding outward. The baseline arm has no tumor cells, so this metric is flat-zero
+      there and is shown for the tumor arm only; it is the quantitative counterpart to
+      the side-by-side snapshots above.
 expected_behavior:
 - "Baseline: stays 100% healthy, no births/deaths, total cells fixed at 206, morphology
   relaxes uniformly."
@@ -211,7 +222,28 @@ conclusion: The controlled comparison isolates the tumor coupling's effect — t
   steps (interval 0.01), while the COPASI-coupled arm grows a single central clone to
   312 cells (175 divisions), reaching 112 tumor and a healthy fraction of 0.64. All four
   acceptance tests pass. With real topology the divergence is visible in tissue size and
-  morphology as well as composition.
+  morphology as well as composition. Implications & next steps - because the only
+  difference between the arms is the coupling, this is a clean substrate for sweeps -
+  vary the tumor-induction scale (or suppress a flux as a "treatment") and chart
+  healthy_fraction / clone radius vs the swept value. See discovery_implications.
+# Forward-looking reading of the controlled contrast (additionalProperties, ignored by schema).
+discovery_implications:
+- discovery: >-
+    With the coupling off the sheet is static and 100% healthy; with it on a single
+    central clone grows the tissue and lowers the healthy fraction - a divergence
+    attributable solely to the SBML coupling (identical geometry/mechanics otherwise).
+  implication: >-
+    The isolated contrast makes the composite a controlled testbed for asking which
+    reactions and parameters drive invasion, and by how much.
+  suggested_visualizations:
+  - Dose-response panel - final healthy_fraction and clone radius vs a swept
+    tumor-induction scale (or a suppressed "treatment" flux).
+  - Side-by-side cell-area distributions (tumor arm vs baseline) to show the tumor arm
+    stays as relaxed as the untouched control despite growing.
+  suggested_studies:
+  - Seed at the edge vs the centre to test geometry-dependence of outgrowth.
+  - Add a mechanical-stress readout to compare the footprint of division-driven growth
+    against the static baseline.
 biological_summary: The baseline represents undisturbed epithelium; the tumor arm
   adds BIOMD0000000903's population dynamics. The tumor arm's division-driven growth and
   healthy-fraction loss, absent in the static baseline, are the spatial read-out of the

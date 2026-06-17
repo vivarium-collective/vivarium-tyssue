@@ -207,6 +207,34 @@ visualizations:
       epithelium itself keeps dividing, so the displacement signal is the healthy
       FRACTION, which drops 1.00→0.64. dead_count is omitted: it is identically 0 under
       topology_ops (apoptotic cells extrude rather than becoming a "dead" type).
+- name: Tumor clone growth
+  address: local:TumorCloneGrowth
+  config:
+    title: Tumor clone growth — size and outward spread
+    sources: [tumor]
+    caption: >-
+      Quantifies the snapshots: the tumor cell count (red) climbs steadily 0→112 while
+      the clone's spread radius (orange dashed — the mean distance of tumor faces from
+      their own centroid) rises early then plateaus near 2.0 even as the count keeps
+      growing. One tight, smoothly-growing radius is the signature of a SINGLE focus
+      expanding and filling in; a scatter of separate foci would show a large, jumpy
+      radius from the first step. This is the quantitative read-out of "seed a single
+      tumor and have it grow out."
+- name: Cell area over time
+  address: local:CellAreaOverTime
+  config:
+    title: Cell-area distribution over time (mesh stays relaxed — no overlap)
+    sources: [tumor]
+    prefered_area: 1.0
+    division_crit: 2.0
+    caption: >-
+      Evidence the sheet relaxes between divisions rather than overlapping. The healthy
+      median face area holds at the prefered area (~1.0); the tumor median sits a little
+      lower (~0.9, freshly-divided daughters); and crucially the 5th-percentile area
+      (the smallest faces on the whole sheet, grey dotted) stays well above zero
+      throughout. Cell overlap would show up as faces collapsing toward zero area — they
+      do not. Reference lines mark the prefered area (1.0) and the division critical area
+      (2.0) a cell must reach before it splits.
 expected_behavior:
 - A single tumor cell seeded at the sheet centre expands by real cell division into one
   contiguous clone; the tissue grows and the focus spreads outward while apoptotic cells
@@ -324,7 +352,34 @@ conclusion: The COPASI-coupled tumor composite runs stably for 150 steps (interv
   clonal patch, the sheet grows 206\u2192312 cells via 175 cell divisions, tumor expands
   0\u2192112, the healthy fraction falls to 0.64, and 67 apoptotic cells extrude. All five
   acceptance tests pass. This is a mechanism demonstration, not a quantitatively
-  validated spatial tumor model.
+  validated spatial tumor model. Implications & next steps - the flux->event adapter is
+  model-agnostic (any SBML birth/death model could drive the sheet), and the clone's
+  saturating spread-radius with a still-rising cell count is a measurable invasion
+  morphology, not just a count. Natural follow-ups - calibrate the scales to data, add a
+  margin-roughness / pushing-vs-infiltrating viz, and move to a curved or 3D geometry now
+  that real topology ops run. See discovery_implications.
+# Forward-looking reading of the result - what it shows beyond pass/fail, and the
+# visualizations / studies it suggests next (additionalProperties, ignored by the schema).
+discovery_implications:
+- discovery: >-
+    A non-spatial population ODE drives real vertex-model topology through a flux->event
+    adapter, and the seeded focus grows as ONE compact clone whose spread radius
+    saturates (~2.0) while the cell count keeps climbing - i.e. the focus densifies and
+    fills rather than fragmenting.
+  implication: >-
+    Invasion here has a measurable morphology (radius vs count, area distribution), so
+    the coupling is a substrate for quantitative spatial questions, not just trend plots.
+  suggested_visualizations:
+  - Margin-roughness trace - perimeter^2 / area of the tumor patch over time, to quantify
+    a smooth pushing margin vs finger-like infiltration.
+  - Local-tumor-fraction heat map on the mesh (faces colored by neighborhood tumor
+    density) to read the invasion front.
+  - Per-cell displacement field (vertex velocity) to show how division pushes the
+    surrounding healthy tissue.
+  suggested_studies:
+  - Calibrate flux->event scales against the BIOMD0000000903 trajectory so counts/areas
+    become quantitative (the open investigation decision).
+  - Repeat on a curved / 3D geometry to test whether the focus buckles or invaginates.
 biological_summary: BIOMD0000000903 models breast-cancer population competition
   (cancer-stem, tumor, healthy, immune, estrogen). Coupled to the mesh, its tumor-growth
   fluxes drive real cell divisions that expand a tumor clone and grow the tissue, while
