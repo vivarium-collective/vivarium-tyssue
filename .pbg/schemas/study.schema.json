@@ -945,6 +945,39 @@
       "description": "Renamed from references because `references:` is dashboard-v4-reserved (list of {file} shape). Keys are section names (e.g. 'expert', 'bib_keys'), values are lists of strings. Free-form additional sections allowed.",
       "additionalProperties": true
     },
+    "discovery_implications": {
+      "type": "object",
+      "description": "Richer Decide-phase synthesis, rendered as the dashboard's 'Discovery implications' section: where this study's results leave the mechanism model and what to investigate next. All sub-fields optional; absent => the section is omitted. The rigor scorecard (pbg_superpowers.rigor) flags a study declaring neither this nor follow_up_studies with a `next_steps` gap. Its `followup_study_proposals` are seedable via /pbg-study seed-from-followup (the richer path).",
+      "additionalProperties": true,
+      "properties": {
+        "resolved_uncertainties": {
+          "type": "array", "items": {"type": "string"},
+          "description": "What this study settled."
+        },
+        "remaining_uncertainties": {
+          "type": "array", "items": {"type": "string"},
+          "description": "What is still open after this study."
+        },
+        "alternate_hypotheses": {
+          "type": "array",
+          "description": "Competing explanations not yet excluded, with what would discriminate them.",
+          "items": {
+            "type": "object", "additionalProperties": true,
+            "properties": {
+              "hypothesis": {"type": "string"},
+              "why_plausible": {"type": "string"},
+              "mechanism_elements_affected": {"type": "array", "items": {"type": "string"}},
+              "discriminating_observables": {"type": "array", "items": {"type": "string"}}
+            }
+          }
+        },
+        "followup_study_proposals": {
+          "type": "array",
+          "description": "Richer variant of the top-level followup_proposals; same seed flow.",
+          "items": {"type": "object", "additionalProperties": true}
+        }
+      }
+    },
     "followup_proposals": {
       "type": "array",
       "description": "Decide-phase output. Each entry is a proposal for a follow-up study motivated by a gap this study revealed. Lifted into a child study via /pbg-study seed-from-followup, which stamps the child with `seeded_from:` and auto-adds the parent to its `pipeline_gate.prerequisites`.",

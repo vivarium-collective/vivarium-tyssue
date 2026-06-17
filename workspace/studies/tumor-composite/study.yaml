@@ -358,28 +358,45 @@ conclusion: The COPASI-coupled tumor composite runs stably for 150 steps (interv
   morphology, not just a count. Natural follow-ups - calibrate the scales to data, add a
   margin-roughness / pushing-vs-infiltrating viz, and move to a curved or 3D geometry now
   that real topology ops run. See discovery_implications.
-# Forward-looking reading of the result - what it shows beyond pass/fail, and the
-# visualizations / studies it suggests next (additionalProperties, ignored by the schema).
+# Decide-phase synthesis, rendered as the dashboard's 'Discovery implications' section
+# (newest investigation spine). Canonical shape: what this study settled / left open /
+# could be explained otherwise / suggests next.
 discovery_implications:
-- discovery: >-
-    A non-spatial population ODE drives real vertex-model topology through a flux->event
-    adapter, and the seeded focus grows as ONE compact clone whose spread radius
-    saturates (~2.0) while the cell count keeps climbing - i.e. the focus densifies and
-    fills rather than fragmenting.
-  implication: >-
-    Invasion here has a measurable morphology (radius vs count, area distribution), so
-    the coupling is a substrate for quantitative spatial questions, not just trend plots.
-  suggested_visualizations:
-  - Margin-roughness trace - perimeter^2 / area of the tumor patch over time, to quantify
-    a smooth pushing margin vs finger-like infiltration.
-  - Local-tumor-fraction heat map on the mesh (faces colored by neighborhood tumor
-    density) to read the invasion front.
-  - Per-cell displacement field (vertex velocity) to show how division pushes the
-    surrounding healthy tissue.
-  suggested_studies:
-  - Calibrate flux->event scales against the BIOMD0000000903 trajectory so counts/areas
-    become quantitative (the open investigation decision).
-  - Repeat on a curved / 3D geometry to test whether the focus buckles or invaginates.
+  resolved_uncertainties:
+  - A non-spatial population ODE can drive real vertex-model topology (cell_division +
+    apoptosis_extrusion) through a flux->event adapter — confirmed by
+    tissue_growth_by_division (206->312) and flux_driven_events.
+  - With a single central seed and no free stem cells, the tumor grows as ONE contiguous
+    clone (single focus) rather than scattered spots; its spread radius saturates (~2.0)
+    while the cell count keeps climbing, so the focus densifies and fills.
+  - At interval 0.01 with division_crit 2.0 and shape index 3.6 the mesh stays relaxed —
+    median face areas sit near the prefered 1.0 and the 5th-percentile area stays well
+    above zero (no cell overlap).
+  remaining_uncertainties:
+  - The flux->event scales are tuned for a watchable cadence, not calibrated to the
+    BIOMD0000000903 trajectory, so counts/areas are qualitative.
+  - Whether the clone's saturating spread radius reflects genuine mechanical confinement
+    or merely the flat-sheet geometry — untested on curved / 3D meshes.
+  - Whether the healthy-fraction decline is driven mainly by division-crowding vs active
+    healthy apoptosis.
+  alternate_hypotheses:
+  - hypothesis: The healthy-fraction fall is proliferation diluting a fixed healthy pool,
+      not active displacement of healthy tissue.
+    why_plausible: Absolute healthy count barely falls (206->200); the fraction drops
+      mostly because total grows.
+    mechanism_elements_affected: [healthy apoptosis flux, tumor induction flux]
+    discriminating_observables: [healthy_deaths events, absolute healthy_count slope,
+      local healthy area at the tumor margin]
+  followup_study_proposals:
+  - title: Calibrate flux->event scales to BIOMD0000000903
+    rationale: Make counts/areas quantitative rather than qualitative (the open
+      investigation decision).
+    suggested_visualizations: [margin-roughness trace (perimeter^2 / area of the tumor
+      patch), invasion-front heat map (faces by local tumor density)]
+  - title: Tumor outgrowth on curved / 3D geometry
+    rationale: Test whether the single focus buckles or invaginates once topology ops run
+      off the flat sheet.
+    suggested_visualizations: [per-cell displacement field (vertex velocity)]
 biological_summary: BIOMD0000000903 models breast-cancer population competition
   (cancer-stem, tumor, healthy, immune, estrogen). Coupled to the mesh, its tumor-growth
   fluxes drive real cell divisions that expand a tumor clone and grow the tissue, while

@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en"><head>
 <meta charset="UTF-8"><title>tyssue:tumor-tyssue</title>
-<link rel="stylesheet" href="assets/style.css?v=1781294558_1781294558">
+<link rel="stylesheet" href="assets/style.css?v=1781737251_1781737251">
 <link rel="stylesheet" href="assets/snapshot-readonly.css">
 <script>
 // Per-workspace branding (rail logo, title, brand text) is resolved
@@ -72,6 +72,7 @@ window.addEventListener('pageshow', function (e) {
 .emitter-sqlite  { background: #e5e7eb; color: #374151; }   /* gray  */
 .emitter-parquet { background: #fef3c7; color: #92400e; }   /* amber */
 .emitter-xarray  { background: #ccfbf1; color: #0f766e; }   /* teal  */
+.emitter-none    { background: transparent; color: #9ca3af; }   /* no emitter (summary-only) */
 .action-btn--secondary {
   margin-top: 10px; padding: 5px 12px;
   border: 1px solid #b91c1c; background: #fef2f2;
@@ -127,16 +128,43 @@ window.addEventListener('pageshow', function (e) {
 }
 
 /* Workspace switcher (top of the left rail). */
-.viv-workspace-switcher { position: relative; padding: 8px 12px; }
-.viv-workspace-switcher-trigger {
-  display: flex; align-items: center; gap: 6px;
-  width: 100%; padding: 6px 8px; background: #fff;
-  border: 1px solid #ddd; border-radius: 4px; cursor: pointer;
-  font-size: 13px;
+.viv-workspace-switcher { position: relative; padding: 0; }
+/* One dashboard per repo: the workspace name is a built-in FIXTURE — a quiet
+   caption sitting directly under the Vivarium brand. NOT a control: no box, no
+   background, no border, no hover, default cursor. Just a small status dot + the
+   repo name in muted text. */
+.viv-workspace-name {
+  display: flex; align-items: center; gap: 7px;
+  padding: 0 16px 10px;
+  margin: 0;
+  font-size: 12.5px; font-weight: 600;
+  color: #64748b; cursor: default;
+  background: none; border: none; border-radius: 0;
 }
-.viv-workspace-switcher-trigger:hover { background: #f5f5f5; }
+.viv-workspace-name strong { font-weight: 600; }
+.viv-workspace-name .viv-workspace-switcher-glyph { font-size: 8px; }
 .viv-workspace-switcher-glyph { color: #2ea043; font-size: 14px; }
 .viv-glyph-running { color: #2ea043; }
+/* The workspace name links to its GitHub repo; a small mark signals it. */
+.viv-ws-repo-link {
+  display: inline-flex; align-items: center; gap: 5px;
+  color: inherit; text-decoration: none;
+}
+.viv-ws-repo-link strong { font-weight: 600; }
+.viv-ws-repo-link:hover { color: #0f172a; }
+.viv-ws-gh-mark { flex: none; color: #94a3b8; }
+.viv-ws-repo-link:hover .viv-ws-gh-mark { color: #0f172a; }
+/* Collapsed rail: a single centered GitHub mark (the switcher is hidden). */
+.viv-rail-repo-mini { display: none; }
+.viv-rail.viv-rail-collapsed .viv-rail-repo-mini {
+  display: flex; justify-content: center; align-items: center;
+  /* Sit in the nav-icon rhythm: breathing room under the brand avatar, not
+     crammed against it. Muted to match the expanded name's GitHub mark. */
+  padding: 10px 0 14px; color: #94a3b8;
+}
+.viv-rail.viv-rail-collapsed .viv-rail-repo-mini:hover { color: #0f172a; }
+/* Keep the snapshot repo label out of the collapsed rail (avoids truncation). */
+.viv-rail.viv-rail-collapsed #snapshot-repo-label { display: none !important; }
 .viv-glyph-stopped { color: #999; }
 .viv-glyph-stale   { color: #d29922; }
 .viv-glyph-missing { color: #cf222e; }
@@ -318,27 +346,49 @@ window.addEventListener('pageshow', function (e) {
 
     <!-- Brand: fixed Vivarium logo + name (no per-workspace icon/name override). -->
     <div class="viv-rail-header">
-      <img class="viv-rail-logo" src="assets/vivarium-logo.png?v=1781294558_1781294558" alt="Vivarium" loading="lazy">
+      <img class="viv-rail-logo" src="assets/vivarium-logo.png?v=1781737251_1781737251" alt="Vivarium" loading="lazy">
       <div class="viv-rail-brand">
         <strong>Vivarium</strong>
         <small>dashboard</small>
       </div>
     </div>
 
+    
+    <!-- GitHub mark, defined once and reused (workspace-name link + collapsed icon). -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true"><symbol id="viv-gh-mark" viewBox="0 0 16 16"><path fill="currentColor" d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0016 8c0-4.42-3.58-8-8-8z"/></symbol></svg>
+    
+
     <div class="viv-workspace-switcher" id="viv-workspace-switcher">
-      <button class="viv-workspace-switcher-trigger" type="button"
-              aria-haspopup="true" aria-expanded="false"
-              id="viv-workspace-switcher-trigger">
+      <!-- One dashboard per repo: the workspace name IS the link to the
+           associated GitHub repository (git remote origin). -->
+      <div class="viv-workspace-name">
         <span class="viv-workspace-switcher-glyph">●</span>
-        <strong>tyssue:tumor-tyssue</strong>
-        <span class="viv-arrow">▾</span>
-      </button>
+        
+        <a class="viv-ws-repo-link" href="https://github.com/vivarium-collective/vivarium-tyssue" target="_blank" rel="noopener"
+           title="Open tyssue on GitHub">
+          <strong>tyssue</strong>
+          <svg class="viv-ws-gh-mark" width="12" height="12"><use href="#viv-gh-mark"/></svg>
+        </a>
+        
+      </div>
     </div>
     <!-- Snapshot mode: static repo label replaces the switcher dropdown. -->
     <div class="viv-repo-label" id="snapshot-repo-label" style="display:none">
       <span class="viv-workspace-switcher-glyph">●</span>
-      <strong>tyssue</strong>
+      
+      <a class="viv-ws-repo-link" href="https://github.com/vivarium-collective/vivarium-tyssue" target="_blank" rel="noopener"
+         title="Open tyssue on GitHub"><strong>tyssue</strong>
+        <svg class="viv-ws-gh-mark" width="12" height="12"><use href="#viv-gh-mark"/></svg></a>
+      
     </div>
+
+    
+    <!-- Collapsed rail: a single centered GitHub mark linking to the repo. -->
+    <a class="viv-rail-repo-mini" href="https://github.com/vivarium-collective/vivarium-tyssue" target="_blank" rel="noopener"
+       title="Open tyssue on GitHub" aria-label="GitHub repository">
+      <svg width="16" height="16"><use href="#viv-gh-mark"/></svg>
+    </a>
+    
 
     <!-- Primary nav -->
     <nav class="viv-rail-section" role="tablist">
@@ -497,10 +547,15 @@ window.addEventListener('pageshow', function (e) {
   <!-- MAIN: topbar + content -->
   <div class="viv-main">
 
-    <!-- Read-only snapshot banner — hidden in local mode; shown when body.snapshot is set. -->
+    <!-- Read-only snapshot banner — hidden in local mode; shown when body.snapshot is set.
+         The link points at the vivarium-dashboard repo (clone + `vivarium-dashboard
+         serve` to run the full interactive dashboard locally); there is no hosted
+         interactive version. -->
     <div id="snapshot-banner">
-      <span>Read-only view &mdash; a full interactive version is available.</span>
-      <a id="snapshot-interactive-link" target="_blank" rel="noopener">Open interactive version</a>
+      <span>Read-only snapshot &mdash; run the dashboard locally for the full interactive version.</span>
+      <a id="snapshot-interactive-link"
+         href="https://github.com/vivarium-collective/vivarium-dashboard#readme"
+         target="_blank" rel="noopener">Get vivarium-dashboard on GitHub →</a>
     </div>
 
     <!-- Top banner removed — was a non-functional breadcrumb + "Coming soon" Share/settings placeholders + a decorative avatar. -->
@@ -554,18 +609,13 @@ window.addEventListener('pageshow', function (e) {
 <!-- ===== PAGE: ANALYSES ===== -->
 <section id="page-visualizations" class="page" data-page="visualizations">
   <h2 class="page-title">Analyses</h2>
-  <p class="page-lead">Analysis scripts and visualization classes available in this workspace. <strong>Analyses</strong> are v2ecoli <code>Analysis</code> steps (registered in <code>ANALYSIS_REGISTRY</code>) that post-process simulation output. <strong>Visualizations</strong> are chart classes (subclasses of <code>pbg_superpowers.visualization.Visualization</code>) that render observable trajectories — configure one with specific settings or generate a new one with <code>/pbg-viz</code>.</p>
+  <p class="page-lead">A gallery of special, saved, interactive visualizations for this workspace &mdash; embedded <strong>3D structural models</strong> (parsimony packs) and a <strong>Pathway Tools</strong> Omics-Viewer launcher. Looking for the chart/analysis <em>class</em> catalog? It now lives in <a href="#registry" onclick="setTimeout(function(){_setRegistrySubtab&amp;&amp;_setRegistrySubtab('discovered');_setRegistryTab&amp;&amp;_setRegistryTab('visualization');},0)">Registry &rarr; Discovered &rarr; Visualizations</a>.</p>
 
-
-  <!-- Available Analysis + Visualization classes (catalog) -->
   <div class="panel">
-    <h3>Available classes <span id="viz-count" class="count-badge"></span></h3>
-    <p class="panel-lead">Classes discovered from the installed environment. Analyses are <code>v2ecoli</code> <code>ANALYSIS_REGISTRY</code> entries; Visualizations are <code>pbg_superpowers.visualization.Visualization</code> subclasses. Click <strong>Preview</strong> (Visualizations only) to see a demo render; <strong>Use</strong> to register a Visualization in this workspace. Need a new visualization? Run <code>/pbg-viz &lt;name&gt; &lt;description&gt;</code> in Claude Code.</p>
-    <input type="search" id="viz-catalog-search" placeholder="Search classes by name or doc…"
-           style="width:100%;padding:6px;margin-bottom:8px;font-size:0.9em"
-           oninput="_filterVizCatalog(this.value)">
-    <div id="viz-picker-container">
-      <p class="empty-state">Discovering classes&hellip; <span class="muted">First load walks the installed environment and can take a few seconds; subsequent loads are cached for 30 s.</span></p>
+    <h3>Saved visualizations <span id="viz-count" class="count-badge"></span></h3>
+    <p class="panel-lead">Interactive scenes saved as workspace artifacts. 3D models load embedded below; open any in a new tab for a full-window view. Produce a 3D model by running a parsimony packing composite (it writes <code>studies/&lt;name&gt;/viz/3d/&lt;name&gt;.pack.json</code>), then revisit this tab.</p>
+    <div id="analyses-gallery" class="analyses-gallery">
+      <p class="empty-state">Loading saved visualizations&hellip;</p>
     </div>
   </div>
 
@@ -641,11 +691,20 @@ window.addEventListener('pageshow', function (e) {
     <button class="action-btn" onclick="_loadRegistry(true)">Refresh registry</button>
     <div id="registry-status" class="muted" style="margin:8px 0"></div>
 
+    <!-- Imported repositories (workspace.yaml::imports) + the processes/steps
+         each one contributes. Populated by _renderImportedRepos. -->
+    <div id="registry-imports-section" hidden>
+      <h3 style="margin:14px 0 2px">Imported repositories <span class="count-badge" id="registry-imports-count"></span></h3>
+      <p class="panel-lead" style="margin:2px 0 10px">External pbg-* repositories this workspace declares in <code>workspace.yaml: imports</code>, and the Processes / Steps / Emitters / Visualizations each contributes.</p>
+      <div id="registry-imports-container" class="module-grid"></div>
+    </div>
+
     <div class="registry-tabs">
       <button class="registry-tab active" data-kind="process"       onclick="_setRegistryTab('process')">Processes <span class="count-badge" id="registry-process-count"></span></button>
       <button class="registry-tab"        data-kind="step"          onclick="_setRegistryTab('step')">Steps <span class="count-badge" id="registry-step-count"></span></button>
       <button class="registry-tab"        data-kind="emitter"       onclick="_setRegistryTab('emitter')">Emitters <span class="count-badge" id="registry-emitter-count"></span></button>
       <button class="registry-tab"        data-kind="visualization" onclick="_setRegistryTab('visualization')">Visualizations <span class="count-badge" id="registry-visualization-count"></span></button>
+      <button class="registry-tab"        data-kind="analysis"      onclick="_setRegistryTab('analysis')">Analyses <span class="count-badge" id="registry-analysis-count"></span></button>
       <button class="registry-tab"        data-kind="type"          onclick="_setRegistryTab('type')">Types <span class="count-badge" id="registry-type-count"></span></button>
     </div>
 
@@ -655,6 +714,7 @@ window.addEventListener('pageshow', function (e) {
     <div class="registry-tab-panel"        data-kind="step"          id="registry-steps-container"></div>
     <div class="registry-tab-panel"        data-kind="emitter"       id="registry-emitters-container"></div>
     <div class="registry-tab-panel"        data-kind="visualization" id="registry-visualizations-container"></div>
+    <div class="registry-tab-panel"        data-kind="analysis"      id="registry-analyses-container"></div>
     <div class="registry-tab-panel"        data-kind="type"          id="registry-types-container"></div>
   </section>
 </section>
@@ -785,6 +845,8 @@ window.addEventListener('pageshow', function (e) {
         <summary class="inv-bio-story-label">Biology — the mechanism this investigation models</summary>
         <div id="investigation-biology-story-text" class="inv-bio-story-text"></div>
       </details>
+      <!-- SP5: Needs-attention panel. Populated by JS from /api/needs-attention. -->
+      <div id="investigation-needs-attention"></div>
     </div>
     <!-- Discourse-graph framing: studies as knowledge-producing operations. -->
     <div id="investigation-dag-lead" style="margin: 4px 0 8px; font-size: 0.88em; color: #475569; line-height: 1.4;">
@@ -997,12 +1059,12 @@ window.addEventListener('pageshow', function (e) {
   <p class="page-lead">
     Every persisted run across this workspace, tagged by investigation and
     study, gathered from each <code>studies/&lt;name&gt;/runs.db</code>.
-    Defaults to the current investigation — toggle to see all.
+    Shows all investigations by default — untoggle to scope to the current one.
   </p>
 
   <div style="margin: 8px 0 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
     <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
-      <input id="sim-all-toggle" type="checkbox" /> All investigations
+      <input id="sim-all-toggle" type="checkbox" checked /> All investigations
     </label>
     <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
       Study
@@ -1535,8 +1597,8 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/data-source.js"></script>
 <script src="assets/render-helpers.js"></script>
 <script src="assets/client.js" onerror="/* live mode unavailable */"></script>
-<script src="assets/walkthrough.js?v=1781294558_1781294558" onerror="/* walkthrough unavailable */"></script>
-<script src="assets/github-login.js?v=1781294558_1781294558" onerror="/* github-login unavailable */"></script>
+<script src="assets/walkthrough.js?v=1781737251_1781737251" onerror="/* walkthrough unavailable */"></script>
+<script src="assets/github-login.js?v=1781737251_1781737251" onerror="/* github-login unavailable */"></script>
 <!-- workspace-switcher.js is intentionally not loaded: the left-rail dropdown
      it used to drive has been repurposed into the investigation switcher
      (investigation-switcher.js). The /api/workspaces endpoints remain available

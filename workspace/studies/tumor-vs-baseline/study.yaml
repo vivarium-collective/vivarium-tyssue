@@ -226,24 +226,32 @@ conclusion: The controlled comparison isolates the tumor coupling's effect — t
   difference between the arms is the coupling, this is a clean substrate for sweeps -
   vary the tumor-induction scale (or suppress a flux as a "treatment") and chart
   healthy_fraction / clone radius vs the swept value. See discovery_implications.
-# Forward-looking reading of the controlled contrast (additionalProperties, ignored by schema).
+# Decide-phase synthesis of the controlled contrast, rendered as the dashboard's
+# 'Discovery implications' section (newest investigation spine).
 discovery_implications:
-- discovery: >-
-    With the coupling off the sheet is static and 100% healthy; with it on a single
-    central clone grows the tissue and lowers the healthy fraction - a divergence
-    attributable solely to the SBML coupling (identical geometry/mechanics otherwise).
-  implication: >-
-    The isolated contrast makes the composite a controlled testbed for asking which
-    reactions and parameters drive invasion, and by how much.
-  suggested_visualizations:
-  - Dose-response panel - final healthy_fraction and clone radius vs a swept
-    tumor-induction scale (or a suppressed "treatment" flux).
-  - Side-by-side cell-area distributions (tumor arm vs baseline) to show the tumor arm
-    stays as relaxed as the untouched control despite growing.
-  suggested_studies:
-  - Seed at the edge vs the centre to test geometry-dependence of outgrowth.
-  - Add a mechanical-stress readout to compare the footprint of division-driven growth
-    against the static baseline.
+  resolved_uncertainties:
+  - With the coupling off the sheet is static and 100% healthy; with it on a single
+    central clone grows the tissue and lowers the healthy fraction — a divergence
+    attributable solely to the SBML coupling (identical geometry / mechanics otherwise).
+  remaining_uncertainties:
+  - The contrast is qualitative; geometry and flux->event scales are not fit to data.
+  - Whether outgrowth is geometry-dependent — edge-vs-centre seeding is untested.
+  alternate_hypotheses:
+  - hypothesis: The divergence is partly mechanical (the tumor arm's extra cells alone
+      deform the sheet) rather than purely compositional.
+    why_plausible: Division adds faces and changes local packing independent of cell type.
+    mechanism_elements_affected: [cell_division rate, area elasticity, perimeter elasticity]
+    discriminating_observables: [baseline-vs-tumor cell-area distributions, mechanical
+      stress at the tumor margin]
+  followup_study_proposals:
+  - title: Dose-response sweep of the tumor-induction scale
+    rationale: Because only the coupling differs between arms, sweep the induction scale
+      (or suppress a flux as a "treatment") and chart the response.
+    suggested_visualizations: [dose-response panel — final healthy_fraction and clone
+      radius vs the swept scale, side-by-side tumor-vs-baseline cell-area distributions]
+  - title: Edge vs centre seeding
+    rationale: Test geometry-dependence of outgrowth and the mechanical footprint of
+      division-driven growth against the static baseline.
 biological_summary: The baseline represents undisturbed epithelium; the tumor arm
   adds BIOMD0000000903's population dynamics. The tumor arm's division-driven growth and
   healthy-fraction loss, absent in the static baseline, are the spatial read-out of the
