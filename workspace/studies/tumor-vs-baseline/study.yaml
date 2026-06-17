@@ -6,7 +6,7 @@ phase: Simulate
 design_status: approved
 implementation_status: complete
 simulation_status: ran
-evaluation_status: not_evaluated
+evaluation_status: evaluated
 parent_studies:
 - tumor-composite
 objective: >-
@@ -207,6 +207,7 @@ findings:
   explanation: See the 'Tissue size and composition — tumor vs baseline' overlay and
     the side-by-side snapshot panels and animations.
   evidence: {from_test: tumor_arm_grows_tissue, observed: 312, units: cells}
+  provenance: {run_ids: [tumor__tumor, epithelium_2d__baseline]}
 - id: F2
   kind: biological
   status: confirms
@@ -217,6 +218,21 @@ findings:
     central clone) while apoptotic cells extrude, against a baseline where healthy tissue
     is fully preserved and the mesh is static.
   evidence: {from_test: healthy_fraction_gap, observed: 0.64, units: fraction}
+  provenance: {run_ids: [tumor__tumor, epithelium_2d__baseline]}
+conclusion_logic:
+  if_primary_tests_pass:
+    implementation_status: >-
+      Both arms run on the same flat sheet; the tumor arm grows by real cell_division
+      while the mechanics-only baseline stays fixed — the only difference is the coupling.
+    biological_validation: >-
+      Controlled divergence reproduced — the tumor arm grows 206->312 with a healthy
+      fraction of 0.64 vs the baseline's fixed 206 / 1.00. Qualitative (geometry and
+      scales not fit to data).
+    pipeline_unblocks: []
+  if_primary_tests_fail:
+    diagnose:
+    - If baseline_stays_uniform failed, the control isn't clean (mechanics introducing events).
+    - If tumor_arm_grows_tissue failed, the coupling isn't driving real divisions in the tumor arm.
 conclusion: The controlled comparison isolates the tumor coupling's effect — the
   mechanics-only baseline stays 100% healthy and fixed at 206 cells across all 150
   steps (interval 0.01), while the COPASI-coupled arm grows a single central clone to

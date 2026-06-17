@@ -6,7 +6,7 @@ phase: Simulate
 design_status: approved
 implementation_status: complete
 simulation_status: ran
-evaluation_status: not_evaluated
+evaluation_status: evaluated
 objective: Build the COPASI-coupled tumor composite and demonstrate, through five
   visualizations, that BIOMD0000000903 drives discrete cell-fate dynamics on a tyssue
   2D epithelial sheet.
@@ -316,6 +316,7 @@ findings:
     (PASS \u2014 total cells 206\u2192312). The "cell n\u00b0 is born" log lines are tyssue's own
     cell_division emitting as the mesh grows.
   evidence: {from_test: tissue_growth_by_division, observed: 312, units: cells}
+  provenance: {run_ids: [tumor__tumor]}
 - id: F2
   kind: biological
   status: confirms
@@ -333,6 +334,7 @@ findings:
     the sheet gains cells \u2014 addressing the prior review (movie showed only relaxation;
     multiple foci; cells overlapping).
   evidence: {from_test: tumor_expansion, observed: 112, units: cells}
+  provenance: {run_ids: [tumor__tumor]}
 - id: F3
   kind: methodological
   status: novel
@@ -346,6 +348,22 @@ findings:
     relabel path is retained only as a fallback for stock tyssue installs.
   explanation: The topology_ops flag selects real vertex-model surgery (default true
     here) vs the relabel fallback, so the same coupling runs on either tyssue build.
+  provenance: {run_ids: [tumor__tumor]}
+conclusion_logic:
+  if_primary_tests_pass:
+    implementation_status: >-
+      The COPASI->tyssue coupling runs stably and births/deaths fire as real tyssue
+      cell_division / apoptosis_extrusion on the mesh (topology_ops=true).
+    biological_validation: >-
+      Qualitative invasion dynamics reproduced — a single central clone grows 0->112,
+      the tissue grows 206->312, the healthy fraction falls to 0.64. Scales are tuned,
+      not calibrated, so the match is qualitative, not quantitative.
+    pipeline_unblocks: [tumor-vs-baseline]
+  if_primary_tests_fail:
+    diagnose:
+    - If tissue_growth_by_division failed (total stayed 206), births are relabelings not
+      real divisions — re-check topology_ops and the pandas-3 tyssue fork.
+    - If flux_driven_events failed, the adapter isn't reading COPASI reaction fluxes.
 conclusion: The COPASI-coupled tumor composite runs stably for 150 steps (interval 0.01)
   on the pandas-3 tyssue fork and reproduces breast-cancer invasion dynamics as real
   vertex-model topology \u2014 a single tumor cell seeded at the centre grows out into one
