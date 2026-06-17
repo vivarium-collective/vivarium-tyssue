@@ -10,8 +10,9 @@ question: >-
 hypothesis: >-
   Coupling the breast-cancer competition ODE to the mesh — each step converting the
   model's reaction fluxes into scaled cell-fate events — reproduces the expected
-  qualitative trends: a seeded tumor focus expands by real cell division while the
-  healthy fraction declines, diverging clearly from a mechanics-only baseline sheet.
+  qualitative trends: a single seeded tumor focus expands outward by real cell division
+  while the healthy fraction declines, diverging clearly from a mechanics-only baseline
+  sheet.
 description: >-
   BIOMD0000000903 (Solís-Pérez et al., 2019) is a fractional ODE over five
   populations — cancer-stem (C), tumor (T), healthy (H), immune (I), estrogen (E).
@@ -19,9 +20,12 @@ description: >-
   fractional accumulator and fires integer cell-fate events on a flat SheetGeometry
   mesh. With real vertex-model topology (topology_ops=true, on the pandas-3-compatible
   tyssue fork) a birth is a tyssue cell_division and a death an apoptosis_extrusion, so
-  the tissue genuinely grows and remodels. I and E remain SBML-internal drivers with no
-  mesh cells. The coupling is a qualitative mechanism, not a quantitatively validated
-  spatial tumor model — see each study's limitations.
+  the tissue genuinely grows and remodels. A single tumor cell is seeded at the sheet
+  centre and grows outward as one clonal patch; the run uses interval 0.01 with
+  division_crit 2.0 and shape index 3.6 so the mesh relaxes between divisions (no cell
+  overlap). I and E remain SBML-internal drivers with no mesh cells. The coupling is a
+  qualitative mechanism, not a quantitatively validated spatial tumor model — see each
+  study's limitations.
 # --- v2 narrative spine -----------------------------------------------------
 lead: Eran
 executive:
@@ -32,9 +36,10 @@ executive:
     mechanics-only control.
   verdict: >-
     Mechanism demonstrated. SBML fluxes drive real cell divisions (the mesh grows
-    206→308 cells over 150 steps) and apoptotic extrusions; the tumor clone expands
-    0→117 and the healthy fraction falls 1.00→0.62, while the baseline arm stays static
-    and 100% healthy. All acceptance tests pass.
+    206→312 cells over 150 steps at interval 0.01) and apoptotic extrusions; a single
+    tumor cell seeded at the sheet centre grows out into one clonal patch (0→112) and the
+    healthy fraction falls 1.00→0.64, while the baseline arm stays static and 100%
+    healthy. All acceptance tests pass.
   verdict_status: supported
   decisions_needed:
   - Expert opinion on whether the flux→event scales should be calibrated to data (they
@@ -53,10 +58,11 @@ scientific_argument:
     flux→event adapter, producing qualitative tumor-invasion dynamics (clonal expansion
     by division + apoptotic extrusion) on an epithelial sheet.
   evidence_for:
-  - "tumor-composite: mesh grows 206→308 via 176 real cell_division events; tumor 0→117;
-    healthy fraction 1.00→0.62; 68 apoptosis_extrusion events. All 5 tests pass."
+  - "tumor-composite: a single central tumor seed grows the mesh 206→312 via 175 real
+    cell_division events; tumor 0→112; healthy fraction 1.00→0.64; 67 apoptosis_extrusion
+    events. All 5 tests pass."
   - "tumor-vs-baseline: baseline arm stays fixed at 206 healthy cells with zero events,
-    while the tumor arm grows to 306 cells — divergence attributable solely to the coupling."
+    while the tumor arm grows to 312 cells — divergence attributable solely to the coupling."
   evidence_against:
   - The prior revision ran in fixed-topology relabel mode, which (correctly, per review)
     showed no real growth — only mechanical relaxation. That mode is now a fallback only.
@@ -70,13 +76,13 @@ scientific_argument:
     vary by a few cells run-to-run.
   interpretation_ref: tumor-composite
 biological_story: >-
-  A small focus of tumor cells is seeded into an otherwise healthy epithelial sheet. The
-  COPASI breast-cancer model's tumor-induction fluxes drive those cells to divide,
-  expanding a clonal patch and physically growing the tissue, while its death fluxes
-  cause apoptotic cells to extrude out of the sheet — the same way real epithelia shed
-  dying cells. Against an untouched control sheet that merely relaxes mechanically, the
-  coupled sheet visibly invades and remodels: tumor patches spread and the healthy
-  fraction of the tissue steadily falls.
+  A single tumor cell is seeded at the centre of an otherwise healthy epithelial sheet.
+  The COPASI breast-cancer model's tumor-induction fluxes drive it and its descendants to
+  divide, expanding one clonal patch outward and physically growing the tissue, while its
+  death fluxes cause apoptotic cells to extrude out of the sheet — the same way real
+  epithelia shed dying cells. Against an untouched control sheet that merely relaxes
+  mechanically, the coupled sheet visibly invades and remodels: the tumor clone spreads
+  and the healthy fraction of the tissue steadily falls.
 studies:
 - tumor-composite
 - tumor-vs-baseline

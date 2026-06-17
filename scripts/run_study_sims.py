@@ -91,6 +91,12 @@ def run_study(study: str, sim_name: str, composite_yaml: str, steps: int,
 
     eptm = comp.state["Tyssue"]["instance"].eptm
     prev = {k: 0.0 for k in _EVENTS}
+    # The heavy per-step mesh snapshot (vert/edge/face DataFrames as JSON) dominates
+    # runs.db size. The timeseries viz read the scalar state every step, but the
+    # snapshot/gif viz only subsample ~6/60 frames — so store the full mesh only every
+    # Nth step (keeping ~120 mesh frames regardless of step count), which bounds the db
+    # at long step counts (interval 0.01 needs ~10x more steps than the old 0.1 runs).
+    snapshot_every = max(1, steps // 120)
     for step in range(steps + 1):
         if step > 0:
             comp.run(1)
@@ -109,11 +115,12 @@ def run_study(study: str, sim_name: str, composite_yaml: str, steps: int,
             cur = float(comp.state.get(k, 0.0) or 0.0)
             state[k] = max(cur - prev[k], 0.0)
             prev[k] = cur
-        state["Datasets"] = {
-            "vert_df": _jsonable(eptm.vert_df),
-            "edge_df": _jsonable(eptm.edge_df),
-            "face_df": _jsonable(eptm.face_df),
-        }
+        if step % snapshot_every == 0 or step == steps:
+            state["Datasets"] = {
+                "vert_df": _jsonable(eptm.vert_df),
+                "edge_df": _jsonable(eptm.edge_df),
+                "face_df": _jsonable(eptm.face_df),
+            }
         conn.execute("INSERT OR REPLACE INTO history (simulation_id, step, global_time, state)"
                      " VALUES (?,?,?,?)", (run_id, step, gt, json.dumps(state)))
 

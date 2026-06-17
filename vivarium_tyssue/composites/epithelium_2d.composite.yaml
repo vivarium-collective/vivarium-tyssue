@@ -17,8 +17,10 @@ emitters: []
 parameters:
   interval:
     type: float
-    default: 1.0
-    description: Solver / step interval (dt).
+    default: 0.01
+    description: Solver / step interval (dt). 0.01 to match the tumor arm in the
+      tumor-vs-baseline comparison (reviewer 2026-06-17); mechanics-only here, so the
+      sheet just relaxes regardless of dt.
 state:
   Tyssue:
     _type: process

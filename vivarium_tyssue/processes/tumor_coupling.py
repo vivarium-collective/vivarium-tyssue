@@ -58,6 +58,26 @@ def select_uids(face_df: dict, cell_type: str, n: int, *, exclude: set, rng_pick
     return list(rng_pick(candidates, k))
 
 
+def select_central_uids(face_df: dict, cell_type: str, n: int, *, exclude: set, rng_pick) -> list:
+    """Choose up to ``n`` unique_ids of ``cell_type`` closest to the tissue centroid,
+    so a seeded focus is one compact central patch that grows outward rather than a
+    random scatter (reviewer 2026-06-17: "seed a single tumor and have it grow out").
+    Falls back to a random ``select_uids`` pick when the face centroid coords (x/y)
+    are unavailable (e.g. the minimal dict face_df used in unit tests)."""
+    xs, ys = face_df.get("x"), face_df.get("y")
+    if xs is None or ys is None:
+        return select_uids(face_df, cell_type, n, exclude=exclude, rng_pick=rng_pick)
+    xs, ys = list(xs), list(ys)
+    cx = sum(xs) / len(xs) if xs else 0.0
+    cy = sum(ys) / len(ys) if ys else 0.0
+    ranked = []
+    for i, (u, t) in enumerate(_rows(face_df)):
+        if t == cell_type and u not in exclude:
+            ranked.append(((xs[i] - cx) ** 2 + (ys[i] - cy) ** 2, u))
+    ranked.sort(key=lambda r: r[0])
+    return [u for _, u in ranked[:max(0, int(n))]]
+
+
 import numpy as np
 from process_bigraph import Process
 
@@ -195,8 +215,10 @@ class TumorCoupling(Process):
         # --- Seeding step: convert the initial focus, then return. ---
         if not self._seeded:
             self._seeded = True
-            for healthy_uid in select_uids(face_df, "healthy", int(self.seed.get("tumor", 0)),
-                                           exclude=used, rng_pick=self._pick):
+            # Tumor focus is seeded at the sheet centre (a single compact patch that
+            # grows outward); stem (if any) is seeded at random.
+            for healthy_uid in select_central_uids(face_df, "healthy", int(self.seed.get("tumor", 0)),
+                                                   exclude=used, rng_pick=self._pick):
                 behaviors.append(self._differentiate(healthy_uid, "tumor")); used.add(healthy_uid)
             for healthy_uid in select_uids(face_df, "healthy", int(self.seed.get("stem", 0)),
                                            exclude=used, rng_pick=self._pick):

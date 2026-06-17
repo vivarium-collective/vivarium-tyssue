@@ -30,19 +30,20 @@ study_card:
     sheet. Real vertex-model topology (cell_division / apoptosis_extrusion) runs on the
     pandas-3-compatible tyssue fork (vivatyssue).
   conclusion: >-
-    Over a 150-step run the sheet grows 206→308 cells via 176 real cell divisions, the
-    tumor clone expands 0→117, the healthy fraction falls 1.00→0.62, and 68 apoptotic
-    cells extrude. All five acceptance tests pass.
+    Over a 150-step run (interval 0.01) a single tumor cell seeded at the sheet centre
+    grows out into one clonal patch: the sheet grows 206→312 cells via 175 real cell
+    divisions, the tumor clone expands 0→112, the healthy fraction falls 1.00→0.64, and
+    67 apoptotic cells extrude. All five acceptance tests pass.
   main_insight: Births add faces and deaths remove them — tumor invasion manifests as
-    genuine tissue growth and remodeling, not relabeling.
+    genuine tissue growth and remodeling, not relabeling, and grows outward from one focus.
   caveat: Qualitative coupling (scales tuned, not fit); requires the tyssue fork; final
     counts vary by a few cells run-to-run.
   key_metrics:
-  - {label: total cells, value: "206 → 308", status: pass}
-  - {label: tumor cells, value: "0 → 117", status: pass}
-  - {label: healthy fraction, value: "1.00 → 0.62", status: pass}
-  - {label: cell divisions, value: "176 events", status: pass}
-  - {label: apoptotic extrusions, value: "68 events", status: pass}
+  - {label: total cells, value: "206 → 312", status: pass}
+  - {label: tumor cells, value: "0 → 112", status: pass}
+  - {label: healthy fraction, value: "1.00 → 0.64", status: pass}
+  - {label: cell divisions, value: "175 events", status: pass}
+  - {label: apoptotic extrusions, value: "67 events", status: pass}
 description: >-
   The `tumor` composite wires CopasiUTCProcess(BIOMD0000000903) \u2014 owned internally
   by TumorCoupling \u2014 to the EulerSolver tyssue process on a flat SheetGeometry sheet
@@ -52,8 +53,13 @@ description: >-
   pandas-3-compatible tyssue fork), a birth is a real tyssue cell_division (the cell
   splits, the mesh gains a face) and a death is a real apoptosis_extrusion (the cell
   shrinks and is removed via remove_face) \u2014 so the tissue genuinely grows and remodels,
-  not just recolors. Tumor births preferentially differentiate a free stem cell (C\u2192T),
-  else divide an existing tumor cell. Interval 0.1 keeps the vertex mechanics stable.
+  not just recolors. A SINGLE tumor cell is seeded at the sheet centre (no scattered
+  stem), so every tumor birth divides the existing clone and the patch grows outward as
+  one contiguous focus. Three settings keep the mesh well-relaxed (reviewer 2026-06-17):
+  interval 0.01 (finer mechanical steps), division_crit 2.0 (a cell grows to area > 2.0
+  over ~8 steps before it splits, so daughters start near their 1.0 prefered area), and
+  a shape index prefered_perimeter/\u221aprefered_area = 3.6 (solid regime \u2014 cells stay
+  compact rather than deforming into overlaps).
 baseline:
 - name: tumor
   composite: vivarium_tyssue.composites.tumor
@@ -140,9 +146,11 @@ visualizations:
     caption: >-
       Six stills from the run, faces colored by cell type and drawn with tyssue's
       own sheet_view (the same renderer as the animation, so stills and movie agree).
-      The seeded tumor focus (red) expands into clonal patches while the sheet itself
-      grows — there are visibly more cells at t=125 than at t=0 because births are real
-      cell divisions that add faces to the mesh, not recolorings.
+      A SINGLE tumor cell seeded at the sheet centre (red) grows out into one contiguous
+      clonal patch while the sheet itself grows — there are visibly more cells at the end
+      than at t=0 because births are real cell divisions that add faces to the mesh, not
+      recolorings. At interval 0.01 with division_crit 2.0 the cells stay compact and
+      relaxed (no overlap) as the focus expands.
 - name: Tumor sheet animation
   address: local:TissueSheetGif
   config:
@@ -168,8 +176,9 @@ visualizations:
       COPASI model's per-reaction fluxes (e.g. "Induction of tumor cell") scaled through
       a fractional accumulator. Under topology_ops every birth is a real tyssue
       cell_division — the cell splits and the mesh gains a face. Over the 150-step run
-      these sum to 176 divisions (173 tumor, 2 healthy, 1 stem); the trace is spiky
-      because events are integer and fire only when a flux's accumulator crosses 1.0.
+      these sum to 175 divisions (173 tumor, 2 healthy, 0 stem — the single seed grows
+      purely by clonal division); the trace is spiky because events are integer and fire
+      only when a flux's accumulator crosses 1.0.
 - name: Cell deaths over time
   address: local:TimeSeriesFromObservables
   config:
@@ -181,7 +190,7 @@ visualizations:
     caption: >-
       Per-step death events under flux control. Each is a real apoptosis_extrusion: the
       cell shrinks to a critical area and is removed from the sheet via remove_face
-      (68 extrusions over the run — 61 tumor, 7 healthy). Because extruded cells leave
+      (67 extrusions over the run — 60 tumor, 7 healthy). Because extruded cells leave
       the mesh entirely, deaths show up here as events, not as a "dead" cell count.
 - name: Cell types over time
   address: local:TimeSeriesFromObservables
@@ -193,29 +202,34 @@ visualizations:
     - healthy_count
     - healthy_fraction
     caption: >-
-      total_count rises 206→308 as the tumor proliferates — direct evidence of real
-      division-driven growth. Healthy absolute count barely falls (206→191) because the
+      total_count rises 206→312 as the tumor proliferates — direct evidence of real
+      division-driven growth. Healthy absolute count barely falls (206→200) because the
       epithelium itself keeps dividing, so the displacement signal is the healthy
-      FRACTION, which drops 1.00→0.62. dead_count is omitted: it is identically 0 under
+      FRACTION, which drops 1.00→0.64. dead_count is omitted: it is identically 0 under
       topology_ops (apoptotic cells extrude rather than becoming a "dead" type).
 expected_behavior:
-- Seeded focus (8 tumor, 2 stem) expands by real cell division; the tissue grows and
-  tumor patches spread while apoptotic cells extrude from the sheet.
-- "150-step run (interval 0.1, seed 0): total cells 206\u2192308, tumor 0\u2192117, healthy
-  fraction 1.00\u21920.62; 176 cell-division and 68 apoptosis-extrusion events."
+- A single tumor cell seeded at the sheet centre expands by real cell division into one
+  contiguous clone; the tissue grows and the focus spreads outward while apoptotic cells
+  extrude from the sheet.
+- "150-step run (interval 0.01, seed 0): total cells 206\u2192312, tumor 0\u2192112, healthy
+  fraction 1.00\u21920.64; 175 cell-division and 67 apoptosis-extrusion events."
 limitations:
 - Qualitative coupling, not a quantitatively validated spatial tumor model \u2014 flux\u2192event
   scales are tuned for a watchable cadence, not fit to data.
 - Real vertex-model topology (cell_division / apoptosis_extrusion) requires the
   pandas-3-compatible tyssue fork (vivatyssue); stock PyPI tyssue 1.1.0 crashes on
   these ops under the numpy-2/pandas-3 the COPASI stack forces.
+- Interval 0.01 trades runtime for mesh stability \u2014 ~10x more steps than the old 0.1
+  runs to cover the same COPASI trajectory, but the sheet relaxes between divisions so
+  cells stay compact (no overlap).
 - Reproducibility is approximate \u2014 cell selection is stochastic (seeded) and rare
   topology edge cases (dividing a since-extruded cell) are skipped, so final counts
-  vary by a few cells run-to-run (~115\u2013120 tumor); the qualitative trend is stable.
+  vary by a few cells run-to-run (~108\u2013115 tumor); the qualitative trend is stable.
 - Immune (I) and estrogen (E) drive the ODE but have no mesh cells.
-# Acceptance tests evaluated against the canonical 150-step run (interval 0.1,
-# seed=0, topology_ops=true). measure.path points at an emitted observable; result
-# is the run's verdict against pass_if. (behavior_tests is the v3 array form.)
+# Acceptance tests evaluated against the canonical 150-step run (interval 0.01,
+# seed=0, topology_ops=true, single central tumor seed). measure.path points at an
+# emitted observable; result is the run's verdict against pass_if. (behavior_tests
+# is the v3 array form.)
 behavior_tests:
 - name: tumor_expansion
   classification: quantitative
@@ -223,7 +237,8 @@ behavior_tests:
   measure: {kind: last, path: tumor_count}
   pass_if: {op: gt, threshold: 10}
   result: PASS
-  notes: "final tumor_count = 117 (seeded 8) \u2014 well above the 10-cell threshold."
+  notes: "final tumor_count = 112 (seeded 1) \u2014 a single central cell grows into a
+    112-cell clone, well above the 10-cell threshold."
 - name: tissue_growth_by_division
   classification: quantitative
   question: Does the mesh actually grow \u2014 i.e. are births real cell divisions, not
@@ -231,7 +246,7 @@ behavior_tests:
   measure: {kind: last, path: total_count}
   pass_if: {op: gt, threshold: 206}
   result: PASS
-  notes: "total cells 206\u2192308 (+102). Births add faces via tyssue cell_division;
+  notes: "total cells 206\u2192312 (+106). Births add faces via tyssue cell_division;
     a relabeling model would hold total fixed at 206."
 - name: healthy_displacement
   classification: quantitative
@@ -239,7 +254,7 @@ behavior_tests:
   measure: {kind: last, path: healthy_fraction}
   pass_if: {op: lt, threshold: 0.8}
   result: PASS
-  notes: "healthy fraction 1.00\u21920.62. Absolute healthy count barely falls (206\u2192191)
+  notes: "healthy fraction 1.00\u21920.64. Absolute healthy count barely falls (206\u2192200)
     because the sheet proliferates, so fraction is the honest displacement signal."
 - name: apoptotic_extrusion
   classification: quantitative
@@ -247,7 +262,7 @@ behavior_tests:
   measure: {kind: series, path: tumor_deaths}
   pass_if: {op: nonzero}
   result: PASS
-  notes: "68 extrusion events over the run (61 tumor, 7 healthy); each removes a face
+  notes: "67 extrusion events over the run (60 tumor, 7 healthy); each removes a face
     via remove_face. dead_count stays 0 by construction \u2014 extruded cells leave the mesh."
 - name: flux_driven_events
   classification: qualitative
@@ -270,24 +285,26 @@ findings:
     apoptosis_extrusion (remove_face). Events vanish when the driving flux is zero,
     so the cadence tracks the model, not a random timer.
   explanation: Verified by flux_driven_events (PASS) and tissue_growth_by_division
-    (PASS \u2014 total cells 206\u2192308). The "cell n\u00b0 is born" log lines are tyssue's own
+    (PASS \u2014 total cells 206\u2192312). The "cell n\u00b0 is born" log lines are tyssue's own
     cell_division emitting as the mesh grows.
-  evidence: {from_test: tissue_growth_by_division, observed: 308, units: cells}
+  evidence: {from_test: tissue_growth_by_division, observed: 312, units: cells}
 - id: F2
   kind: biological
   status: confirms
-  statement: A seeded tumor focus expands by real cell division \u2014 the tissue grows and
-    tumor patches spread while apoptotic cells extrude \u2014 the expected qualitative
-    invasion trend, now visible as genuine topology change rather than recoloring.
-  summary: "Over 150 steps (interval 0.1) the mesh grew 206\u2192308 cells via 176 cell
-    divisions; tumor rose 0\u2192117 and the healthy fraction fell 1.00\u21920.62, with 68
-    apoptosis-extrusion events removing cells from the sheet. Tumor births preferentially
-    differentiate a free stem cell (C\u2192T) then divide existing tumor cells, matching the
-    model's stem\u2192tumor induction; the 2 seeded stem cells are consumed early."
+  statement: A single tumor cell seeded at the sheet centre expands by real cell division
+    into one contiguous clone \u2014 the tissue grows and the focus spreads outward while
+    apoptotic cells extrude \u2014 the expected qualitative invasion trend, now visible as
+    genuine topology change rather than recoloring.
+  summary: "Over 150 steps (interval 0.01) one centrally seeded tumor cell grew the mesh
+    206\u2192312 cells via 175 cell divisions; tumor rose 0\u2192112 and the healthy fraction fell
+    1.00\u21920.64, with 67 apoptosis-extrusion events removing cells from the sheet. With no
+    free stem cells seeded, every tumor birth is a real cell_division of the existing
+    clone, so the patch grows outward as one focus rather than scattered spots."
   explanation: Drawn from the canonical run's trajectory and the tyssue sheet_view
-    snapshots/animation, which now show the sheet visibly gaining cells and tumor
-    clones spreading \u2014 addressing the prior review that the movie showed only relaxation.
-  evidence: {from_test: tumor_expansion, observed: 117, units: cells}
+    snapshots/animation, which now show a single central focus visibly growing outward as
+    the sheet gains cells \u2014 addressing the prior review (movie showed only relaxation;
+    multiple foci; cells overlapping).
+  evidence: {from_test: tumor_expansion, observed: 112, units: cells}
 - id: F3
   kind: methodological
   status: novel
@@ -301,12 +318,13 @@ findings:
     relabel path is retained only as a fallback for stock tyssue installs.
   explanation: The topology_ops flag selects real vertex-model surgery (default true
     here) vs the relabel fallback, so the same coupling runs on either tyssue build.
-conclusion: The COPASI-coupled tumor composite runs stably for 150 steps (interval 0.1)
+conclusion: The COPASI-coupled tumor composite runs stably for 150 steps (interval 0.01)
   on the pandas-3 tyssue fork and reproduces breast-cancer invasion dynamics as real
-  vertex-model topology \u2014 the sheet grows 206\u2192308 cells via 176 cell divisions, tumor
-  expands 0\u2192117, the healthy fraction falls to 0.62, and 68 apoptotic cells extrude.
-  All five acceptance tests pass. This is a mechanism demonstration, not a
-  quantitatively validated spatial tumor model.
+  vertex-model topology \u2014 a single tumor cell seeded at the centre grows out into one
+  clonal patch, the sheet grows 206\u2192312 cells via 175 cell divisions, tumor expands
+  0\u2192112, the healthy fraction falls to 0.64, and 67 apoptotic cells extrude. All five
+  acceptance tests pass. This is a mechanism demonstration, not a quantitatively
+  validated spatial tumor model.
 biological_summary: BIOMD0000000903 models breast-cancer population competition
   (cancer-stem, tumor, healthy, immune, estrogen). Coupled to the mesh, its tumor-growth
   fluxes drive real cell divisions that expand a tumor clone and grow the tissue, while
@@ -321,7 +339,7 @@ conclusion_verdicts:
   biological_validation:
     result: MIXED
     basis: Qualitative invasion dynamics match the expected trend (division-driven
-      growth 206\u2192308, tumor 0\u2192117, healthy fraction 1.00\u21920.62, 68 extrusions), but the
+      growth 206\u2192312, tumor 0\u2192112, healthy fraction 1.00\u21920.64, 67 extrusions), but the
       flux\u2192event scales are tuned, not calibrated to data \u2014 so the match is qualitative.
   explanatory_gain:
     result: POSITIVE
@@ -366,4 +384,40 @@ feedback_responses:
     Added a study_card executive summary (purpose, background, headline metrics) and
     expanded the description with the real-topology mechanism so the report's
     purpose/background panel is populated.
+# Responses to the 2026-06-17 inline review (Tasnif Rahman) on study-tumor-composite-embeds.
+# The single annotation raised four distinct points; each gets its own action.
+- ref: study-tumor-composite-embeds
+  reviewer: '"Seems that multiple tumors are seeded. Let''s try to seed a single tumor
+    and have that grow out."'
+  action: >-
+    Done. seed changed from {tumor: 8, stem: 2} to {tumor: 1, stem: 0}, and the seed is
+    now placed at the sheet centre (new TumorCoupling.select_central_uids picks the
+    healthy cell closest to the centroid) instead of a random scatter. With no free stem
+    cells, every tumor birth divides the existing clone, so the focus grows outward as
+    one contiguous patch. The re-rendered snapshots/animation show a single central
+    tumor expanding radially (0→112 cells).
+- ref: study-tumor-composite-embeds
+  reviewer: '"the cells are growing too fast and the tissue does not have enough time to
+    relax causing cell overlap. Reduce the time-step to 0.01."'
+  action: >-
+    Done. The composite interval is now 0.01 (was 0.1). COPASI integrates duration=interval
+    each step, so the mechanics relax ~10x more finely between divisions; the canonical run
+    uses 150 steps over the early COPASI trajectory and the sheet stays well-relaxed (no
+    overlap in the re-rendered viz). run_study_sims now decimates the per-step mesh snapshot
+    so the finer/longer runs do not bloat runs.db.
+- ref: study-tumor-composite-embeds
+  reviewer: '"make sure the ratio of preferred perimeter to the square root of prefered
+    area is 3.6 or lower."'
+  action: >-
+    Verified and documented. prefered_perimeter = 3.6 and prefered_area = 1.0, so the
+    shape index p0 = 3.6/√1.0 = 3.6 (≤ 3.6, and below the ~3.81 rigidity transition →
+    solid regime, cells hold compact shapes). divide_crypt resets prefered_area to 1.0
+    after each split, so the ratio stays 3.6 throughout the run rather than drifting up.
+- ref: study-tumor-composite-embeds
+  reviewer: '"set the critical area for the division events to 2.0."'
+  action: >-
+    Done. division_crit 0.5 → 2.0 (apoptosis_crit was already 2.0). A cell must now grow
+    to area > 2.0 before it splits, so divide_crypt inflates its prefered_area over ~8
+    manager steps first (the sheet relaxes in between) and the two daughters start near
+    their 1.0 prefered area instead of as tiny overlapping faces.
 runs: []

@@ -26,28 +26,30 @@ study_card:
     identical mechanics-only epithelial sheet, so any divergence is attributable to the
     SBML-driven cell-fate events and not to the mesh mechanics.
   background: >-
-    Both arms run 150 steps on the same flat SheetGeometry sheet (test_square, 206 cells).
-    The tumor arm is the BIOMD0000000903-coupled composite with real topology
-    (cell_division / apoptosis_extrusion); the baseline arm is EulerSolver only.
+    Both arms run 150 steps at interval 0.01 on the same flat SheetGeometry sheet
+    (test_square, 206 cells). The tumor arm is the BIOMD0000000903-coupled composite with
+    real topology (cell_division / apoptosis_extrusion) and a single central tumor seed;
+    the baseline arm is EulerSolver only.
   conclusion: >-
-    The baseline stays 100% healthy and fixed at 206 cells; the tumor arm grows to 306
-    cells via 176 divisions, reaching 115 tumor and a healthy fraction of 0.62. All four
+    The baseline stays 100% healthy and fixed at 206 cells; the tumor arm grows to 312
+    cells via 175 divisions, reaching 112 tumor and a healthy fraction of 0.64. All four
     acceptance tests pass.
   main_insight: With real topology the divergence is visible in tissue size and morphology
-    (the tumor arm physically grows), not only in cell-type labels.
+    (the tumor arm physically grows a single central clone), not only in cell-type labels.
   caveat: Qualitative comparison; requires the tyssue fork; counts vary slightly run-to-run.
   key_metrics:
   - {label: baseline total cells, value: "206 (fixed)", status: pass}
-  - {label: tumor-arm total cells, value: "206 → 306", status: pass}
-  - {label: tumor-arm tumor cells, value: "0 → 115", status: pass}
-  - {label: healthy fraction (tumor arm), value: "1.00 → 0.62", status: pass}
+  - {label: tumor-arm total cells, value: "206 → 312", status: pass}
+  - {label: tumor-arm tumor cells, value: "0 → 112", status: pass}
+  - {label: healthy fraction (tumor arm), value: "1.00 → 0.64", status: pass}
 description: >-
   Two simulation sources on the same flat SheetGeometry sheet (test_square): `tumor`
-  (COPASI BIOMD0000000903 coupled, topology_ops=true) and `epithelium_2d` (EulerSolver
-  only, no coupling). Run for matched step counts (150) and compare cell-type composition,
-  tissue size, cumulative births/deaths, and healthy-cell fraction. With real topology the
-  tumor arm grows the mesh by cell division; the baseline arm only relaxes mechanically —
-  so the divergence is now visible in tissue size and morphology, not just labels.
+  (COPASI BIOMD0000000903 coupled, topology_ops=true, single central tumor seed) and
+  `epithelium_2d` (EulerSolver only, no coupling). Run for matched step counts (150) at
+  interval 0.01 and compare cell-type composition, tissue size, cumulative births/deaths,
+  and healthy-cell fraction. With real topology the tumor arm grows the mesh by cell
+  division into one central clone; the baseline arm only relaxes mechanically — so the
+  divergence is visible in tissue size and morphology, not just labels.
 baseline:
 - name: tumor
   composite: vivarium_tyssue.composites.tumor
@@ -87,8 +89,8 @@ visualizations:
     caption: >-
       The controlled contrast. The baseline arm holds flat — total_count stays 206,
       tumor 0, healthy_fraction 1.00 (mechanics only, no events). The tumor arm grows
-      total_count 206→306 by real cell division, tumor rises 0→115, and healthy_fraction
-      falls to 0.62. The only difference between the arms is the COPASI coupling.
+      total_count 206→312 by real cell division, tumor rises 0→112, and healthy_fraction
+      falls to 0.64. The only difference between the arms is the COPASI coupling.
 - name: Births and deaths — tumor vs baseline
   address: local:TimeSeriesFromObservables
   config:
@@ -98,7 +100,7 @@ visualizations:
     caption: >-
       Per-step cell-division (tumor_births) and apoptosis-extrusion (healthy_deaths)
       events. The baseline arm fires none; the tumor arm's events are flux-driven by the
-      SBML model. Cumulatively the tumor arm reaches 176 divisions and 68 extrusions.
+      SBML model. Cumulatively the tumor arm reaches 175 divisions and 67 extrusions.
 - name: Baseline sheet snapshots
   address: local:TissueSheetSnapshots
   config: {title: Baseline sheet snapshots, coords: [x, y], n_panels: 6, sources: [baseline],
@@ -108,9 +110,9 @@ visualizations:
 - name: Tumor sheet snapshots
   address: local:TissueSheetSnapshots
   config: {title: Tumor sheet snapshots, coords: [x, y], n_panels: 6, sources: [tumor],
-    caption: "Tumor arm (tyssue sheet_view). The sheet visibly gains cells and tumor
-      (red) clones spread as the COPASI fluxes drive real divisions — the divergence
-      from the baseline above."}
+    caption: "Tumor arm (tyssue sheet_view). A single tumor cell seeded at the centre
+      grows out into one contiguous red clone as the COPASI fluxes drive real divisions,
+      and the sheet gains cells — the divergence from the static baseline above."}
 - name: Tumor sheet animation
   address: local:TissueSheetGif
   config:
@@ -120,8 +122,9 @@ visualizations:
     sources: [tumor]
     caption: >-
       The requested video for this comparison: the tumor arm animated from its tyssue
-      mesh history, showing the sheet growing by cell division and tumor patches
-      spreading over the 150-step run (transient black cells are mid-extrusion).
+      mesh history, showing the sheet growing by cell division and a single central tumor
+      clone spreading outward over the 150-step run (transient black cells are
+      mid-extrusion).
 - name: Baseline sheet animation
   address: local:TissueSheetGif
   config:
@@ -135,8 +138,9 @@ visualizations:
 expected_behavior:
 - "Baseline: stays 100% healthy, no births/deaths, total cells fixed at 206, morphology
   relaxes uniformly."
-- "Tumor: grows the mesh by real cell division (total 206→306), tumor patches spread,
-  healthy fraction falls, cumulative divisions and extrusions are nonzero."
+- "Tumor: grows the mesh by real cell division (total 206→312), a single central tumor
+  clone spreads outward, healthy fraction falls, cumulative divisions and extrusions are
+  nonzero."
 key_assumptions:
 - Same geometry and mechanics in both arms; the only difference is the tumor coupling.
 - Comparison is qualitative (composition/size/trend), consistent with the parent study's
@@ -161,7 +165,7 @@ behavior_tests:
   measure: {kind: last, path: tumor_count}
   pass_if: {op: gt, threshold: 10}
   result: PASS
-  notes: "tumor arm final tumor_count = 115 vs baseline 0."
+  notes: "tumor arm final tumor_count = 112 vs baseline 0."
 - name: tumor_arm_grows_tissue
   classification: quantitative
   question: Does the tumor arm grow the mesh by real division while the baseline stays
@@ -169,14 +173,14 @@ behavior_tests:
   measure: {kind: last, path: total_count}
   pass_if: {op: gt, threshold: 206}
   result: PASS
-  notes: "tumor arm total_count = 306 (206→306 via 176 divisions) vs baseline fixed at 206."
+  notes: "tumor arm total_count = 312 (206→312 via 175 divisions) vs baseline fixed at 206."
 - name: healthy_fraction_gap
   classification: quantitative
   question: Is the healthy fraction lower in the tumor arm than baseline?
   measure: {kind: last, path: healthy_fraction}
   pass_if: {op: lt, threshold: 0.8}
   result: PASS
-  notes: "tumor arm healthy_fraction = 0.62 vs baseline 1.00 — clear displacement gap."
+  notes: "tumor arm healthy_fraction = 0.64 vs baseline 1.00 — clear displacement gap."
 findings:
 - id: F1
   kind: computational
@@ -184,30 +188,30 @@ findings:
   statement: With tumor coupling off, the sheet stays uniformly healthy and fixed in
     size; with it on, the mesh grows by real division and composition shifts toward
     tumor — a clean, controlled divergence.
-  summary: "Over 150 steps the baseline arm holds at 206 healthy cells (0 tumor,
-    total fixed at 206, zero events) while the tumor arm grows to 306 cells via 176
-    cell divisions, reaching 115 tumor / healthy_fraction 0.62. The only difference
+  summary: "Over 150 steps (interval 0.01) the baseline arm holds at 206 healthy cells
+    (0 tumor, total fixed at 206, zero events) while the tumor arm grows to 312 cells via
+    175 cell divisions, reaching 112 tumor / healthy_fraction 0.64. The only difference
     between the arms is the COPASI coupling, so the divergence is attributable to the
     SBML-driven cell-division/extrusion events."
   explanation: See the 'Tissue size and composition — tumor vs baseline' overlay and
     the side-by-side snapshot panels and animations.
-  evidence: {from_test: tumor_arm_grows_tissue, observed: 306, units: cells}
+  evidence: {from_test: tumor_arm_grows_tissue, observed: 312, units: cells}
 - id: F2
   kind: biological
   status: confirms
   statement: The tumor model displaces healthy tissue (healthy fraction 1.00→0.62)
     relative to the untreated baseline, and grows the tissue mass, over the run.
-  summary: The healthy fraction diverges from 1.00 (baseline) to 0.62 (tumor arm),
-    driven by the model's tumor-induction and stem→tumor fluxes adding tumor cells by
-    division while apoptotic cells extrude, against a baseline where healthy tissue is
-    fully preserved and the mesh is static.
-  evidence: {from_test: healthy_fraction_gap, observed: 0.62, units: fraction}
+  summary: The healthy fraction diverges from 1.00 (baseline) to 0.64 (tumor arm),
+    driven by the model's tumor-induction fluxes adding tumor cells by division (a single
+    central clone) while apoptotic cells extrude, against a baseline where healthy tissue
+    is fully preserved and the mesh is static.
+  evidence: {from_test: healthy_fraction_gap, observed: 0.64, units: fraction}
 conclusion: The controlled comparison isolates the tumor coupling's effect — the
   mechanics-only baseline stays 100% healthy and fixed at 206 cells across all 150
-  steps, while the COPASI-coupled arm grows to 306 cells (176 divisions), reaching 115
-  tumor and a healthy fraction of 0.62. All four acceptance tests pass. With real
-  topology the divergence is now visible in tissue size and morphology as well as
-  composition.
+  steps (interval 0.01), while the COPASI-coupled arm grows a single central clone to
+  312 cells (175 divisions), reaching 112 tumor and a healthy fraction of 0.64. All four
+  acceptance tests pass. With real topology the divergence is visible in tissue size and
+  morphology as well as composition.
 biological_summary: The baseline represents undisturbed epithelium; the tumor arm
   adds BIOMD0000000903's population dynamics. The tumor arm's division-driven growth and
   healthy-fraction loss, absent in the static baseline, are the spatial read-out of the
@@ -215,11 +219,12 @@ biological_summary: The baseline represents undisturbed epithelium; the tumor ar
 conclusion_verdicts:
   regression_compatibility:
     result: PASS
-    basis: Both arms run 150 steps stably on the same sheet; all four acceptance tests pass.
+    basis: Both arms run 150 steps (interval 0.01) stably on the same sheet; all four
+      acceptance tests pass.
   biological_validation:
     result: MIXED
-    basis: The tumor arm diverges from the static baseline as expected (grows to 306 cells,
-      healthy fraction 0.62 vs 1.00), but the comparison is qualitative — geometry and
+    basis: The tumor arm diverges from the static baseline as expected (grows to 312 cells,
+      healthy fraction 0.64 vs 1.00), but the comparison is qualitative — geometry and
       scales are not fit to data.
   explanatory_gain:
     result: POSITIVE
@@ -235,8 +240,20 @@ feedback_responses:
     (1) Divisions/deaths now use exactly those behavior functions: topology_ops=true
     routes births through tyssue cell_division (via divide_crypt) and deaths through
     apoptosis_extrusion (remove_face), on the pandas-3-compatible tyssue fork. The tumor
-    arm grows 206→306 cells via 176 divisions with 68 extrusions; the baseline arm fires
+    arm grows 206→312 cells via 175 divisions with 67 extrusions; the baseline arm fires
     none. (2) Added the requested video — a Tumor sheet animation (plus a Baseline sheet
     animation for side-by-side), rendered from the tyssue mesh history. (3) Fixed a viz
     bug where both snapshot panels could show the same arm: the mesh viz now select their
     simulation by source, so baseline and tumor panels show the correct arm.
+# The 2026-06-17 review annotated study-tumor-composite-embeds; the tumor arm here shares
+# that composite, so it inherits every change.
+- ref: study-tumor-vs-baseline-embeds
+  reviewer: '"(inherited from the 2026-06-17 review of the tumor composite: single seed,
+    time-step 0.01, shape index <= 3.6, division crit_area 2.0.)"'
+  action: >-
+    The tumor arm is the same `tumor` composite, so it now seeds a SINGLE tumor cell at
+    the sheet centre (was 8 scattered + 2 stem), runs at interval 0.01 (was 0.1),
+    uses division_crit 2.0 (was 0.5), and keeps the shape index prefered_perimeter/√
+    prefered_area = 3.6. Both arms were re-run at interval 0.01 and re-rendered: the
+    tumor arm grows one central clone 206→312 (112 tumor, healthy fraction 0.64) with no
+    cell overlap, the baseline arm stays fixed at 206 healthy.
