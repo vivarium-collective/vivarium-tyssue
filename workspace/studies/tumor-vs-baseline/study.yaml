@@ -7,8 +7,14 @@ design_status: approved
 implementation_status: complete
 simulation_status: ran
 evaluation_status: evaluated
-parent_studies:
-- tumor-composite
+# Canonical DAG edge (replaces the legacy parent_studies field).
+pipeline_gate:
+  prerequisites:
+  - {study: tumor-composite, condition: complete}
+question: >-
+  Does adding the COPASI tumor coupling make the epithelial sheet diverge from an
+  otherwise-identical mechanics-only baseline — in tissue size, composition, and
+  morphology?
 objective: >-
   Compare the COPASI-coupled tumor composite against a mechanics-only baseline
   epithelial sheet of identical geometry, isolating the effect of the tumor coupling.
@@ -57,6 +63,21 @@ baseline:
 - name: baseline
   composite: vivarium_tyssue.composites.epithelium_2d
   description: Mechanics-only flat 2D sheet — no tumor coupling (control).
+# v4 conditions block (drives the dashboard's Build tab). The control sheet is the
+# baseline; the tumor coupling is the single variant applied on top of it.
+conditions:
+  baseline:
+    composite: vivarium_tyssue.composites.epithelium_2d
+    params:
+      interval: 0.01
+variants:
+- name: tumor-coupling
+  description: >-
+    The COPASI BIOMD0000000903 tumor coupling (topology_ops, single central tumor seed)
+    applied on top of the baseline sheet — the only difference between the two arms.
+  params:
+    composite: vivarium_tyssue.composites.tumor
+    interval: 0.01
 observables:
 - {name: tumor_count,    store_path: tumor_count,    units: cells, description: Tumor cells on the mesh}
 - {name: healthy_count,  store_path: healthy_count,  units: cells, description: Healthy cells on the mesh}

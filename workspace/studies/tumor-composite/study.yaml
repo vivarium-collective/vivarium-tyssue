@@ -7,6 +7,10 @@ design_status: approved
 implementation_status: complete
 simulation_status: ran
 evaluation_status: evaluated
+question: >-
+  Can the COPASI BIOMD0000000903 tumor-population ODE drive real, discrete cell division
+  and apoptotic extrusion on a tyssue 2D epithelial sheet — a single seeded focus growing
+  out into one clonal patch?
 objective: Build the COPASI-coupled tumor composite and demonstrate, through five
   visualizations, that BIOMD0000000903 drives discrete cell-fate dynamics on a tyssue
   2D epithelial sheet.
@@ -64,6 +68,24 @@ baseline:
 - name: tumor
   composite: vivarium_tyssue.composites.tumor
   description: COPASI BIOMD0000000903 coupled to the flat 2D tyssue sheet.
+# v4 conditions block (drives the dashboard's Build tab) — mirrors the v3 baseline above.
+conditions:
+  baseline:
+    composite: vivarium_tyssue.composites.tumor
+    params:
+      interval: 0.01
+# Single-composite demonstration — one 'reference' configuration (the canonical run),
+# not a sweep. The reviewer-tuned settings are recorded here as the reference variant.
+variants:
+- name: reference
+  description: >-
+    Canonical 150-step run (seed 0), the only configuration evaluated: a single tumor
+    cell seeded at the sheet centre, interval 0.01, division_crit 2.0, shape index 3.6.
+  params:
+    interval: 0.01
+    division_crit: 2.0
+    apoptosis_crit: 2.0
+    seed: {tumor: 1, stem: 0}
 observables:
 - name: tumor_births
   store_path: tumor_births
