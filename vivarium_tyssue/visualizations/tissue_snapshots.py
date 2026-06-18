@@ -13,13 +13,12 @@ The hand-rolled path is kept only as a dependency-light fallback when tyssue's d
 stack is unavailable."""
 from __future__ import annotations
 
-import base64
 import io
 from pathlib import Path
 
 from pbg_superpowers.visualization import Visualization
 from vivarium_tyssue.visualizations.tissue_gif import (
-    _load_frames, _subsample, _empty_html, _build_sheet, CELL_TYPE_COLORS,
+    _load_frames, _subsample, _empty_html, _build_sheet, _embed_figure, CELL_TYPE_COLORS,
 )
 
 _DEFAULT_COLOR = "#9aa0a6"
@@ -143,14 +142,13 @@ def _panels_html(frames: list, coords: list[str], n_panels: int, title: str) -> 
     fig.tight_layout()
     fig.savefig(buf, format="png", dpi=110)
     plt.close(fig)
-    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
     renderer = "matplotlib mesh (fallback)" if used_fallback else "tyssue sheet_view"
     caption = (f'{title} — {len(frames)} steps, {len(sampled)} panels '
                f'(faces colored by cell type, {renderer})')
-    return (f'<figure style="margin:0;text-align:center"><img alt="{title}" '
-            f'style="max-width:100%;height:auto" src="data:image/png;base64,{b64}"/>'
-            f'<figcaption style="font-family:system-ui;font-size:0.85rem;color:#666">'
-            f'{caption}</figcaption>{_legend_html(present_types)}</figure>')
+    figcaption = (f'<figcaption style="font-family:system-ui;font-size:0.85rem;color:#666">'
+                  f'{caption}</figcaption>')
+    return _embed_figure(buf.getvalue(), "image/png", title,
+                         caption_html=figcaption, extra_html=_legend_html(present_types))
 
 
 class TissueSheetSnapshots(Visualization):

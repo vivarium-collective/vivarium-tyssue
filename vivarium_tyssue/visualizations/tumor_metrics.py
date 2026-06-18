@@ -19,12 +19,11 @@ shared ``_load_frames`` loader, so they need no extra emitted observables.
 """
 from __future__ import annotations
 
-import base64
 import io
 
 from pbg_superpowers.visualization import Visualization
 from vivarium_tyssue.visualizations.tissue_gif import (
-    _load_frames, _empty_html, CELL_TYPE_COLORS,
+    _load_frames, _empty_html, _embed_figure, CELL_TYPE_COLORS,
 )
 
 _TUMOR = CELL_TYPE_COLORS.get("tumor", "#c0392b")
@@ -79,10 +78,7 @@ def _fig_to_html(fig, title: str) -> str:
     fig.savefig(buf, format="png", dpi=110)
     import matplotlib.pyplot as plt
     plt.close(fig)
-    b64 = base64.b64encode(buf.getvalue()).decode("ascii")
-    return (f'<figure style="margin:0;text-align:center"><img alt="{title}" '
-            f'style="max-width:100%;height:auto" src="data:image/png;base64,{b64}"/>'
-            f'</figure>')
+    return _embed_figure(buf.getvalue(), "image/png", title)
 
 
 def _setup():

@@ -155,15 +155,46 @@ def _empty_html(msg: str) -> str:
     )
 
 
-def _gif_html(gif_bytes: bytes, caption: str, div_id: str) -> str:
-    b64 = base64.b64encode(gif_bytes).decode("ascii")
+def _img_dims(img_bytes: bytes):
+    """(width, height) in px from raw PNG/GIF bytes, or (None, None) if PIL is absent."""
+    try:
+        from PIL import Image
+        with Image.open(io.BytesIO(img_bytes)) as im:
+            return int(im.width), int(im.height)
+    except Exception:  # noqa: BLE001
+        return None, None
+
+
+def _embed_figure(img_bytes: bytes, mime: str, alt: str, *,
+                  caption_html: str = "", extra_html: str = "", div_id: str = "") -> str:
+    """Wrap a rendered image in a <figure> carrying intrinsic width/height attributes.
+
+    The dashboard embeds each viz in an iframe floored at min-height:1200px and shrinks
+    it to the content's measured height. A bare ``height:auto`` <img> measures
+    indeterminately, so the iframe stays at 1200px → a large white gap. Supplying the
+    intrinsic width/height (read from the bytes) lets the browser reserve the correct
+    aspect-ratio box, so the iframe autosizes to the real height — the same outcome the
+    framework Plotly viz get from their explicit-height container."""
+    b64 = base64.b64encode(img_bytes).decode("ascii")
+    w, h = _img_dims(img_bytes)
+    dim_attrs = f' width="{w}" height="{h}"' if w and h else ""
+    fid = f' id="{div_id}"' if div_id else ""
     return (
-        f'<figure id="{div_id}" style="margin:0;text-align:center">'
-        f'<img alt="{caption}" style="max-width:100%;height:auto" '
-        f'src="data:image/gif;base64,{b64}"/>'
-        f'<figcaption style="font-family:system-ui;font-size:0.85rem;color:#666;'
-        f'margin-top:0.4rem">{caption}</figcaption></figure>'
+        f'<figure{fid} style="margin:0;text-align:center">'
+        f'<img alt="{alt}"{dim_attrs} '
+        f'style="max-width:100%;height:auto;display:inline-block" '
+        f'src="data:{mime};base64,{b64}"/>'
+        f'{caption_html}{extra_html}</figure>'
     )
+
+
+def _gif_html(gif_bytes: bytes, caption: str, div_id: str) -> str:
+    figcaption = (
+        f'<figcaption style="font-family:system-ui;font-size:0.85rem;color:#666;'
+        f'margin-top:0.4rem">{caption}</figcaption>'
+    )
+    return _embed_figure(gif_bytes, "image/gif", caption,
+                         caption_html=figcaption, div_id=div_id)
 
 
 # --------------------------------------------------------------------------
