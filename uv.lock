@@ -1964,7 +1964,7 @@ dependencies = [
 [[package]]
 name = "pbg-superpowers"
 version = "0.14.0"
-source = { git = "https://github.com/vivarium-collective/pbg-superpowers.git#764f1ef680473a6597826d93a85104b60a718686" }
+source = { git = "https://github.com/vivarium-collective/pbg-superpowers.git#1af991a8879c130f9c9a158836a8fa29d855ffe8" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "click" },
@@ -3584,7 +3584,7 @@ wheels = [
 [[package]]
 name = "vivarium-dashboard"
 version = "0.1.0"
-source = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git#bbd1c87859770e57fb571766f18cbd7595fdbc21" }
+source = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git#5bdbd6f9a5b0d02be4a7a2651a9f6d912b5d208c" }
 dependencies = [
     { name = "bigraph-loom" },
     { name = "bigraph-schema" },

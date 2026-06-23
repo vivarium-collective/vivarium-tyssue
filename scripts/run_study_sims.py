@@ -44,14 +44,24 @@ def _jsonable(df):
     return out
 
 
-def run_study(study: str, sim_name: str, composite_yaml: str, steps: int,
+def run_study(study: str, sim_name: str, composite, steps: int,
               interval: float = 0.1, seed: int = 0) -> None:
+    """Run one simulation and record runs.db.
+
+    ``composite`` is either a path to a composite spec file (str/Path) or an
+    already-parsed spec dict. The dict form lets a caller (e.g. the generated
+    reproduction notebook) edit the process-bigraph specification — config
+    parameters, per-process ``interval`` — before the composite is built and
+    run. ``${interval}`` placeholders left in the spec are filled from the
+    ``interval`` argument; a process whose ``interval`` was pinned to a literal
+    keeps that value.
+    """
     from pbg_superpowers.composite_spec import load_spec, build_composite_from_spec
     from vivarium_tyssue.core import build_core
 
     np.random.seed(seed)
     core = build_core()
-    spec = load_spec(Path(composite_yaml))
+    spec = composite if isinstance(composite, dict) else load_spec(Path(composite))
     comp = build_composite_from_spec(spec, overrides={"interval": interval}, core=core)
 
     db_path = ROOT / "workspace" / "studies" / study / "runs.db"
