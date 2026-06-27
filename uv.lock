@@ -3584,7 +3584,7 @@ wheels = [
 [[package]]
 name = "vivarium-dashboard"
 version = "0.1.0"
-source = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git#5bdbd6f9a5b0d02be4a7a2651a9f6d912b5d208c" }
+source = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git#ca2fd00e507483d9605d083d6149dc2503fa7d3c" }
 dependencies = [
     { name = "bigraph-loom" },
     { name = "bigraph-schema" },
