@@ -60,8 +60,22 @@ def run_study(study: str, sim_name: str, composite, steps: int,
     from vivarium_tyssue.core import build_core
 
     np.random.seed(seed)
-    core = build_core()
     spec = composite if isinstance(composite, dict) else load_spec(Path(composite))
+
+    # 3D monolayer studies have no cell-fate coupling, so their observables are
+    # morphology (apical lift-off), not tumor/healthy counts. The generated
+    # reproduction notebook imports a single run_study per workspace, so route
+    # monolayer composites to the lumen recorder here rather than recording the
+    # tumor stores (which would all be zero for these specs).
+    try:
+        _tissue = spec.get("state", {}).get("Tyssue", {}).get("config", {}).get("tissue_type")
+    except AttributeError:
+        _tissue = None
+    if _tissue == "Monolayer":
+        from scripts.run_lumen_sims import run_study as _run_lumen
+        return _run_lumen(study, sim_name, spec, steps, interval, seed)
+
+    core = build_core()
     comp = build_composite_from_spec(spec, overrides={"interval": interval}, core=core)
 
     db_path = ROOT / "workspace" / "studies" / study / "runs.db"

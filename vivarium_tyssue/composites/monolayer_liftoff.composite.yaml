@@ -1,0 +1,93 @@
+name: monolayer_liftoff
+description: >-
+  3D monolayer "lift-off": a flat epithelial sheet is extruded into a polyhedral
+  monolayer (apical surface at z=0, basal at z=-1) and a high line tension is
+  placed on the apical-surface edges only — a purse-string that, against cell
+  volume elasticity and face area/contractility, buckles the apical surface out
+  of plane (the first step of lumen / dome morphogenesis). Pure mechanics, no
+  COPASI coupling. Settings from T. Rahman's monolayer_liftoff notebook.
+tags:
+- tissue
+- multi-cell
+- 3d
+- monolayer
+- morphogenesis
+requires:
+  processes:
+  - EulerSolver
+  types:
+  - tyssue_data
+  - behaviors
+# No emitter: the study viz read runs.db (written by scripts/run_lumen_sims.py),
+# the same Path-C pattern as the tumor studies. Standalone runs stay clean.
+emitters: []
+parameters:
+  interval:
+    type: float
+    default: 0.1
+    description: >-
+      Solver step (dt). The vertex positions relax by gradient descent each step;
+      0.1 is the mechanically stable dt used in the source notebook. Lower it if
+      the apical surface overshoots / self-intersects during fast buckling.
+state:
+  Tyssue:
+    _type: process
+    address: local:EulerSolver
+    config:
+      name: Monolayer Lift-Off
+      eptm: workspace/datasets/monolayer_box.hf5
+      tissue_type: Monolayer
+      parameters:
+        cell_df:
+          # 3D volume term: each polyhedral cell resists changing volume.
+          vol_elasticity: 1.0
+          prefered_vol: 1.0
+          is_alive: 1.0
+        face_df:
+          area_elasticity: 1.0
+          prefered_area: 1.0
+          # Mild face (perimeter) contractility on every face.
+          contractility: 0.05
+          is_alive: 1.0
+        edge_df:
+          # Per-segment line tension: a strong purse-string on the apical edges
+          # only, ~0 elsewhere. This differential apical tension is the knob that
+          # drives lift-off. (EulerSolver expands the dict over edge_df.segment.)
+          line_tension:
+            apical: 1.0
+            default: 0.0
+          is_active: 1.0
+        vert_df:
+          # Vertex drag sets the relaxation timescale.
+          viscosity: 1.0
+          is_alive: 1.0
+      geom: MonolayerGeometry
+      effectors:
+      - CellVolumeElasticity
+      - FaceAreaElasticity
+      - FaceContractility
+      - LineTension
+      ref_effector: FaceAreaElasticity
+      factory: model_factory
+      settings:
+        threshold_length: 0.03
+      # Keep topology fixed so we observe pure shape change (no T1/rearrangements).
+      auto_reconnect: false
+      bounds: {}
+      output_columns: {}
+      maps: {}
+    inputs:
+      behaviors:
+      - Behaviors
+      global_time:
+      - global_time
+    outputs:
+      datasets:
+      - Datasets
+      network_changed:
+      - Network Changed
+      behaviors_update:
+      - Behaviors
+    interval: ${interval}
+  Network Changed: false
+  Behaviors: {}

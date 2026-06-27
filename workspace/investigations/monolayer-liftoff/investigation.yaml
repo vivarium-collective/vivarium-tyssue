@@ -1,0 +1,102 @@
+schema_version: 2
+name: monolayer-liftoff
+title: 3D monolayer lift-off — apical tension drives epithelial folding
+created: '2026-06-27'
+status: running
+question: >-
+  Can differential surface tension alone — a high line tension on the apical edges
+  of a 3D tyssue monolayer — buckle the apical surface out of plane, reproducing
+  the mechanical first step of lumen / dome morphogenesis, inside the workspace's
+  process-bigraph EulerSolver?
+hypothesis: >-
+  Yes: an apical-edge purse-string, opposed by cell-volume elasticity with the
+  basal and lateral edges untensioned, forces the apical surface to invaginate —
+  the out-of-plane amplitude grows monotonically and interior cells sink below the
+  boundary rim, with no growth or topology change required.
+description: >-
+  This investigation lifts the workspace from 2D sheets into 3D morphogenesis. A
+  flat epithelial sheet is extruded into a polyhedral Monolayer (apical surface at
+  z=0, basal at z=-1) and integrated under CellVolumeElasticity + FaceAreaElasticity
+  + FaceContractility + LineTension, with line tension set per mesh segment so only
+  the apical edges pull. The settings come verbatim from T. Rahman's
+  Notebooks/monolayer_liftoff.ipynb; this work packages them as a declared composite
+  + study so the result is reproducible from the cached notebook. It is a mechanics
+  demonstration (hand-set parameters, fixed topology), distinct from and
+  complementary to the 2D tumor-tyssue investigation — and it answers that
+  investigation's open "pursue 3D / curved geometries" decision.
+lead: Eran
+executive:
+  what_is_this: >-
+    A demonstration that apical-edge line tension alone makes a 3D tyssue monolayer
+    fold its apical surface out of plane — the mechanical seed of a lumen — running
+    in the same process-bigraph EulerSolver used for the 2D studies.
+  verdict: >-
+    Mechanism demonstrated. Over 100 relaxation steps the apical out-of-plane
+    amplitude grows 0 -> ~2.3 and interior cells invaginate below the boundary rim
+    (dome_height -> ~-1.5), while the basal surface stays near z=-1. Both
+    pre-registered tests pass.
+  verdict_status: supported
+  decisions_needed:
+  - Whether to add a flat control (apical tension 0) and a tension sweep to turn
+    this demonstration into a controlled, parameterized study.
+  - Whether to enable topological rearrangements (T1) to progress the invagination
+    toward a closed lumen.
+at_a_glance:
+- study: lumen-liftoff
+  role: The lift-off demonstration — apical purse-string tension buckles the 3D
+    monolayer, shown in a 3D animation, an x-z side profile, and morphology metrics.
+scientific_argument:
+  main_claim: >-
+    Differential apical surface tension is sufficient, on its own, to drive
+    out-of-plane folding of a 3D epithelial monolayer in the workspace vertex model.
+  evidence_for:
+  - "lumen-liftoff: apical_amplitude rises monotonically 0 -> ~2.3 and dome_height
+    falls to ~-1.5 (interior cells below the rim) over 100 steps; basal surface
+    stays near z=-1. Both acceptance tests pass."
+  evidence_against:
+  - No flat control has been run yet, so the tension-attribution rests on the
+    mechanism and the localized (apical-only) deformation rather than a contrast.
+  key_figures:
+  - lumen-liftoff / Lift-off side profile
+  - lumen-liftoff / Apical deformation over time
+  caveats:
+  - Hand-set parameters from the source notebook; magnitudes are illustrative.
+  - Topology frozen (auto_reconnect=false); no T1 transitions or growth.
+  interpretation_ref: lumen-liftoff
+biological_story: >-
+  Epithelia fold, pit and form lumens largely by changing where they pull hardest.
+  Here a flat sheet of cells is given a single instruction — squeeze along the
+  apical rim — and nothing else. Because each cell keeps its volume and only the
+  apical edges contract, the top surface cannot stay flat: it bows downward and
+  inward, the interior of the patch sinking below its border, exactly the cupping
+  that begins a lumen or gland. The simulation shows this emerging from mechanics
+  alone, with no cell division, death, or rearrangement.
+studies:
+- lumen-liftoff
+acceptance_criteria:
+- study: lumen-liftoff
+  behavior: >-
+    Apical-edge line tension drives measurable out-of-plane folding — apical
+    amplitude grows from zero and interior cells invaginate below the boundary
+    rim — purely mechanically, with fixed topology and no growth.
+glossary:
+- term: monolayer
+  definition: A 3D tyssue tissue where each cell is a closed polyhedron with apical,
+    basal and lateral faces — unlike a 2D Sheet, which has only faces in a plane.
+- term: apical purse-string
+  definition: A high line tension placed only on the apical-surface edges, which
+    contracts the apical perimeter like a drawstring.
+- term: segment
+  definition: The tyssue label on each edge/face/vertex (apical / basal / lateral)
+    that lets the composite target tension at one surface (line_tension apical=1.0).
+- term: dome_height
+  definition: Mean interior-cell z minus mean boundary-rim-cell z. Negative means the
+    interior has sunk below the rim — an invagination.
+- term: lift-off amplitude
+  definition: max-min z of the apical vertices — how far the apical surface departs
+    from a flat plane.
+how_to_read: >-
+  Start with study lumen-liftoff: watch the x-z side profile fold (the monolayer
+  viewed edge-on, vertical motion shown directly) and the profile snapshots, then
+  read the two morphology time-series (apical amplitude rising; dome_height going
+  negative as the interior invaginates).
