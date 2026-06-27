@@ -189,10 +189,9 @@ findings:
     (CellVolumeElasticity) and the basal/lateral edges untensioned, the only way
     to satisfy the energy is to push the apical surface out of plane. Interior
     cells sink relative to the boundary rim, producing an invagination.
-  evidence:
-    observed: apical_amplitude 0 -> ~2.3; dome_height 0 -> ~-1.5
-    expected: monotonic rise in apical_amplitude; dome_height < 0
+  evidence: {from_test: apical_liftoff_occurs, observed: 2.3, units: length}
   provenance:
+    run_ids: [monolayer_liftoff__liftoff]
     composite: vivarium_tyssue.composites.monolayer_liftoff
     source_notebook: Notebooks/monolayer_liftoff.ipynb
 conclusion_logic:

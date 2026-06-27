@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html lang="en"><head>
-<meta charset="UTF-8"><title>tyssue:tumor-tyssue</title>
-<link rel="stylesheet" href="assets/style.css?v=1781737251_1781737251">
+<meta charset="UTF-8"><title>tyssue</title>
+<link rel="stylesheet" href="assets/style.css?v=1782584302_1782584302">
 <link rel="stylesheet" href="assets/snapshot-readonly.css">
 <script>
 // Per-workspace branding (rail logo, title, brand text) is resolved
@@ -19,6 +19,11 @@ window.addEventListener('pageshow', function (e) {
 });
 </script>
 <script src="https://cdn.plot.ly/plotly-2.27.0.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-weighted-voronoi@1"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-voronoi-map@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/d3-voronoi-treemap@1"></script>
+<script src="https://unpkg.com/escher@1.7.3/dist/escher.min.js"></script>
 <style>
 /* Modal overlay */
 .modal-overlay {
@@ -73,6 +78,9 @@ window.addEventListener('pageshow', function (e) {
 .emitter-parquet { background: #fef3c7; color: #92400e; }   /* amber */
 .emitter-xarray  { background: #ccfbf1; color: #0f766e; }   /* teal  */
 .emitter-none    { background: transparent; color: #9ca3af; }   /* no emitter (summary-only) */
+    .origin-pill { display:inline-block; padding:1px 7px; border-radius:9px; font-size:11px; font-weight:600; }
+    .origin-remote { background:#dbeafe; color:#1e40af; }   /* blue — remote (AWS) */
+    .origin-local  { background:transparent; color:#9ca3af; }
 .action-btn--secondary {
   margin-top: 10px; padding: 5px 12px;
   border: 1px solid #b91c1c; background: #fef2f2;
@@ -129,20 +137,24 @@ window.addEventListener('pageshow', function (e) {
 
 /* Workspace switcher (top of the left rail). */
 .viv-workspace-switcher { position: relative; padding: 0; }
-/* One dashboard per repo: the workspace name is a built-in FIXTURE — a quiet
-   caption sitting directly under the Vivarium brand. NOT a control: no box, no
-   background, no border, no hover, default cursor. Just a small status dot + the
-   repo name in muted text. */
+/* The workspace-name chip is the SOURCE SWITCHER trigger: a small status dot +
+   the current source name under the Vivarium brand. Click to switch local
+   workspace / remote build (source-switch.js opens a dropdown below it). */
 .viv-workspace-name {
-  display: flex; align-items: center; gap: 7px;
-  padding: 0 16px 10px;
-  margin: 0;
+  display: flex; align-items: flex-start; gap: 7px;
+  padding: 0 16px 10px; margin: 0;
   font-size: 12.5px; font-weight: 600;
   color: #64748b; cursor: default;
   background: none; border: none; border-radius: 0;
 }
 .viv-workspace-name strong { font-weight: 600; }
-.viv-workspace-name .viv-workspace-switcher-glyph { font-size: 8px; }
+.viv-ws-text { display: flex; flex-direction: column; min-width: 0; line-height: 1.3; }
+.viv-ws-branch { color: #94a3b8; font-weight: 400; font-size: 0.84em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.viv-ws-remote-tag { font-size: 0.7em; font-weight: 600; color: #7c3aed;
+  background: #f3e8ff; padding: 1px 5px; border-radius: 4px; vertical-align: middle; margin-left: 4px; }
+.viv-workspace-name .viv-workspace-switcher-glyph { font-size: 8px; margin-top: 4px; }
+.viv-workspace-switcher-glyph.viv-glyph-remote { color: #7c3aed; }
 .viv-workspace-switcher-glyph { color: #2ea043; font-size: 14px; }
 .viv-glyph-running { color: #2ea043; }
 /* The workspace name links to its GitHub repo; a small mark signals it. */
@@ -301,6 +313,39 @@ window.addEventListener('pageshow', function (e) {
   display: flex; align-items: center; gap: 8px;
 }
 .viv-iset-menu-row-title { flex: 1; font-size: 13px; color: #111827; }
+.viv-branch-source { padding: 4px 0 16px; max-width: 640px; }
+.viv-bs-title { font-size: 15px; margin: 0 0 12px; }
+.viv-bs-row { display: flex; align-items: center; gap: 10px; margin: 8px 0; }
+.viv-bs-key { width: 64px; color: #6b7280; font-size: 13px; }
+.viv-bs-select, .viv-bs-commit-select { padding: 4px 8px; border: 1px solid #d0d7de; border-radius: 6px; font-size: 13px; }
+.viv-bs-toggle { padding: 4px 12px; border: 1px solid #d0d7de; background: #fff; cursor: pointer; border-radius: 6px; font-size: 13px; }
+.viv-bs-toggle.active { background: #eef4ff; border-color: #94b4ff; color: #1e40af; }
+.viv-bs-commit { font-family: ui-monospace, monospace; font-size: 13px; }
+.viv-bs-current { color: #1e40af; font-weight: 600; font-size: 12px; }
+.viv-bs-actions { display: flex; gap: 8px; margin: 14px 0; }
+.viv-bs-action { padding: 6px 14px; border: 1px solid #d0d7de; background: #fff; border-radius: 6px; cursor: pointer; font-size: 13px; }
+.viv-bs-action:disabled { opacity: 0.45; cursor: default; }
+.viv-bs-note { color: #b45309; font-size: 12px; margin: 6px 0; }
+.viv-bs-list { list-style: none; margin: 10px 0 0; padding: 0; border-top: 1px solid #f3f4f6; }
+.viv-bs-list-row { display: flex; align-items: center; gap: 8px; padding: 6px 4px; border-bottom: 1px solid #f3f4f6; font-size: 13px; }
+.viv-bs-list-row.current { background: #eef4ff; }
+.viv-bs-list-label { flex: 1; }
+.viv-bs-list-label:hover { color: #0366d6; }
+.viv-bs-forget { border: none; background: none; cursor: pointer; color: #c0c4cc; }
+.viv-bs-forget:hover { color: #d1242f; }
+.viv-bs-search { width: 100%; max-width: 420px; margin: 10px 0 0; padding: 5px 9px;
+  border: 1px solid #d0d7de; border-radius: 6px; font-size: 13px; box-sizing: border-box; }
+.viv-bs-list-empty { padding: 8px 4px; color: #9ca3af; font-size: 13px; }
+.viv-bs-busy { margin: 8px 0; padding: 6px 10px; font-size: 12px; color: #1e40af;
+  background: #eef4ff; border: 1px solid #c7d7fe; border-radius: 6px; }
+.viv-iset-menu-forget {
+  flex: 0 0 auto; border: none; background: none; cursor: pointer;
+  color: #c0c4cc; font-size: 12px; line-height: 1; padding: 2px 4px;
+  border-radius: 4px; opacity: 0; transition: opacity 0.1s, color 0.1s, background 0.1s;
+}
+.viv-iset-menu-row:hover .viv-iset-menu-forget,
+.viv-iset-menu-row:focus-within .viv-iset-menu-forget { opacity: 1; }
+.viv-iset-menu-forget:hover { color: #d1242f; background: #ffebe9; }
 .viv-iset-menu-row-pill {
   font-size: 0.7em !important;
   padding: 1px 7px !important;
@@ -346,7 +391,7 @@ window.addEventListener('pageshow', function (e) {
 
     <!-- Brand: fixed Vivarium logo + name (no per-workspace icon/name override). -->
     <div class="viv-rail-header">
-      <img class="viv-rail-logo" src="assets/vivarium-logo.png?v=1781737251_1781737251" alt="Vivarium" loading="lazy">
+      <img class="viv-rail-logo" src="assets/vivarium-logo.png?v=1782584302_1782584302" alt="Vivarium" loading="lazy">
       <div class="viv-rail-brand">
         <strong>Vivarium</strong>
         <small>dashboard</small>
@@ -359,17 +404,19 @@ window.addEventListener('pageshow', function (e) {
     
 
     <div class="viv-workspace-switcher" id="viv-workspace-switcher">
-      <!-- One dashboard per repo: the workspace name IS the link to the
-           associated GitHub repository (git remote origin). -->
-      <div class="viv-workspace-name">
+      <!-- The workspace-name chip opens the Branch page (#github): source,
+           repo/branch/commit, push & build actions. Replaces the old rail
+           dropdown and the standalone Branch rail item. -->
+      <div class="viv-workspace-name" role="button" tabindex="0"
+           title="Open Branch: source, repo · branch · commit, push & build"
+           style="cursor:pointer"
+           onclick="window.location.hash='#github'; if(window._switchPage)_switchPage('github');"
+           onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault(); window.location.hash='#github'; if(window._switchPage)_switchPage('github');}">
         <span class="viv-workspace-switcher-glyph">●</span>
-        
-        <a class="viv-ws-repo-link" href="https://github.com/vivarium-collective/vivarium-tyssue" target="_blank" rel="noopener"
-           title="Open tyssue on GitHub">
+        <span class="viv-ws-text">
           <strong>tyssue</strong>
-          <svg class="viv-ws-gh-mark" width="12" height="12"><use href="#viv-gh-mark"/></svg>
-        </a>
-        
+          <span class="viv-ws-branch" title="feat/tumor-tyssue-investigation">feat/tumor-tyssue-investigation</span>
+        </span>
       </div>
     </div>
     <!-- Snapshot mode: static repo label replaces the switcher dropdown. -->
@@ -482,24 +529,9 @@ window.addEventListener('pageshow', function (e) {
         </span>
         <span class="viv-rail-link-label">Analyses</span>
       </a>
-      <!-- Branch: workspace branch + remote (formerly "GitHub"). The icon
-           is a branch-and-node glyph; renaming the label to "Branch"
-           better reflects that this tab is about the local branch state,
-           the workspace repo's remote, and PR/merge actions — not just
-           GitHub-the-product. Hash route #github kept for back-compat
-           with bookmarks. -->
-      <a href="#github"            class="viv-rail-link menu-link" data-page="github">
-        <span class="viv-rail-link-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" class="viv-rail-link-svg">
-            <circle cx="6" cy="6" r="2"/>
-            <circle cx="6" cy="18" r="2"/>
-            <circle cx="18" cy="12" r="2"/>
-            <path d="M6 8v8"/>
-            <path d="M6 8a6 6 0 0 0 6 6h4"/>
-          </svg>
-        </span>
-        <span class="viv-rail-link-label">Branch</span>
-      </a>
+      <!-- The Branch page (#github) is no longer a rail item — it's reached by
+           clicking the workspace source display at the top of the rail (see
+           #viv-workspace-switcher). Hash route #github kept for back-compat. -->
     </nav>
 
     <!-- Studies of the active investigation, dependency-ordered. -->
@@ -660,7 +692,7 @@ window.addEventListener('pageshow', function (e) {
 
   <!-- Subtab: Modules (catalog grid; workspace + installed entries pinned at top) -->
   <section class="panel registry-subtab-panel active" data-subtab="modules">
-    <p class="panel-lead">Modules active in this workspace appear at the top (the workspace's own first-party package is pinned first, then installed catalog modules). Click Install on any card below to add it. Each installed card carries an Uninstall affordance + its source / path.</p>
+    <p class="panel-lead">Modules active in this workspace appear at the top (the workspace's own first-party package is pinned first, then installed catalog modules). Click Install on any card below to add it. Each installed card shows its install source + path.</p>
     <div class="card-browse-toolbar" id="catalog-toolbar">
       <input type="search" class="card-browse-search" id="catalog-search" placeholder="Filter modules…">
       <div class="card-browse-chips" id="catalog-tag-chips"></div>
@@ -691,13 +723,8 @@ window.addEventListener('pageshow', function (e) {
     <button class="action-btn" onclick="_loadRegistry(true)">Refresh registry</button>
     <div id="registry-status" class="muted" style="margin:8px 0"></div>
 
-    <!-- Imported repositories (workspace.yaml::imports) + the processes/steps
-         each one contributes. Populated by _renderImportedRepos. -->
-    <div id="registry-imports-section" hidden>
-      <h3 style="margin:14px 0 2px">Imported repositories <span class="count-badge" id="registry-imports-count"></span></h3>
-      <p class="panel-lead" style="margin:2px 0 10px">External pbg-* repositories this workspace declares in <code>workspace.yaml: imports</code>, and the Processes / Steps / Emitters / Visualizations each contributes.</p>
-      <div id="registry-imports-container" class="module-grid"></div>
-    </div>
+    <!-- "Imported repositories" was removed: those repos are already shown in
+         the Modules tab, so duplicating them under Discovered registry was noise. -->
 
     <div class="registry-tabs">
       <button class="registry-tab active" data-kind="process"       onclick="_setRegistryTab('process')">Processes <span class="count-badge" id="registry-process-count"></span></button>
@@ -816,11 +843,10 @@ window.addEventListener('pageshow', function (e) {
     <div style="display:flex; align-items:center; gap:12px; margin-bottom:8px;">
       <h3 id="investigation-detail-title" style="margin:0; flex:1"></h3>
       <span id="investigation-detail-status" class="status-pill planned" style="font-size:0.85em"></span>
-      <span class="viv-info-chip" data-tooltip="Run unblocked &mdash; queue every variant whose model_settings don&#39;t have any unset &#39;required-before-run&#39; gates. Sequential, one variant at a time on a background thread.&#10;&#10;Refresh &mdash; re-fetch the investigation from disk. Use after editing YAML files directly.&#10;&#10;Generate report &mdash; self-contained HTML report you can email.&#10;&#10;Clone &mdash; copy this investigation into a fresh planning state with no run results.">?</span>
+      <span class="viv-info-chip" data-tooltip="Refresh &mdash; re-fetch the investigation from disk. Use after editing YAML files directly.&#10;&#10;Generate report &mdash; self-contained HTML report you can email.&#10;&#10;Download notebook &mdash; a self-contained Jupyter notebook (+ matching .py) that re-runs the studies and renders their figures.">?</span>
       <button class="btn-mini" id="investigation-detail-refresh" onclick="_refreshInvestigationDetail()" title="Re-fetch the investigation + its studies from disk. Use after editing YAML files directly (which the dashboard can't see otherwise).">↻ Refresh</button>
-      <button class="btn-mini" id="investigation-run-unblocked" onclick="_runUnblockedSimulations()" title="Run every variant whose model_settings don't have any unset 'required-before-run' gates. Sequential — one variant at a time on a background thread. Progress shown in the panel below.">▶ Run unblocked</button>
       <button class="btn-mini" onclick="_generateInvestigationReport()" title="Generate a shareable HTML report (self-contained, attach to email)">Generate report 📄</button>
-      <button class="btn-mini" onclick="_openCloneIsetModal()" title="Clone this investigation into a fresh planning state (no run results). Useful for a parallel attempt or a demo fixture.">Clone ⎘</button>
+      <button class="btn-mini" onclick="_downloadInvestigationNotebook()" title="Download a self-contained Jupyter notebook (+ matching .py) that re-runs this investigation's studies via the process-bigraph protocol and renders their figures. The coder-facing complement to the HTML report.">Download notebook 📓</button>
     </div>
     <!-- Run-progress panel: rendered while a run-unblocked job is active. -->
     <div id="investigation-run-progress" class="inv-run-progress" style="display:none"></div>
@@ -891,6 +917,7 @@ window.addEventListener('pageshow', function (e) {
 <!-- GitHub: in-UI sign-in + (future) org picker. The github-login.js widget
      activates the #viv-gh-chip element on load. No-AI-agent setup path. -->
 <section id="page-github" class="page" data-page="github">
+  <div id="viv-branch-source" class="viv-branch-source"></div>
   <h2 class="page-title">Branch</h2>
 
   <!-- Settings-style single panel: three sections (Account, Workspace
@@ -1057,14 +1084,21 @@ window.addEventListener('pageshow', function (e) {
 <section id="page-simulations" class="page" data-page="simulations">
   <h2 class="page-title">Simulations DB</h2>
   <p class="page-lead">
-    Every persisted run across this workspace, tagged by investigation and
-    study, gathered from each <code>studies/&lt;name&gt;/runs.db</code>.
-    Shows all investigations by default — untoggle to scope to the current one.
+    Persisted runs gathered from each <code>studies/&lt;name&gt;/runs.db</code>,
+    tagged by investigation and study, with the storage location for each run.
+    On a remote build, the deployment's runs for that build's commit are
+    included too (Origin column). Scoped to the current branch's investigation
+    by default and refreshed automatically.
+    <span id="sim-scope-note" style="color:#6b7280;"></span>
   </p>
 
   <div style="margin: 8px 0 12px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
     <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
-      <input id="sim-all-toggle" type="checkbox" checked /> All investigations
+      Investigation
+      <select id="sim-inv-filter" style="padding:4px 8px; font-size:13px;
+              border:1px solid #d1d5db; border-radius:4px;">
+        <option value="">All</option>
+      </select>
     </label>
     <label style="display:flex; align-items:center; gap:6px; font-size:13px;">
       Study
@@ -1088,16 +1122,18 @@ window.addEventListener('pageshow', function (e) {
     No simulation runs found.
   </div>
 
-  <table id="sim-table" style="width:100%; border-collapse: collapse; font-size: 13px; display: none;">
+  <table id="sim-table" style="width:100%; table-layout:fixed; border-collapse: collapse; font-size: 13px; display: none;">
     <thead>
       <tr style="background:#f3f4f6;">
-        <th style="text-align:left; padding:6px 8px;">Investigation</th>
-        <th style="text-align:left; padding:6px 8px;">Study</th>
+        <th style="text-align:left; padding:6px 8px; width:130px;">Investigation</th>
+        <th style="text-align:left; padding:6px 8px; width:130px;">Study</th>
         <th style="text-align:left; padding:6px 8px;">Run</th>
-        <th style="text-align:left; padding:6px 8px; width:90px;">Emitter</th>
-        <th style="text-align:left; padding:6px 8px; width:140px;">Time</th>
-        <th style="text-align:left; padding:6px 8px; width:90px;">Status</th>
-        <th style="text-align:center; padding:6px 8px; width:120px;">Actions</th>
+        <th style="text-align:left; padding:6px 8px; width:150px;">Location</th>
+        <th style="text-align:left; padding:6px 8px; width:90px;">Origin</th>
+        <th style="text-align:left; padding:6px 8px; width:80px;">Emitter</th>
+        <th style="text-align:left; padding:6px 8px; width:104px;">Time</th>
+        <th style="text-align:left; padding:6px 8px; width:84px;">Status</th>
+        <th style="text-align:center; padding:6px 8px; width:96px;">Actions</th>
       </tr>
     </thead>
     <tbody id="sim-tbody"></tbody>
@@ -1597,13 +1633,16 @@ Nothing on <code id="pr-base-display-2">main</code> changes until someone presse
 <script src="assets/data-source.js"></script>
 <script src="assets/render-helpers.js"></script>
 <script src="assets/client.js" onerror="/* live mode unavailable */"></script>
-<script src="assets/walkthrough.js?v=1781737251_1781737251" onerror="/* walkthrough unavailable */"></script>
-<script src="assets/github-login.js?v=1781737251_1781737251" onerror="/* github-login unavailable */"></script>
+<script src="assets/walkthrough.js?v=1782584302_1782584302" onerror="/* walkthrough unavailable */"></script>
+<script src="assets/explorer.js?v=1782584302_1782584302" onerror="/* explorer unavailable */"></script>
+<script src="assets/explorer-views.js?v=1782584302_1782584302" onerror="/* explorer views unavailable */"></script>
+<script src="assets/github-login.js?v=1782584302_1782584302" onerror="/* github-login unavailable */"></script>
 <!-- workspace-switcher.js is intentionally not loaded: the left-rail dropdown
      it used to drive has been repurposed into the investigation switcher
      (investigation-switcher.js). The /api/workspaces endpoints remain available
      for CLI tooling. -->
 <script src="assets/investigation-switcher.js"></script>
+<script src="assets/branch-source.js?v=1782584302_1782584302"></script>
 <script>
 // Initialize drop zones once walkthrough.js is loaded.
 document.addEventListener("DOMContentLoaded", function() {
