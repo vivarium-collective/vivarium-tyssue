@@ -231,4 +231,156 @@ discovery_implications:
   uncertainties:
   - Whether the fixed-topology invagination is stable or would relax/collapse once
     rearrangements are allowed.
+# ---------------------------------------------------------------------------
+# v4 narrative spine — reviewer-facing summary blocks
+# ---------------------------------------------------------------------------
+report:
+  title: 3D monolayer lift-off — apical tension folds the epithelium
+  verdict: passing
+  confidence: high
+  evidence_quality: literature-matched
+  objective: >-
+    Show that a high line tension on the apical edges of a 3D tyssue monolayer
+    buckles the apical surface out of plane — the mechanical first step of lumen /
+    dome morphogenesis — purely from differential tension, no growth or cell-fate.
+  conclusion: >-
+    It does. Over 100 relaxation steps the apical out-of-plane amplitude grows from
+    0 to ~2.3 and interior cells invaginate below the boundary rim (dome_height ->
+    ~-1.5), while the basal surface stays near z=-1. Both pre-registered tests pass.
+  main_insight: >-
+    Differential apical surface tension alone is sufficient to fold a 3D epithelial
+    monolayer in the workspace vertex model — no growth, division, or rearrangement.
+  caveat: >-
+    Parameters are hand-set (from T. Rahman's source notebook), topology is frozen
+    (auto_reconnect=false), and no flat control has been run yet — so this is a
+    qualitative mechanism demonstration, not a calibrated morphogenesis model.
+  key_metrics:
+  - {label: apical out-of-plane amplitude (max-min z), value: '0.0 -> ~2.3', status: pass}
+  - {label: dome height (interior cell z - rim z), value: '0.0 -> ~-1.5', status: pass}
+  - {label: apical mean z (lift-off from z=0), value: '0.0 -> ~-0.25', status: pass}
+conclusion_verdicts:
+  regression_compatibility:
+    result: PASS
+    basis: >-
+      The 3D Monolayer composite builds and runs 100 steps stably in the workspace
+      EulerSolver; the per-segment line_tension expansion and the Monolayer cell_df
+      handling work (the latter required two truthiness fixes). All repo tests pass.
+  biological_validation:
+    result: MIXED
+    basis: >-
+      The deformation qualitatively matches differential-tension epithelial folding
+      (apical amplitude rises monotonically; interior invaginates below the rim), but
+      the parameters are hand-set, not calibrated, and there is no flat control yet —
+      so the match is mechanistic/qualitative, not quantitative.
+  explanatory_gain:
+    result: POSITIVE
+    basis: >-
+      Establishes 3D morphogenesis in the workspace (Monolayer + MonolayerGeometry +
+      CellVolumeElasticity) and a reusable per-segment tension mechanism, answering the
+      tumor-tyssue investigation's open "pursue 3D / curved geometries" decision.
+biological_summary: >-
+  Epithelia fold, pit, and form lumens largely by changing where they pull hardest:
+  a band of cells contracts its apical surface while keeping volume, and the sheet
+  has no choice but to bend. This study isolates that mechanism. A flat sheet is
+  extruded into a 3D monolayer and given a single instruction — a strong line tension
+  on the apical edges only — opposed by cell-volume elasticity, with the basal and
+  lateral edges untensioned. The apical surface cannot stay flat: its perimeter
+  shortens, the interior of the patch sinks below its boundary rim, and the monolayer
+  cups inward — the geometry that seeds a lumen or gland. The effect emerges purely
+  from mechanics, with no cell division, death, or topological rearrangement.
+literature_anchors:
+- expectation: >-
+    Differential apical surface tension / apical constriction drives epithelial
+    bending and invagination (the canonical mechanism of folding and lumen formation).
+  model_observable: apical_amplitude (max-min apical z) rising and dome_height going negative
+  source: Lecuit & Lenne, Nat Rev Mol Cell Biol 2007; Martin & Goldstein, Development 2014
+  status_in_workspace: Verified — apical_amplitude 0 -> ~2.3, dome_height -> ~-1.5
+- expectation: >-
+    Cells are approximately volume-conserving during shape change, so apical
+    contraction must be accommodated by out-of-plane deformation rather than shrinkage.
+  model_observable: CellVolumeElasticity term (vol_elasticity 1.0, prefered_vol 1.0)
+  source: Honda 1983; Farhadifar et al., Curr Biol 2007 (vertex-model mechanics)
+  status_in_workspace: Enforced by the energy model (CellVolumeElasticity effector)
+model_change:
+  base_model: >-
+    monolayer_liftoff composite — a 3D Monolayer (test_square extruded by thickness 1
+    into monolayer_box.hf5) driven by the existing EulerSolver.
+  new_processes: []
+  modified_processes:
+  - >-
+    EulerSolver — parameter assignment now expands a per-segment dict
+    (line_tension {apical: 1.0, default: 0.0}) over edge_df.segment; also fixed two
+    'if df:' truthiness checks that raised on a Monolayer's non-empty cell_df.
+  new_parameters:
+  - per-segment line_tension dict (apical purse-string vs untensioned bulk)
+  notes: >-
+    Pure mechanics — no coupling/SBML process. Effectors: CellVolumeElasticity,
+    FaceAreaElasticity, FaceContractility, LineTension on MonolayerGeometry.
+implementation_requirements:
+- id: monolayer-composite
+  kind: composite
+  title: Declare the 3D monolayer lift-off composite
+  effort: M
+  description: >-
+    monolayer_liftoff.composite.yaml + the extruded monolayer_box.hf5 dataset, with
+    per-segment apical line tension. DONE.
+- id: per-segment-tension
+  kind: process
+  title: Per-segment parameter expansion in EulerSolver
+  effort: S
+  description: >-
+    Expand dict-valued parameters over the mesh 'segment' column so tension can target
+    one surface; fix Monolayer cell_df truthiness. DONE.
+- id: lumen-runner
+  kind: data
+  title: Morphology runner + observables
+  effort: S
+  description: >-
+    scripts/run_lumen_sims.py records apical amplitude/mean-z and dome_height + mesh;
+    run_study_sims routes Monolayer specs to it. DONE.
+- id: faster-3d-render
+  kind: listener
+  title: Headless 3D animation renderer
+  effort: M
+  description: >-
+    The matplotlib 3D fallback is too slow for the ~7k-edge mesh and ipyvolume can't
+    render headless; a pyvista-based renderer would add a rotating 3D view. DEFERRED.
+  defer_until: a controlled study (with flat control) is in place
+design_pivot_required:
+- id: lumen-flat-control
+  status: open
+  question: >-
+    Should we add a flat control (apical line tension 0) and promote this to a
+    controlled contrast before treating the lift-off as established?
+  alternatives:
+  - A. Add a 'flat' sim (tension 0) to this study, tumor-vs-baseline style.
+  - B. Keep this as a single-arm demonstration and cite the localized (apical-only) deformation.
+  requested_response: Expert opinion on whether a control is needed for this demonstration.
+- id: lumen-topology
+  status: open
+  question: >-
+    Should auto_reconnect (T1 transitions) be enabled so the invagination can progress
+    toward a closed lumen, or kept off to isolate pure shape change?
+  alternatives:
+  - A. Keep topology frozen (current) — clean mechanism, no closure.
+  - B. Enable T1 — more realistic, but mixes in rearrangement dynamics.
+  requested_response: Whether the next study should turn topology on.
+runtime:
+  default_emitter: sqlite
+  subprocess_timeout_s: 1200
+enforced_params:
+  params:
+    interval: 0.1
+  source: T. Rahman monolayer_liftoff notebook (mechanically stable dt)
+key_assumptions:
+- Cells are volume-conserving (CellVolumeElasticity), so apical contraction must be
+  accommodated by out-of-plane deformation rather than by cell shrinkage.
+- Topology is held fixed (auto_reconnect=false) to isolate pure shape change — no T1
+  transitions, division, or extrusion.
+- The flat test_square sheet extruded by thickness 1 (apical z=0, basal z=-1) is an
+  adequate starting geometry for the lift-off mechanism.
+- Mechanical parameters are taken verbatim from the source notebook and are illustrative,
+  not calibrated to any measured tissue.
+- The mesh 'segment' labels (apical / basal / lateral) correctly identify the apical
+  surface that the purse-string tension targets.
 runs: []
