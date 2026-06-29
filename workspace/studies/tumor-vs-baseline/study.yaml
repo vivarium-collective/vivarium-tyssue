@@ -315,7 +315,7 @@ feedback_responses:
     This section also needs a video."'
   action: >-
     (1) Divisions/deaths now use exactly those behavior functions: topology_ops=true
-    routes births through tyssue cell_division (via divide_crypt) and deaths through
+    routes births through tyssue cell_division (via division) and deaths through
     apoptosis_extrusion (remove_face), on the pandas-3-compatible tyssue fork. The tumor
     arm grows 206→312 cells via 175 divisions with 67 extrusions; the baseline arm fires
     none. (2) Added the requested video — a Tumor sheet animation (plus a Baseline sheet

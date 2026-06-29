@@ -4,7 +4,7 @@
 
 **Goal:** Couple BioModels `BIOMD0000000903` (breast-cancer population ODE, run in COPASI) to a tyssue 2D vertex-model sheet so the SBML model's per-step birth/death fluxes drive discrete division/apoptosis/differentiation events on the mesh; deliver one investigation with two studies and a draft PR.
 
-**Architecture:** A new tyssue-side `TumorCoupling` process is *"Gillespie, but driven by COPASI reaction fluxes instead of internal rates."* Each step it reads the COPASI `fluxes` output, scales each birth/death flux into a fractional event accumulator per cell type, fires `floor(accumulator)` discrete behaviors (`divide_crypt` / `apoptosis_extrusion` / `differentiation`) on cells it selects from the tyssue `datasets`, and emits scalar observables (`tumor_births`, `healthy_deaths`, `tumor_count`, …). Three processes share `Behaviors` / `Datasets` / `global_time` stores exactly like the existing `gillespie.composite.yaml`. Births/deaths/composition timeseries reuse the framework's `local:TimeSeriesFromObservables`; one new `TissueSheetSnapshots` viz renders cell-type-colored panels.
+**Architecture:** A new tyssue-side `TumorCoupling` process is *"Gillespie, but driven by COPASI reaction fluxes instead of internal rates."* Each step it reads the COPASI `fluxes` output, scales each birth/death flux into a fractional event accumulator per cell type, fires `floor(accumulator)` discrete behaviors (`division` / `apoptosis_extrusion` / `differentiation`) on cells it selects from the tyssue `datasets`, and emits scalar observables (`tumor_births`, `healthy_deaths`, `tumor_count`, …). Three processes share `Behaviors` / `Datasets` / `global_time` stores exactly like the existing `gillespie.composite.yaml`. Births/deaths/composition timeseries reuse the framework's `local:TimeSeriesFromObservables`; one new `TissueSheetSnapshots` viz renders cell-type-colored panels.
 
 **Tech Stack:** process-bigraph, bigraph-schema, tyssue, pbg-copasi (`CopasiUTCProcess` + basico/COPASI), pbg-biomodels (`load_biomodel`), pbg-superpowers (Visualization, TimeSeriesFromObservables, study/investigation spine), matplotlib, pytest.
 
@@ -22,7 +22,7 @@
 - **Species:** `C` (stem, init 7.37e5), `T` (tumor, 7.62e6), `H` (healthy, 2.5e7), `I` (immune, 0), `E` (estrogen, 0). Fluxes are O(1e3–1e7).
 - **tyssue process:** `vivarium_tyssue.processes.eulersolver.EulerSolver`, `local:EulerSolver`. Inputs `behaviors: list[node]`, `global_time: float`. Outputs `datasets: tyssue_data`, `network_changed`, `behaviors_update`. Consumes behaviors via `BEHAVIOR_MAP` + `EventManager` (`vivarium_tyssue/processes/eulersolver.py:185-227`).
 - **Behavior dicts** (from `vivarium_tyssue/processes/gillespie.py:164-198`, executed by `vivarium_tyssue/behaviors/behaviors.py`):
-  - divide: `{"func": "divide_crypt", "geom": <str>, "cell_uid": <int>, "dt": <float>, "cell_type": <str>, "crit_area": <float>, "growth_rate": <float>}` → `cell_division` (immediate when `area > crit_area`).
+  - divide: `{"func": "division", "geom": <str>, "cell_uid": <int>, "dt": <float>, "cell_type": <str>, "crit_area": <float>, "growth_rate": <float>}` → `cell_division` (immediate when `area > crit_area`).
   - death: `{"func": "apoptosis_extrusion", "geom": <str>, "cell_uid": <int>, "dt": <float>, "crit_area": <float>, "shrink_rate": <float>}` → `remove_face` (immediate when `area < crit_area`).
   - differentiate: `{"func": "differentiation", "cell_uid": <int>, "new_type": <str>}` → relabels `face_df.cell_type`.
   - Immediate events: relaxed sheet faces have `area ≈ 1.0`, so `crit_area_div=0.5` (area>0.5 ⇒ divide) and `crit_area_apop=2.0` (area<2.0 ⇒ remove) make events fire on first execution.
@@ -430,7 +430,7 @@ def test_flux_step_fires_division_and_apoptosis():
               "H_birth": 0.0, "C_birth": 0.0, "C_death": 0.0}
     out = proc.update({"fluxes": fluxes, "datasets": ds, "global_time": 5.0}, 1.0)
     funcs = sorted(b["func"] for b in out["behaviors"])
-    # one tumor birth (divide_crypt or differentiation of stem) + one healthy death
+    # one tumor birth (division or differentiation of stem) + one healthy death
     assert "apoptosis_extrusion" in funcs
     assert out["healthy_deaths"] == 1.0 and out["tumor_births"] == 1.0
     assert out["tumor_count"] == 2.0 and out["healthy_count"] == 2.0
@@ -506,7 +506,7 @@ class TumorCoupling(Process):
 
     # -- behavior dict builders (shapes match gillespie.py / behaviors.py) --
     def _divide(self, uid, cell_type):
-        return {"func": "divide_crypt", "geom": self.geom, "cell_uid": int(uid),
+        return {"func": "division", "geom": self.geom, "cell_uid": int(uid),
                 "dt": self.dt, "cell_type": cell_type, "crit_area": self.division_crit,
                 "growth_rate": self.growth_rate}
 

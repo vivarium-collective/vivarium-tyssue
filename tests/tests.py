@@ -150,10 +150,10 @@ def get_test_regulation_spec(interval=0.1, config=None, double=False):
         "address": "local:TestRegulations",
         "config": {
             "period": 5,
-            "geom": "VesselGeometry",
+            "geom": "SheetGeometry",
             "crit_area": 2,
             "growth_rate": 0.2,
-            "double": False,
+            "double": double,
         },
         "inputs": {
             "global_time": ["global_time"],
@@ -164,16 +164,16 @@ def get_test_regulation_spec(interval=0.1, config=None, double=False):
         },
         "interval": interval,
     }
-    if double:
-        spec["Regulation"]["config"]["double"] = True
 
     return spec
 
-def run_test_regulation(core, double = False, tf=20, dt=0.1):
+def run_test_regulation(core, double = False, tf=20, dt=0.1, config=None):
+    if config is None:
+        config = get_test_config_flat()
     if double:
-        spec = get_test_regulation_spec(interval=dt, double=True)
+        spec = get_test_regulation_spec(interval=dt, config=config, double=True)
     else:
-        spec = get_test_regulation_spec(interval=dt)
+        spec = get_test_regulation_spec(interval=dt, config=config)
     spec["emitter"] = test_emitter
 
     sim = Composite(

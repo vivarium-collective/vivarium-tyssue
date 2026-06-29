@@ -112,7 +112,7 @@ class TumorCoupling(Process):
         "copasi_time": "float",
         "copasi_intervals": "integer",
         # topology_ops=true uses real tyssue cell_division / remove_face behaviors
-        # (divide_crypt / apoptosis_extrusion). Those crash under the pandas-3.0 /
+        # (division / apoptosis_extrusion). Those crash under the pandas-3.0 /
         # numpy-2.2 that the COPASI stack forces (tyssue 1.1.0 topology is
         # incompatible). Default false: drive cell FATE on a fixed-topology mesh —
         # birth relabels a source cell into the target type, death relabels a cell
@@ -186,7 +186,7 @@ class TumorCoupling(Process):
 
     # -- behavior dict builders (shapes match gillespie.py / behaviors.py) --
     def _divide(self, uid, cell_type):
-        return {"func": "divide_crypt", "geom": self.geom, "cell_uid": int(uid),
+        return {"func": "division", "geom": self.geom, "cell_uid": int(uid),
                 "dt": self.dt, "cell_type": cell_type, "crit_area": self.division_crit,
                 "growth_rate": self.growth_rate}
 

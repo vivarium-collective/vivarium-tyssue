@@ -45,7 +45,7 @@ state:
           # Shape index p0 = prefered_perimeter / sqrt(prefered_area) = 3.6 / sqrt(1.0)
           # = 3.6 (reviewer 2026-06-17: keep <= 3.6). Below the ~3.81 rigidity
           # transition, so the sheet stays in the solid/jammed regime and cells hold
-          # compact shapes instead of deforming into overlaps. divide_crypt resets
+          # compact shapes instead of deforming into overlaps. division resets
           # prefered_area to 1.0 after each split, so the ratio stays 3.6 throughout.
           perimeter_elasticity: 0.1
           prefered_perimeter: 3.6
@@ -116,7 +116,7 @@ state:
       growth_rate: 0.1
       shrink_rate: 0.1
       # division_crit 0.5 -> 2.0 (reviewer 2026-06-17). A cell must now grow to area
-      # > 2.0 before it splits, so divide_crypt inflates prefered_area over ~8 manager
+      # > 2.0 before it splits, so division inflates prefered_area over ~8 manager
       # steps first (the sheet relaxes in between) and the two daughters start near the
       # 1.0 prefered area instead of as tiny overlapping faces. apoptosis_crit already 2.0.
       division_crit: 2.0

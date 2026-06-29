@@ -523,13 +523,13 @@ feedback_responses:
   action: >-
     Verified and documented. prefered_perimeter = 3.6 and prefered_area = 1.0, so the
     shape index p0 = 3.6/√1.0 = 3.6 (≤ 3.6, and below the ~3.81 rigidity transition →
-    solid regime, cells hold compact shapes). divide_crypt resets prefered_area to 1.0
+    solid regime, cells hold compact shapes). division resets prefered_area to 1.0
     after each split, so the ratio stays 3.6 throughout the run rather than drifting up.
 - ref: study-tumor-composite-embeds
   reviewer: '"set the critical area for the division events to 2.0."'
   action: >-
     Done. division_crit 0.5 → 2.0 (apoptosis_crit was already 2.0). A cell must now grow
-    to area > 2.0 before it splits, so divide_crypt inflates its prefered_area over ~8
+    to area > 2.0 before it splits, so division inflates its prefered_area over ~8
     manager steps first (the sheet relaxes in between) and the two daughters start near
     their 1.0 prefered area instead of as tiny overlapping faces.
 runs: []

@@ -58,7 +58,7 @@ EulerSolver (tyssue)                                     # local:EulerSolver
 `TumorCoupling` is structurally **"Gillespie, but driven by COPASI fluxes
 instead of internal rates"** — it reads the tyssue datasets to find target cell
 uids per type and emits the same behavior dicts the existing Gillespie process
-emits (`divide_crypt`, `apoptosis_extrusion`, `differentiation`), which
+emits (`division`, `apoptosis_extrusion`, `differentiation`), which
 `EulerSolver` executes via its `EventManager`.
 
 ### The coupling rule (proportional Δ + accumulator, flux-based)
@@ -80,7 +80,7 @@ which directly feeds the "births over time" / "deaths over time" visualizations.
   cell** (`differentiation` behavior, `new_type="tumor"`) when a stem cell is
   available; otherwise by dividing an existing tumor cell. This honors "stem
   cells source tumor cells" and solves the first-tumor-cell seeding problem.
-- **Births** → `divide_crypt` (tyssue `cell_division`) on a chosen same-type cell.
+- **Births** → `division` (tyssue `cell_division`) on a chosen same-type cell.
 - **Deaths** → `apoptosis_extrusion` (tyssue `remove_face`) on a chosen same-type cell.
 - **Target selection:** pick the cell uid to divide/kill from the matching-type
   cells in `face_df` (uniform or area-weighted; uniform for v1).
@@ -173,7 +173,7 @@ target type (stem→tumor realizes C→T; healthy→stem; dead→healthy regener
 a death relabels a cell to `dead`. Composition still evolves under SBML control
 and every visualization (snapshots, gif, births/deaths/composition timeseries)
 works off `cell_type`. A `topology_ops: true` config flag selects the real
-`divide_crypt`/`apoptosis_extrusion` behaviors for when a pandas-3-compatible
+`division`/`apoptosis_extrusion` behaviors for when a pandas-3-compatible
 tyssue is available (covered by a unit test). Compatibility shims also fixed three
 other tyssue/numpy-2.x/pandas-3.0 issues (StringDtype schema coercion in
 EulerSolver, read-only `shuffle` in `merge_vertices`). The default interval is

@@ -61,7 +61,7 @@ class TestRegulations(Process):
             faces = inputs["datasets"]["face_df"]
             positive_y = faces.loc[(faces["y"] > 1) & (faces["z"] > -7) & (faces["z"] < 7)]
             def pick():
-                return random.choice(positive_y.index)
+                return int(random.choice(positive_y["unique_id"].values))
 
             base = {
                 "geom": self.config["geom"],
@@ -72,9 +72,9 @@ class TestRegulations(Process):
             }
 
             if self.config["double"]:
-                update = [{**base, "cell_id": pick()}, {**base, "cell_id": pick()}]
+                update = [{**base, "cell_uid": pick()}, {**base, "cell_uid": pick()}]
             else:
-                update = [{**base, "cell_id": pick()}]
+                update = [{**base, "cell_uid": pick()}]
 
         else:
             update = []
