@@ -95,6 +95,10 @@ override-dependencies = [
     # (git+https://…, no branch). Uv treats these as conflicting URLs; override
     # pins to the unqualified ref so both resolve to the same HEAD commit.
     "pbg-superpowers @ git+https://github.com/vivarium-collective/pbg-superpowers.git",
+    # Same conflict for pbg-emitters: pbg-superpowers (>=0.14.0) pins it with
+    # branch = "main" (→ git+https://…@main), while the root requests the
+    # unqualified ref. Pin both to the unqualified ref so they share one URL.
+    "pbg-emitters[parquet] @ git+https://github.com/vivarium-collective/pbg-emitters.git",
 ]
 
 # [tool.uv.sources] supplies the git URL for vivarium-dashboard (not on PyPI).
