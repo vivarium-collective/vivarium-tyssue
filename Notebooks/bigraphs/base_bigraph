@@ -2,13 +2,13 @@ digraph bigraph {
 	dpi=100 overlap=false rankdir=TB splines=true
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
-	"('Behaviors',)" [label=<Behaviors>]
-	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('global_time',)" [label=<global_time>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
-	"('Datasets',)" [label=<Datasets>]
+	"('Behaviors',)" [label=<Behaviors>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('Network Changed',)" [label=<Network<BR/>Changed>]
+	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
+	"('Datasets',)" [label=<Datasets>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('Network Changed',)" [label=<Network<BR/>Changed>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
@@ -36,27 +36,27 @@ digraph bigraph {
 	"('Datasets',)" -> "('Datasets', 'cell_df')" [arrowhead=none constraint=true penwidth=2]
 	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
 	subgraph "('Tyssue',)" {
-		"('Behaviors',)" -> "('Tyssue',)" [label=<behaviors> constraint=true fontsize="10pt" labelloc=t]
-	}
-	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
-	subgraph "('Tyssue',)" {
 		"('global_time',)" -> "('Tyssue',)" [label=<global_time> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
-	subgraph "('Regulation',)" {
-		"('Datasets',)" -> "('Regulation',)" [label=<datasets> constraint=true fontsize="10pt" labelloc=t]
+	subgraph "('Tyssue',)" {
+		"('Behaviors',)" -> "('Tyssue',)" [label=<behaviors> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
 	subgraph "('Regulation',)" {
 		"('global_time',)" -> "('Regulation',)" [label=<global_time> constraint=true fontsize="10pt" labelloc=t]
 	}
-	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
-	subgraph "('Tyssue',)" {
-		"('Datasets',)" -> "('Tyssue',)" [label=<datasets> constraint=true fontsize="10pt" labelloc=t]
+	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
+	subgraph "('Regulation',)" {
+		"('Datasets',)" -> "('Regulation',)" [label=<datasets> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
 	subgraph "('Tyssue',)" {
 		"('Network Changed',)" -> "('Tyssue',)" [label=<network_changed> constraint=true fontsize="10pt" labelloc=t]
+	}
+	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
+	subgraph "('Tyssue',)" {
+		"('Datasets',)" -> "('Tyssue',)" [label=<datasets> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
 	subgraph "('Tyssue',)" {

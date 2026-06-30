@@ -2,9 +2,9 @@ digraph bigraph {
 	dpi=100 overlap=false rankdir=TB splines=true
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
-	"('Behaviors',)" [label=<Behaviors>]
-	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('global_time',)" [label=<global_time>]
+	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
+	"('Behaviors',)" [label=<Behaviors>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('Network Changed',)" [label=<Network<BR/>Changed>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
@@ -12,11 +12,11 @@ digraph bigraph {
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('Network Changed',)" [label=<Network<BR/>Changed>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
-	"('Datasets', 'face_df')" [label=<face_df>]
-	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('Datasets', 'edge_df')" [label=<edge_df>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('Datasets', 'vert_df')" [label=<vert_df>]
+	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
+	"('Datasets', 'face_df')" [label=<face_df>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('global_time',)" [label=<global_time>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
@@ -33,24 +33,20 @@ digraph bigraph {
 	"('Tyssue',)" [label=<Tyssue>]
 	"('emitter',)" [label=<emitter>]
 	edge [style=filled]
-	"('Datasets',)" -> "('Datasets', 'face_df')" [arrowhead=none constraint=true penwidth=2]
-	edge [style=filled]
 	"('Datasets',)" -> "('Datasets', 'edge_df')" [arrowhead=none constraint=true penwidth=2]
 	edge [style=filled]
 	"('Datasets',)" -> "('Datasets', 'vert_df')" [arrowhead=none constraint=true penwidth=2]
 	edge [style=filled]
+	"('Datasets',)" -> "('Datasets', 'face_df')" [arrowhead=none constraint=true penwidth=2]
+	edge [style=filled]
 	"('Datasets',)" -> "('Datasets', 'cell_df')" [arrowhead=none constraint=true penwidth=2]
-	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
-	subgraph "('Tyssue',)" {
-		"('Behaviors',)" -> "('Tyssue',)" [label=<behaviors> constraint=true fontsize="10pt" labelloc=t]
-	}
 	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
 	subgraph "('Tyssue',)" {
 		"('global_time',)" -> "('Tyssue',)" [label=<global_time> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
-	subgraph "('emitter',)" {
-		"('Datasets', 'face_df')" -> "('emitter',)" [label=<face_df> constraint=true fontsize="10pt" labelloc=t]
+	subgraph "('Tyssue',)" {
+		"('Behaviors',)" -> "('Tyssue',)" [label=<behaviors> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
 	subgraph "('emitter',)" {
@@ -68,9 +64,9 @@ digraph bigraph {
 	subgraph "('emitter',)" {
 		"('Datasets', 'vert_df')" -> "('emitter',)" [label=<vert_df> constraint=true fontsize="10pt" labelloc=t]
 	}
-	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
-	subgraph "('Tyssue',)" {
-		"('Behaviors',)" -> "('Tyssue',)" [label=<behaviors_update> constraint=true fontsize="10pt" labelloc=t]
+	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
+	subgraph "('emitter',)" {
+		"('Datasets', 'face_df')" -> "('emitter',)" [label=<face_df> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
 	subgraph "('Tyssue',)" {
@@ -79,5 +75,9 @@ digraph bigraph {
 	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
 	subgraph "('Tyssue',)" {
 		"('Datasets',)" -> "('Tyssue',)" [label=<datasets> constraint=true fontsize="10pt" labelloc=t]
+	}
+	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
+	subgraph "('Tyssue',)" {
+		"('Behaviors',)" -> "('Tyssue',)" [label=<behaviors_update> constraint=true fontsize="10pt" labelloc=t]
 	}
 }
