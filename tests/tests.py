@@ -150,10 +150,10 @@ def get_test_regulation_spec(interval=0.1, config=None, double=False):
         "address": "local:TestRegulations",
         "config": {
             "period": 5,
-            "geom": "VesselGeometry",
+            "geom": "SheetGeometry",
             "crit_area": 2,
             "growth_rate": 0.2,
-            "double": False,
+            "double": double,
         },
         "inputs": {
             "global_time": ["global_time"],
@@ -164,16 +164,16 @@ def get_test_regulation_spec(interval=0.1, config=None, double=False):
         },
         "interval": interval,
     }
-    if double:
-        spec["Regulation"]["config"]["double"] = True
 
     return spec
 
-def run_test_regulation(core, double = False, tf=20, dt=0.1):
+def run_test_regulation(core, double = False, tf=20, dt=0.1, config=None):
+    if config is None:
+        config = get_test_config_flat()
     if double:
-        spec = get_test_regulation_spec(interval=dt, double=True)
+        spec = get_test_regulation_spec(interval=dt, config=config, double=True)
     else:
-        spec = get_test_regulation_spec(interval=dt)
+        spec = get_test_regulation_spec(interval=dt, config=config)
     spec["emitter"] = test_emitter
 
     sim = Composite(
@@ -440,11 +440,9 @@ if __name__ == "__main__":
     core.register_link("EulerSolver", EulerSolver)
     core = register_processes(core)
 
-    # results, sim = run_test_solver(core, config=get_test_config())
-    # pprint(results[10]["face_df"])
-    # pprint(results[8]["face_df"])
-    # history = sim.state["Tyssue"]["instance"].history
-    # history.update_datasets()
+    results, sim = run_test_solver(core, config=get_test_config())
+    history = sim.state["Tyssue"]["instance"].history
+    history.update_datasets()
     draw_specs = config.draw.sheet_spec()
     draw_specs["face"]["visible"] = True
     draw_specs["face"]["alpha"] = 1
@@ -452,9 +450,8 @@ if __name__ == "__main__":
     draw_specs["edge"]["color"] = "black"
     draw_specs["edge"]["width"] = 0.5
     draw_specs["edge"]["alpha"] = 0.8
-    # create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
+    create_gif(history, "test.gif", coords = ["x", "z"], **draw_specs)
 
-    # start = time.time()
     # results, sim = run_test_solver(core, config=get_test_config_flat(), tf = 40, df = 0.1)
     # end = time.time()
     # print(f"{time.time() - start} seconds")

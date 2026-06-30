@@ -1,0 +1,73 @@
+name: epithelium_2d
+description: Baseline flat (square) 2D sheet epithelium — pure mechanical relaxation,
+  no tumor coupling. Control for the tumor-composite comparison study.
+tags:
+- tissue
+- mechanics
+requires:
+  processes:
+  - EulerSolver
+  types:
+  - tyssue_data
+  - behaviors
+# No DataFrameParquetEmitter (pyarrow can't merge the object-dtype cell_type
+# column across frames). Study viz read runs.db (SQLite, injected by the
+# dashboard), so parquet isn't needed.
+emitters: []
+parameters:
+  interval:
+    type: float
+    default: 0.01
+    description: Solver / step interval (dt). 0.01 to match the tumor arm in the
+      tumor-vs-baseline comparison (reviewer 2026-06-17); mechanics-only here, so the
+      sheet just relaxes regardless of dt.
+state:
+  Tyssue:
+    _type: process
+    address: local:EulerSolver
+    config:
+      name: Epithelium 2D
+      eptm: workspace/datasets/test_square.hf5
+      tissue_type: Sheet
+      parameters:
+        face_df:
+          area_elasticity: 1.0
+          prefered_area: 1.0
+          perimeter_elasticity: 0.1
+          prefered_perimeter: 3.6
+          cell_type: healthy
+          is_alive: 1.0
+        edge_df:
+          line_tension: 0.0
+          is_active: 1.0
+        vert_df:
+          viscosity: 1.0
+          is_alive: 1.0
+      geom: SheetGeometry
+      effectors:
+      - LineTension
+      - FaceAreaElasticity
+      - PerimeterElasticity
+      ref_effector: FaceAreaElasticity
+      factory: model_factory
+      settings:
+        threshold_length: 0.03
+      auto_reconnect: true
+      bounds: {}
+      output_columns: {}
+      maps: {}
+    inputs:
+      behaviors:
+      - Behaviors
+      global_time:
+      - global_time
+    outputs:
+      datasets:
+      - Datasets
+      network_changed:
+      - Network Changed
+      behaviors_update:
+      - Behaviors
+    interval: ${interval}
+  Network Changed: false
+  Behaviors: {}

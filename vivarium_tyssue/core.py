@@ -18,6 +18,14 @@ from process_bigraph import allocate_core
 def build_core():
     core = allocate_core()
 
+    # numpy 2.x compat: patch tyssue's merge_vertices (read-only shuffle) so the
+    # default reconnect event doesn't crash on runs with divisions/extrusions.
+    try:
+        from vivarium_tyssue._tyssue_compat import apply_tyssue_compat
+        apply_tyssue_compat()
+    except Exception as exc:  # noqa: BLE001
+        print(f"vivarium_tyssue.core: tyssue compat shim not applied ({type(exc).__name__}: {exc})")
+
     # Custom schema types (tyssue_data, behaviors, tyssue_dset, frame).
     from vivarium_tyssue.data_types import register_types
     core = register_types(core)
@@ -54,5 +62,23 @@ def build_core():
                 core.register_link(_name, _cls)
     except Exception as exc:  # noqa: BLE001
         print(f"vivarium_tyssue.core: visualizations not registered ({type(exc).__name__}: {exc})")
+
+    # COPASI SBML process (pbg-copasi) — needed by the tumor composite. Degrade
+    # gracefully if the COPASI/basico stack isn't installed.
+    try:
+        from pbg_copasi.processes import CopasiUTCProcess
+        if "CopasiUTCProcess" not in core.link_registry:
+            core.register_link("CopasiUTCProcess", CopasiUTCProcess)
+    except Exception as exc:  # noqa: BLE001
+        print(f"vivarium_tyssue.core: CopasiUTCProcess not registered ({type(exc).__name__}: {exc})")
+
+    # Framework timeseries viz (pbg-superpowers) — plots scalar observables
+    # (tumor_births, healthy_deaths, *_count) the TumorCoupling process emits.
+    try:
+        from pbg_superpowers.visualizations.timeseries_from_observables import TimeSeriesFromObservables
+        if "TimeSeriesFromObservables" not in core.link_registry:
+            core.register_link("TimeSeriesFromObservables", TimeSeriesFromObservables)
+    except Exception as exc:  # noqa: BLE001
+        print(f"vivarium_tyssue.core: TimeSeriesFromObservables not registered ({type(exc).__name__}: {exc})")
 
     return core

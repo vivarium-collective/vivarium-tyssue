@@ -20,6 +20,11 @@ on: [push, pull_request]
 jobs:
   test:
     runs-on: ubuntu-latest
+    # COPASI/basico (pbg-copasi dep) resets LC_CTYPE to "C" on import, which makes
+    # locale-default file reads (composite/study YAML via read_text()) crash on the
+    # non-ASCII em-dash in generated YAML comments. Force Python UTF-8 mode globally.
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v6
         with:
@@ -36,9 +41,17 @@ jobs:
           ls -la external/ 2>&1 || true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          python-version: "3.12"
       - name: Install uv
         run: pip install uv
+      - name: Rewrite SSH GitHub URLs to HTTPS (vivatyssue submodule)
+        # The vivatyssue fork (the tyssue source in pyproject) declares a docs-only
+        # submodule `doc/notebooks` via an SSH URL (git@github.com:damcb/tyssue-demo.git).
+        # uv initialises submodules when cloning a git source, so the install below
+        # fails with "Permission denied (publickey)" (no SSH key in CI). Rewrite SSH
+        # GitHub URLs to anonymous HTTPS so the public submodule clones without creds.
+        # Mirrors the same fix in the Dockerfile (commit da8cc39).
+        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
       - name: Set up venv and install
         run: |
           uv venv .venv

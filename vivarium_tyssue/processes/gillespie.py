@@ -166,7 +166,7 @@ class Gillespie(Process):
         if rate_event/self.rates_max[cell_type][jump] >= u1:
             if jump == cell_type:
                 event = [{
-                    "func": "divide_crypt",
+                    "func": "division",
                     "geom": self.geom,
                     "cell_uid": cell_uid,
                     "dt": self.global_interval,

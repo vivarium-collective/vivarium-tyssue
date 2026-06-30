@@ -1,0 +1,113 @@
+schema_version: 2
+name: tumor-tyssue
+title: Tumor population dynamics on a tyssue 2D epithelium
+created: "2026-06-12"
+status: running
+question: >-
+  Can a non-spatial SBML tumor-population model (BioModels BIOMD0000000903, run in
+  COPASI) drive discrete cell birth/death/differentiation on a tyssue 2D epithelial
+  sheet, and how does the resulting tissue differ from a baseline epithelium?
+hypothesis: >-
+  Coupling the breast-cancer competition ODE to the mesh — each step converting the
+  model's reaction fluxes into scaled cell-fate events — reproduces the expected
+  qualitative trends: a single seeded tumor focus expands outward by real cell division
+  while the healthy fraction declines, diverging clearly from a mechanics-only baseline
+  sheet.
+description: >-
+  BIOMD0000000903 (Solís-Pérez et al., 2019) is a fractional ODE over five
+  populations — cancer-stem (C), tumor (T), healthy (H), immune (I), estrogen (E).
+  A flux-driven TumorCoupling process scales each per-step birth/death flux into a
+  fractional accumulator and fires integer cell-fate events on a flat SheetGeometry
+  mesh. With real vertex-model topology (topology_ops=true, on the pandas-3-compatible
+  tyssue fork) a birth is a tyssue cell_division and a death an apoptosis_extrusion, so
+  the tissue genuinely grows and remodels. A single tumor cell is seeded at the sheet
+  centre and grows outward as one clonal patch; the run uses interval 0.01 with
+  division_crit 2.0 and shape index 3.6 so the mesh relaxes between divisions (no cell
+  overlap). I and E remain SBML-internal drivers with no mesh cells. The coupling is a
+  qualitative mechanism, not a quantitatively validated spatial tumor model — see each
+  study's limitations.
+# --- v2 narrative spine -----------------------------------------------------
+lead: Eran
+executive:
+  what_is_this: >-
+    A demonstration that a non-spatial breast-cancer population ODE (run in COPASI) can
+    drive real, discrete vertex-model mechanics — cell division and apoptotic extrusion —
+    on a 2D tyssue epithelial sheet, and that the coupled tissue diverges cleanly from a
+    mechanics-only control.
+  verdict: >-
+    Mechanism demonstrated. SBML fluxes drive real cell divisions (the mesh grows
+    206→312 cells over 150 steps at interval 0.01) and apoptotic extrusions; a single
+    tumor cell seeded at the sheet centre grows out into one clonal patch (0→112) and the
+    healthy fraction falls 1.00→0.64, while the baseline arm stays static and 100%
+    healthy. All acceptance tests pass.
+  verdict_status: supported
+  decisions_needed:
+  - Expert opinion on whether the flux→event scales should be calibrated to data (they
+    are currently tuned for a watchable cadence) before any quantitative claim.
+  - Whether to pursue 3D / curved geometries now that real topology ops run on the fork.
+at_a_glance:
+- study: tumor-composite
+  role: The coupled model itself — shows COPASI fluxes driving real division/extrusion
+    on the mesh, with five visualizations.
+- study: tumor-vs-baseline
+  role: The controlled comparison — same sheet with vs without the coupling, isolating
+    the tumor effect in tissue size, composition, and morphology.
+scientific_argument:
+  main_claim: >-
+    A non-spatial population ODE can drive a real spatial vertex model through a
+    flux→event adapter, producing qualitative tumor-invasion dynamics (clonal expansion
+    by division + apoptotic extrusion) on an epithelial sheet.
+  evidence_for:
+  - "tumor-composite: a single central tumor seed grows the mesh 206→312 via 175 real
+    cell_division events; tumor 0→112; healthy fraction 1.00→0.64; 67 apoptosis_extrusion
+    events. All 5 tests pass."
+  - "tumor-vs-baseline: baseline arm stays fixed at 206 healthy cells with zero events,
+    while the tumor arm grows to 312 cells — divergence attributable solely to the coupling."
+  evidence_against:
+  - The prior revision ran in fixed-topology relabel mode, which (correctly, per review)
+    showed no real growth — only mechanical relaxation. That mode is now a fallback only.
+  key_figures:
+  - tumor-composite / Cell composition and tissue size over time
+  - tumor-composite / Tumor sheet snapshots (tyssue sheet_view)
+  - tumor-vs-baseline / Tissue size and composition — tumor vs baseline
+  caveats:
+  - Qualitative coupling; flux→event scales are tuned, not fit to data.
+  - Real topology requires the pandas-3-compatible tyssue fork (vivatyssue); final counts
+    vary by a few cells run-to-run.
+  interpretation_ref: tumor-composite
+biological_story: >-
+  A single tumor cell is seeded at the centre of an otherwise healthy epithelial sheet.
+  The COPASI breast-cancer model's tumor-induction fluxes drive it and its descendants to
+  divide, expanding one clonal patch outward and physically growing the tissue, while its
+  death fluxes cause apoptotic cells to extrude out of the sheet — the same way real
+  epithelia shed dying cells. Against an untouched control sheet that merely relaxes
+  mechanically, the coupled sheet visibly invades and remodels: the tumor clone spreads
+  and the healthy fraction of the tissue steadily falls.
+studies:
+- tumor-composite
+- tumor-vs-baseline
+acceptance_criteria:
+- study: tumor-composite
+  behavior: SBML reaction fluxes drive discrete, real cell-fate mechanics on the mesh —
+    cell_division (births) and apoptosis_extrusion (deaths) fire under flux control, not
+    at random, and the tissue grows.
+- study: tumor-vs-baseline
+  behavior: The tumor composite diverges from the mechanics-only baseline — division-driven
+    growth and healthy-fraction decline versus a static, uniformly healthy sheet.
+glossary:
+- term: topology_ops
+  definition: Flag selecting real tyssue vertex-model surgery (cell_division /
+    apoptosis_extrusion) over the fixed-topology relabel fallback. Default true here.
+- term: apoptosis_extrusion
+  definition: Tyssue behavior that shrinks a dying cell and removes its face from the
+    sheet (remove_face) — the mesh loses a cell, modeling apoptotic extrusion.
+- term: healthy_fraction
+  definition: Healthy cells / total cells. The displacement signal that stays meaningful
+    when the epithelium proliferates (absolute healthy count barely falls).
+- term: flux→event adapter
+  definition: The TumorCoupling step that scales COPASI per-reaction fluxes into integer
+    cell-fate events via per-type fractional accumulators.
+how_to_read: >-
+  Start with study tumor-composite (the coupled model and its five visualizations — note
+  the tissue growing in the snapshots/animation), then tumor-vs-baseline for the
+  controlled comparison against a plain epithelial sheet, including side-by-side videos.

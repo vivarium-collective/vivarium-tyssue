@@ -10,7 +10,6 @@ BEHAVIOR_MAP = {
     "update_tension": update_tension,
     "cell_jamming": cell_jamming,
     "apply_gradient": apply_gradient,
-    "divide_crypt": divide_crypt,
     "apoptosis_extrusion": apoptosis_extrusion,
     "differentiation": differentiation,
 }

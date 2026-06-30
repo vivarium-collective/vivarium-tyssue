@@ -7,6 +7,11 @@
 # is just a convenience wrapper so `bash scripts/serve.sh` keeps working.
 set -euo pipefail
 
+# COPASI/basico (pbg-copasi dep) resets LC_CTYPE to "C" on import; force Python
+# UTF-8 mode so locale-default YAML reads (composite/study specs) don't crash on
+# non-ASCII characters when the dashboard loads composites that import COPASI.
+export PYTHONUTF8=1
+
 WS_ROOT="$(pwd)"
 [ -f "$WS_ROOT/workspace.yaml" ] || { echo "ERROR: run from workspace root" >&2; exit 1; }
 

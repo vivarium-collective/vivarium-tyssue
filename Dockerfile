@@ -17,6 +17,13 @@ ENV PYTHONUNBUFFERED=1 \
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
+# The vivatyssue fork (the tyssue source in pyproject) declares a docs-only
+# submodule `doc/notebooks` via an SSH URL (git@github.com:damcb/tyssue-demo.git).
+# uv initialises submodules when cloning a git source, which fails in CI with
+# "Host key verification failed" (no SSH key in the build). Rewrite SSH GitHub
+# URLs to anonymous HTTPS so the public submodule clones without credentials.
+RUN git config --global url."https://github.com/".insteadOf "git@github.com:"
+
 WORKDIR /app
 
 COPY . /app

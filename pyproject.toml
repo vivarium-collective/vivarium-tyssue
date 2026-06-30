@@ -2,13 +2,17 @@
 name = "vivarium-tyssue"
 version = "0.0.0"
 description = "Process-bigraph research workspace wrapping the tyssue vertex-model simulator"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
     "process-bigraph",
     "bigraph-schema",
     "bigraph-viz>=2.0.3",
     # Provides pbg_superpowers.visualization.Visualization (the base class the
-    # workspace's Visualization Steps subclass) + the composite_spec loader.
+    # workspace's Visualization Steps subclass) + the composite_spec loader, plus
+    # the investigation-spine modules (study_outcomes, finding_observations,
+    # study_verdict, report_linter, linkage_index, …). The spine landed on main
+    # (0.14.0) and is not yet on PyPI (tops at 0.13.0); resolved via
+    # [tool.uv.sources] below.
     "pbg-superpowers",
     "pyyaml>=6.0",
     "jsonschema[format-nongpl]>=4.21",
@@ -20,6 +24,11 @@ dependencies = [
     # tyssue pulls these transitively but does not declare them all, so pin them
     # explicitly: scikit-image + vispy (tyssue.draw import chain), quantities
     # (tyssue.dynamics), tables (HDF5 .hf5 mesh loading via pandas.HDFStore).
+    # tyssue resolves to the vivarium-collective *fork* (vivatyssue) via
+    # [tool.uv.sources] — stock PyPI tyssue 1.1.0 crashes on real topology ops
+    # (cell_division/remove_face) under the pandas-3.0/numpy-2.x that the COPASI
+    # stack forces (read-only array in get_opposite). The fork patches that, so
+    # the tumor composite can run topology_ops=true (real divisions/extrusions).
     "tyssue",
     "pandas",
     "numpy",
@@ -27,16 +36,29 @@ dependencies = [
     "vispy",
     "quantities",
     "tables",
+    # ipywidgets is imported at module top by tyssue.draw (plt_draw + ipv_draw),
+    # so tyssue's own sheet_view / create_gif are unimportable without it. The
+    # snapshot + gif visualizations render through tyssue.draw, so this is a
+    # load-bearing runtime dep, not just a notebook nicety.
+    "ipywidgets",
     # Web-based workspace dashboard (server + templates + assets + lib helpers);
     # provides the `vivarium-dashboard serve` CLI invoked by scripts/serve.sh and
-    # the Dockerfile CMD. Not published to PyPI, so reference the repo directly —
-    # a PEP 508 direct URL is honored by pip, `uv pip install` and `uv sync`
-    # alike (the scaffold's machine-local `[tool.uv.sources]` path broke CI).
-    "vivarium-dashboard @ git+https://github.com/vivarium-collective/vivarium-dashboard.git",
+    # the Dockerfile CMD. Not published to PyPI — resolved via [tool.uv.sources]
+    # below so the root-workspace git URL overrides pbg-biomodels' local-path source
+    # (see the [tool.uv.sources] comment for details).
+    "vivarium-dashboard",
     # ParquetEmitter — the workspace's default emitter (see workspace.yaml
     # runtime.default_emitter and vivarium_tyssue.core). The [parquet] extra pulls
     # polars/pyarrow/duckdb/fsspec. Not on PyPI; reference the repo directly.
     "pbg-emitters[parquet] @ git+https://github.com/vivarium-collective/pbg-emitters.git",
+    # COPASI process (CopasiUTCProcess) wrapping basico/COPASI — runs the cached SBML
+    # tumor model. Not on PyPI — resolved via [tool.uv.sources] + override-dependencies
+    # below. pbg-biomodels (the BioModels *fetcher*) is NOT a runtime dep: it pulls
+    # pbg-tellurium -> tellurium -> libroadrunner, which has no linux/arm64 wheel and
+    # breaks the multi-arch Docker build. The model is already cached at
+    # workspace/datasets/BIOMD0000000903.xml, so fetching is a one-off — see the
+    # `fetch` extra below.
+    "pbg-copasi",
 ]
 
 [project.optional-dependencies]
@@ -44,10 +66,54 @@ dev = ["pytest>=7.4"]
 # Optional viewer stack for the faithful 3D crypt animation (tyssue.draw.create_gif_3d
 # uses ipyvolume). Without it, TissueCryptGif3D falls back to a matplotlib 3D mesh.
 viz3d = ["ipyvolume"]
+# One-off model fetching (scripts/fetch_tumor_biomodel.py). Pulls the tellurium /
+# libroadrunner SBML stack (no linux/arm64 wheel), so it is opt-in and kept out of
+# the default install + Docker image. The fetched model is committed, so this is
+# rarely needed.
+fetch = ["pbg-biomodels @ git+https://github.com/vivarium-collective/pbg-biomodels.git"]
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+# uv 0.9.x bug workaround: pbg-biomodels has [tool.uv.sources] with local-path
+# entries for its sibling repos (vivarium-dashboard, pbg-tellurium, pbg-copasi,
+# pbg-simbio). When uv fetches pbg-biomodels from git it incorrectly applies those
+# path sources, converting them to invalid
+#   git+https://…pbg-biomodels.git#subdirectory=../vivarium-dashboard
+# URLs that fail to resolve.  override-dependencies is applied unconditionally
+# BEFORE the resolver fetches any URL, so it replaces those bad URLs with the
+# correct git refs for all four packages.
+[tool.uv]
+override-dependencies = [
+    "vivarium-dashboard @ git+https://github.com/vivarium-collective/vivarium-dashboard.git",
+    "pbg-tellurium @ git+https://github.com/vivarium-collective/pbg-tellurium.git",
+    "pbg-simbio @ git+https://github.com/vivarium-collective/pbg-simbio.git",
+    "pbg-copasi @ git+https://github.com/vivarium-collective/pbg-copasi.git",
+    # pbg-simbio and pbg-tellurium reference pbg-superpowers with branch = "main"
+    # (→ git+https://…@main), while the root uses the default-branch ref
+    # (git+https://…, no branch). Uv treats these as conflicting URLs; override
+    # pins to the unqualified ref so both resolve to the same HEAD commit.
+    "pbg-superpowers @ git+https://github.com/vivarium-collective/pbg-superpowers.git",
+    # Same conflict for pbg-emitters: pbg-superpowers (>=0.14.0) pins it with
+    # branch = "main" (→ git+https://…@main), while the root requests the
+    # unqualified ref. Pin both to the unqualified ref so they share one URL.
+    "pbg-emitters[parquet] @ git+https://github.com/vivarium-collective/pbg-emitters.git",
+]
+
+# [tool.uv.sources] supplies the git URL for vivarium-dashboard (not on PyPI).
+# The root-workspace source should in principle override pbg-biomodels' path source,
+# but override-dependencies above is the primary fix; this is belt-and-suspenders.
+[tool.uv.sources]
+# The pandas-3-compatible tyssue fork (adds VesselGeometry/model_factory_* and
+# patches get_opposite so cell_division/remove_face work under read-only pandas-3
+# arrays). Required for the tumor composite's topology_ops=true path.
+tyssue = { git = "https://github.com/vivarium-collective/vivatyssue.git" }
+vivarium-dashboard = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git" }
+pbg-tellurium = { git = "https://github.com/vivarium-collective/pbg-tellurium.git" }
+pbg-simbio = { git = "https://github.com/vivarium-collective/pbg-simbio.git" }
+pbg-copasi = { git = "https://github.com/vivarium-collective/pbg-copasi.git" }
+pbg-superpowers = { git = "https://github.com/vivarium-collective/pbg-superpowers.git" }
 
 # Allow the PEP 508 direct git URL for vivarium-dashboard (not on PyPI).
 [tool.hatch.metadata]

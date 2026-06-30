@@ -16,3 +16,19 @@ workspace/reports/assets/*
 out/
 
 .DS_Store
+
+# Generated simulation data — regenerate via scripts/run_study_sims.py
+workspace/studies/*/runs.db
+workspace/studies/*/runs.db-shm
+workspace/studies/*/runs.db-wal
+workspace/studies/*/sims/
+
+# Generated viz HTML (regenerate via scripts/render_study_viz.py)
+workspace/studies/*/viz/
+
+# Cached reproduction notebooks: the .ipynb/.py are committed (ready-to-run from
+# a fresh clone, RERUN=True regenerates results); the heavy siblings are not.
+workspace/reports/notebooks/*.preview.html
+workspace/reports/notebooks/figures/
+workspace/reports/notebooks/__pycache__/
+workspace/reports/notebooks/.ipynb_checkpoints/

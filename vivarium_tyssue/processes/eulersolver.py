@@ -77,7 +77,20 @@ class EulerSolver(Process):
             for dataframe, parameters in config["parameters"].items():
                 df = getattr(self.eptm, dataframe)
                 for parameter, value in parameters.items():
-                    df[parameter] = value
+                    # A dict value sets the parameter per mesh segment (apical /
+                    # basal / lateral / sagittal), e.g. line_tension:
+                    #   {apical: 1.0, default: 0.0}  ->  high tension on apical
+                    # edges only (a 3D-monolayer "purse-string"). Falls back to
+                    # the literal value when the df has no 'segment' column (a
+                    # flat Sheet) so scalar configs are unchanged.
+                    if isinstance(value, dict):
+                        if "segment" in df.columns:
+                            default = value.get("default", 0.0)
+                            df[parameter] = df["segment"].map(value).fillna(default)
+                        else:
+                            df[parameter] = value.get("default", 0.0)
+                    else:
+                        df[parameter] = value
 
         manager = EventManager()
         if self.config["auto_reconnect"]:
@@ -89,6 +102,23 @@ class EulerSolver(Process):
             self.bounds = self.config["bounds"]
         else:
             self.bounds = None
+        # Normalize any StringDtype columns from parameter assignment (pandas 3.0).
+        self._coerce_string_columns()
+
+    def _coerce_string_columns(self):
+        """pandas 3.0 gives scalar-string column assignments (e.g. ``cell_type``)
+        a ``StringDtype``, which bigraph-schema's ``get_frame_schema`` can't
+        introspect ('StringDtype' object has no attribute 'fields'). Coerce any
+        such columns back to plain object dtype on the live epithelium dataframes
+        so both ``outputs()`` (schema) and emission work."""
+        import pandas as pd
+        for df_name in ("vert_df", "edge_df", "face_df", "cell_df"):
+            df = getattr(self.eptm, df_name, None)
+            if df is None or isinstance(df, dict):
+                continue
+            for col in df.columns:
+                if isinstance(df[col].dtype, pd.StringDtype):
+                    df[col] = df[col].astype(object)
 
     def output_dfs(self):
         output_columns = self.config.get("output_columns", {})
@@ -102,8 +132,8 @@ class EulerSolver(Process):
                     output_dfs[df_name] = {}
         else:
             for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
-                if getattr(self.eptm, df_name):
-                    print(df_name)
+                df_present = getattr(self.eptm, df_name, None)
+                if df_present is not None and len(df_present) > 0:
                     if df_name in output_columns.keys():
                         cols = output_columns.get(df_name)
                         if not "unique_id" in cols:
@@ -172,8 +202,11 @@ class EulerSolver(Process):
                 "_columns": get_frame_schema(self.eptm.face_df)
             },
         }
-        if self.eptm.cell_df:
-            datasets["cell_df"] = {"_columns": get_frame_schema(self.eptm.cell_df)}
+        # cell_df is None for a 2D Sheet but a (non-empty) DataFrame for a 3D
+        # Monolayer — test explicitly, since `if df:` is ambiguous on a frame.
+        cell_df = getattr(self.eptm, "cell_df", None)
+        if cell_df is not None and len(cell_df) > 0:
+            datasets["cell_df"] = {"_columns": get_frame_schema(cell_df)}
         else:
             datasets["cell_df"] = {}
         return {
@@ -215,6 +248,10 @@ class EulerSolver(Process):
             network_changed = False
 
         self.eptm.network_changed = False
+
+        # Behaviors (differentiation, division) may re-introduce StringDtype
+        # cell_type columns under pandas 3.0; coerce before schema/emission.
+        self._coerce_string_columns()
 
         self.record(inputs["global_time"])
 

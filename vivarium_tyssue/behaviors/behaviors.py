@@ -42,7 +42,7 @@ def divide_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
     return daughter
 
 def division(
-        sheet, manager, geom= "SheetGeometry", cell_uid=0, crit_area=2.0, growth_rate=0.1, dt=1.
+        sheet, manager, geom= "SheetGeometry", cell_uid=0, cell_type=None, crit_area=2.0, growth_rate=0.1, dt=1.
 ):
     """Defines a division behavior.
 
@@ -50,10 +50,15 @@ def division(
     ----------
 
     sheet: a :class:`Sheet` object
-    cell_id: int
-        the index of the dividing cell
+    cell_uid: int
+        the unique_id of the dividing cell
+    cell_type: str, optional
+        If provided, the cell is flagged "dividing" while it grows and both the
+        mother and daughter faces are stamped with this cell_type once division
+        occurs. If None (default), no cell_type bookkeeping is done and the
+        behavior matches the plain division.
     crit_area: float
-        the area at which
+        the area at which the cell divides
     growth_rate: float
         increase in the prefered are per unit time
         A_0(t + dt) = A0(t) * (1 + growth_rate * dt)
@@ -62,7 +67,16 @@ def division(
         geometry = GEOMETRY_MAP[geom]
     else:
         geometry = geom
-    cell_id = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
+    # The cell may have been extruded (apoptosis_extrusion) between when the
+    # coupling queued this division and when the manager runs it — its unique_id
+    # is then gone. Skip gracefully, matching apoptosis_extrusion's guard.
+    match = sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index
+    if len(match) == 0:
+        print("Cell not found, skipping division")
+        return
+    cell_id = int(match[0])
+    if cell_type is not None:
+        sheet.face_df.loc[cell_id, "cell_type"] = "dividing"
     if sheet.face_df.loc[cell_id, "area"] > crit_area:
         # restore prefered_area
         sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
@@ -73,46 +87,15 @@ def division(
         # update geometry
         geometry.update_all(sheet)
         sheet.network_changed = True
+        if cell_type is not None:
+            sheet.face_df.loc[cell_id, "cell_type"] = cell_type
+            sheet.face_df.loc[daughter, "cell_type"] = cell_type
         print(f"cell n°{daughter} is born")
     else:
         #
         sheet.face_df.loc[cell_id, "prefered_area"] *= (1 + dt * growth_rate)
         manager.append(
             division,
-            geom=geom,
-            cell_uid=cell_uid,
-            crit_area=crit_area,
-            growth_rate=growth_rate,
-            dt=dt
-        )
-
-def divide_crypt(
-        sheet, manager, geom= "SheetGeometry", cell_uid=0, cell_type="None", crit_area=2.0, growth_rate=0.1, dt=1.
-    ):
-    if type(geom) == str:
-        geometry = GEOMETRY_MAP[geom]
-    else:
-        geometry = geom
-    cell_id = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
-    sheet.face_df.loc[cell_id, "cell_type"] = "dividing"
-    if sheet.face_df.loc[cell_id, "area"] > crit_area:
-        # restore prefered_area
-        sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
-        # Do division
-        daughter = cell_division(sheet, cell_id, geometry)
-        # Update the topology
-        sheet.reset_index(order=True)
-        # update geometry
-        geometry.update_all(sheet)
-        sheet.network_changed = True
-        sheet.face_df.loc[cell_id, "cell_type"] = cell_type
-        sheet.face_df.loc[daughter, "cell_type"] = cell_type
-        print(f"cell n°{daughter} is born")
-    else:
-        #
-        sheet.face_df.loc[cell_id, "prefered_area"] *= (1 + dt * growth_rate)
-        manager.append(
-            divide_crypt,
             geom=geom,
             cell_uid=cell_uid,
             cell_type=cell_type,
