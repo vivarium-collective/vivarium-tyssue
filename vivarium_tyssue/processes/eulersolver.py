@@ -72,7 +72,6 @@ class EulerSolver(Process):
         self.geom.update_all(self.eptm)
         effectors = [self.maps["EFFECTORS_MAP"][effector] for effector in config["effectors"]]
         self.model = self.maps["FACTORY_MAP"][config["factory"]](effectors, self.maps["EFFECTORS_MAP"][config["ref_effector"]])
-        self.history = History(self.eptm)
         if len(config["parameters"]) > 0:
             for dataframe, parameters in config["parameters"].items():
                 df = getattr(self.eptm, dataframe)
@@ -104,6 +103,10 @@ class EulerSolver(Process):
             self.bounds = None
         # Normalize any StringDtype columns from parameter assignment (pandas 3.0).
         self._coerce_string_columns()
+        # Build the history only after the configured parameters (e.g.
+        # line_tension) have been written onto the dataframes, so those columns
+        # are actually recorded each step and available for per-frame colouring.
+        self.history = History(self.eptm)
 
     def _coerce_string_columns(self):
         """pandas 3.0 gives scalar-string column assignments (e.g. ``cell_type``)
