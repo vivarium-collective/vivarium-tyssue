@@ -153,9 +153,10 @@ readouts:
 - {name: dead_count,     store_path: dead_count,     units: cells}
 - {name: total_count,    store_path: total_count,    units: cells}
 - {name: healthy_fraction, store_path: healthy_fraction, units: fraction}
-- {name: vert_df, store_path: Datasets/vert_df, description: mesh vertices (geometry)}
-- {name: edge_df, store_path: Datasets/edge_df, description: mesh edges (geometry)}
-- {name: face_df, store_path: Datasets/face_df, description: cells (cell_type/area)}
+# The mesh dataframes (vert_df/edge_df/face_df/cell_df) are emitted to runs.db
+# Datasets/* and consumed by the TissueSheetGif/Snapshots viz directly; they are
+# whole-DataFrame stores, not canonical scalar selectors, so they are not listed
+# as readouts (which are evaluable observables for behavior_tests).
 visualizations:
 - name: Tumor sheet snapshots
   address: local:TissueSheetSnapshots
@@ -286,6 +287,7 @@ behavior_tests:
   question: Does the seeded tumor focus expand under SBML flux control?
   measure: {kind: last, path: tumor_count}
   pass_if: {op: gt, threshold: 10}
+  cites: [solisperez2019]
   result: PASS
   notes: "final tumor_count = 112 (seeded 1) \u2014 a single central cell grows into a
     112-cell clone, well above the 10-cell threshold."
@@ -295,6 +297,7 @@ behavior_tests:
     relabelings?
   measure: {kind: last, path: total_count}
   pass_if: {op: gt, threshold: 206}
+  cites: [solisperez2019]
   result: PASS
   notes: "total cells 206\u2192312 (+106). Births add faces via tyssue cell_division;
     a relabeling model would hold total fixed at 206."
@@ -303,6 +306,7 @@ behavior_tests:
   question: Is healthy tissue progressively displaced (as a fraction of the sheet)?
   measure: {kind: last, path: healthy_fraction}
   pass_if: {op: lt, threshold: 0.8}
+  cites: [solisperez2019]
   result: PASS
   notes: "healthy fraction 1.00\u21920.64. Absolute healthy count barely falls (206\u2192200)
     because the sheet proliferates, so fraction is the honest displacement signal."
@@ -532,4 +536,187 @@ feedback_responses:
     to area > 2.0 before it splits, so division inflates its prefered_area over ~8
     manager steps first (the sheet relaxes in between) and the two daughters start near
     their 1.0 prefered area instead of as tiny overlapping faces.
-runs: []
+# ---------------------------------------------------------------------------
+# v4 narrative spine — reviewer-facing summary blocks
+# ---------------------------------------------------------------------------
+report:
+  title: COPASI tumor ODE driving real cell division/extrusion on a 2D epithelium
+  verdict: passing
+  confidence: medium
+  evidence_quality: qualitative
+  objective: >-
+    Show that the non-spatial breast-cancer population ODE BIOMD0000000903 (run in
+    COPASI) can drive discrete, real cell-fate mechanics — cell division and apoptotic
+    extrusion — on a tyssue vertex-model epithelial sheet, with a single seeded focus
+    growing out into one clonal patch.
+  conclusion: >-
+    It can. Over a 150-step run (interval 0.01) a single tumor cell seeded at the sheet
+    centre grows out into one clonal patch: the sheet grows 206→312 cells via 175 real
+    cell divisions, the tumor clone expands 0→112, the healthy fraction falls 1.00→0.64,
+    and 67 apoptotic cells extrude. All five acceptance tests pass.
+  main_insight: >-
+    Births add faces and deaths remove them — tumor invasion manifests as genuine tissue
+    growth and remodeling, not relabeling, and grows outward from one focus.
+  caveat: >-
+    Qualitative coupling (flux→event scales tuned, not fit to data); requires the
+    pandas-3-compatible tyssue fork (vivatyssue); final counts vary by a few cells
+    run-to-run.
+  key_metrics:
+  - {label: total cells, value: "206 → 312", status: pass}
+  - {label: tumor cells, value: "0 → 112", status: pass}
+  - {label: healthy fraction, value: "1.00 → 0.64", status: pass}
+  - {label: cell divisions, value: "175 events", status: pass}
+  - {label: apoptotic extrusions, value: "67 events", status: pass}
+runtime:
+  default_emitter: sqlite
+  subprocess_timeout_s: 1200
+key_assumptions:
+- The flux→event coupling is qualitative — scales are tuned for a watchable cadence,
+  not fit to the BIOMD0000000903 trajectory, so counts and areas are illustrative.
+- Real vertex-model topology (cell_division / apoptosis_extrusion) requires the
+  pandas-3-compatible tyssue fork (vivatyssue); stock PyPI tyssue 1.1.0 crashes on
+  these ops under the numpy-2/pandas-3 the COPASI stack forces.
+- A SINGLE tumor cell is seeded at the sheet centre (no scattered stem), so every
+  tumor birth divides the existing clone and the patch grows outward as one focus.
+- prefered_perimeter/√prefered_area = 3.6 keeps the tissue in the solid regime
+  (below the ~3.81 rigidity transition) so cells hold compact shapes rather than
+  deforming into overlaps.
+- Interval 0.01 is required for mesh stability — the sheet relaxes between divisions
+  at ~10x finer mechanical steps than the old 0.1 runs, so cells stay compact.
+enforced_params:
+  params:
+    interval: 0.01
+    division_crit: 2.0
+    apoptosis_crit: 2.0
+  source: T. Rahman 2026-06-17 reviewer settings (finer dt for mesh relaxation;
+    cells grow to area > 2.0 before splitting; shape index 3.6 solid regime)
+literature_anchors:
+- expectation: >-
+    A breast-cancer population competition model (cancer-stem, tumor, healthy, immune,
+    estrogen) drives tumor expansion while healthy tissue is progressively displaced.
+  model_observable: tumor_count rising and healthy_fraction falling over the run
+  source: Solís-Pérez et al. 2019 (BIOMD0000000903, the source population ODE)
+  status_in_workspace: Verified — tumor_count 0 → 112, healthy_fraction 1.00 → 0.64
+- expectation: >-
+    Cells in the solid regime (shape index ≤ ~3.81) hold compact shapes rather than
+    fluidizing, so a proliferating sheet relaxes between divisions without overlap.
+  model_observable: median face area near prefered 1.0; 5th-percentile area stays above 0
+  source: Bi et al. 2015 (shape-index rigidity transition); Farhadifar et al. 2007
+    (vertex-model epithelial mechanics)
+  status_in_workspace: Enforced — prefered_perimeter/√prefered_area = 3.6 (solid regime,
+    no cell overlap observed)
+model_change:
+  base_model: >-
+    tumor composite — CopasiUTCProcess(BIOMD0000000903) coupled to the EulerSolver tyssue
+    process on a flat SheetGeometry sheet (test_square, 206 cells).
+  new_processes:
+  - >-
+    TumorCoupling — owns COPASI internally, integrates BIOMD0000000903 each step, scales
+    its per-reaction birth/death fluxes through fractional accumulators, and fires integer
+    cell-fate events on the mesh (a flux→cell-fate adapter).
+  modified_processes:
+  - >-
+    EulerSolver — with topology_ops=true (default on the pandas-3 tyssue fork) a birth is a
+    real tyssue cell_division (the cell splits, the mesh gains a face) and a death a real
+    apoptosis_extrusion (the cell shrinks and is removed via remove_face).
+  new_parameters:
+  - "single central tumor seed ({tumor: 1, stem: 0}, placed at the sheet centroid)"
+  - interval 0.01, division_crit 2.0, apoptosis_crit 2.0, shape index 3.6
+  notes: >-
+    Effectors keep the sheet in the solid regime (prefered_perimeter 3.6, prefered_area 1.0).
+    The fixed-topology relabel path is retained only as a fallback for stock tyssue installs.
+implementation_requirements:
+- id: tumor-composite
+  kind: composite
+  title: Declare the COPASI-coupled tumor composite
+  effort: M
+  description: >-
+    tumor.composite.yaml wiring CopasiUTCProcess(BIOMD0000000903) to the EulerSolver on a
+    flat SheetGeometry sheet (test_square, 206 cells), with topology_ops=true on the
+    pandas-3 tyssue fork. DONE.
+- id: flux-event-adapter
+  kind: process
+  title: TumorCoupling flux→event adapter
+  effort: M
+  description: >-
+    Integrate the COPASI model each step and scale its per-reaction birth/death fluxes
+    through per-type fractional accumulators into integer tyssue cell_division /
+    apoptosis_extrusion events. DONE.
+- id: single-central-seed
+  kind: process
+  title: Single central tumor seed selector
+  effort: S
+  description: >-
+    TumorCoupling.select_central_uids picks the healthy cell closest to the centroid;
+    seed changed {tumor: 8, stem: 2} → {tumor: 1, stem: 0} so the clone grows as one
+    contiguous focus. DONE.
+- id: runs-db-decimation
+  kind: data
+  title: Decimate per-step mesh snapshots in runs.db
+  effort: S
+  description: >-
+    run_study_sims decimates the per-step mesh snapshot so the finer/longer 0.01 runs
+    (150 steps) do not bloat runs.db. DONE.
+design_pivot_required:
+- id: tumor-calibrate-scales
+  status: open
+  question: >-
+    Should the flux→event scales be calibrated to the BIOMD0000000903 trajectory so the
+    counts/areas become quantitative rather than qualitative?
+  alternatives:
+  - A. Calibrate scales to the ODE trajectory and add a margin-roughness / invasion-front viz.
+  - B. Keep the tuned watchable cadence and treat the study as a qualitative mechanism demo.
+  requested_response: Expert opinion on whether quantitative calibration is needed next.
+- id: tumor-curved-3d
+  status: open
+  question: >-
+    Should tumor outgrowth be tested on a curved / 3D geometry to see whether the single
+    focus buckles or invaginates once topology ops run off the flat sheet?
+  alternatives:
+  - A. Move to a curved / 3D mesh (e.g. the monolayer geometry) now that real topology runs.
+  - B. Stay on the flat sheet and characterize the in-plane invasion morphology first.
+  requested_response: Whether the next study should leave the flat geometry.
+- id: tumor-healthy-decline
+  status: open
+  question: >-
+    Is the healthy-fraction decline driven mainly by division-crowding (proliferation
+    diluting a fixed healthy pool) or by active healthy apoptosis at the tumor margin?
+  alternatives:
+  - A. Add discriminating observables (healthy_deaths events, absolute healthy_count slope,
+    local healthy area at the margin) to separate the two.
+  - B. Accept the fraction as the headline displacement signal without disentangling cause.
+  requested_response: Whether to instrument the healthy-decline mechanism.
+# v4 section 3 — concrete run plan (replaces v3 baseline+variants; those stay for
+# back-compat). One canonical single-arm run (the reviewer-tuned reference).
+simulation_set:
+- name: reference
+  kind: single
+  status: completed
+  base_model: vivarium_tyssue.composites.tumor
+  duration_steps: 150
+  interval: 0.01
+  seeds: [0]
+  params:
+    seed: {tumor: 1, stem: 0}
+    division_crit: 2.0
+    apoptosis_crit: 2.0
+    shape_index: 3.6
+  metrics: [total_count, tumor_count, healthy_fraction]
+  pass_fail_tests: [tumor_expansion, tissue_growth_by_division, healthy_displacement,
+    apoptotic_extrusion, flux_driven_events]
+  description: >-
+    Canonical 150-step run (interval 0.01) of the COPASI-coupled tumor composite: a single
+    tumor cell seeded at the sheet centre, division_crit 2.0, apoptosis_crit 2.0, shape
+    index 3.6 (solid regime). The only configuration evaluated.
+# v4 planned/executed runs. The reference run is completed (runs.db is canonical
+# source of truth; the deprecated runs: field is intentionally omitted).
+planned_runs:
+- name: reference
+  status: completed
+  composite: vivarium_tyssue.composites.tumor
+  n_steps: 150
+  seeds: [0]
+  details: >-
+    Canonical single-central-seed run; all five pre-registered tests pass — total cells
+    206→312 via 175 cell divisions, tumor 0→112, healthy fraction 1.00→0.64, 67 apoptotic
+    extrusions. Run history in runs.db.

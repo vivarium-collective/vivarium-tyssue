@@ -97,9 +97,10 @@ readouts:
 - {name: healthy_fraction, store_path: healthy_fraction, units: fraction}
 - {name: tumor_births,   store_path: tumor_births,   units: events/step}
 - {name: healthy_deaths, store_path: healthy_deaths, units: events/step}
-- {name: vert_df, store_path: Datasets/vert_df, description: mesh vertices}
-- {name: edge_df, store_path: Datasets/edge_df, description: mesh edges}
-- {name: face_df, store_path: Datasets/face_df, description: cells (cell_type)}
+# The mesh dataframes (vert_df/edge_df/face_df/cell_df) are emitted to runs.db
+# Datasets/* and consumed by the TissueSheetGif/Snapshots viz directly; they are
+# whole-DataFrame stores, not canonical scalar selectors, so they are not listed
+# as readouts (which are evaluable observables for behavior_tests).
 visualizations:
 - name: Tissue size and composition — tumor vs baseline
   address: local:TimeSeriesFromObservables
@@ -189,6 +190,7 @@ behavior_tests:
   question: Does the mechanics-only baseline stay 100% healthy (no births/deaths)?
   measure: {kind: last, path: healthy_count}
   pass_if: {op: eq, threshold: 206}
+  cites: [solisperez2019]
   result: PASS
   notes: "baseline final healthy_count = 206 (0 tumor, 0 dead) — uniform control."
 - name: tumor_arm_diverges
@@ -196,6 +198,7 @@ behavior_tests:
   question: Does the tumor arm diverge from baseline (tumor cells appear)?
   measure: {kind: last, path: tumor_count}
   pass_if: {op: gt, threshold: 10}
+  cites: [solisperez2019]
   result: PASS
   notes: "tumor arm final tumor_count = 112 vs baseline 0."
 - name: tumor_arm_grows_tissue
@@ -204,6 +207,7 @@ behavior_tests:
     fixed?
   measure: {kind: last, path: total_count}
   pass_if: {op: gt, threshold: 206}
+  cites: [solisperez2019]
   result: PASS
   notes: "tumor arm total_count = 312 (206→312 via 175 divisions) vs baseline fixed at 206."
 - name: healthy_fraction_gap
@@ -211,6 +215,7 @@ behavior_tests:
   question: Is the healthy fraction lower in the tumor arm than baseline?
   measure: {kind: last, path: healthy_fraction}
   pass_if: {op: lt, threshold: 0.8}
+  cites: [solisperez2019]
   result: PASS
   notes: "tumor arm healthy_fraction = 0.64 vs baseline 1.00 — clear displacement gap."
 findings:
@@ -334,3 +339,188 @@ feedback_responses:
     prefered_area = 3.6. Both arms were re-run at interval 0.01 and re-rendered: the
     tumor arm grows one central clone 206→312 (112 tumor, healthy fraction 0.64) with no
     cell overlap, the baseline arm stays fixed at 206 healthy.
+# ---------------------------------------------------------------------------
+# v4 narrative spine — reviewer-facing summary blocks
+# ---------------------------------------------------------------------------
+report:
+  title: Tumor composite vs mechanics-only baseline — controlled divergence
+  verdict: passing
+  confidence: medium
+  evidence_quality: qualitative
+  objective: >-
+    Compare the COPASI-coupled tumor composite against a mechanics-only baseline
+    epithelial sheet of identical geometry, isolating the effect of the tumor coupling
+    on tissue size, composition, and morphology.
+  conclusion: >-
+    The baseline arm stays 100% healthy and fixed at 206 cells across all 150 steps
+    (interval 0.01), while the COPASI-coupled tumor arm grows a single central clone to
+    312 cells via 175 divisions, reaching 112 tumor and a healthy fraction of 0.64. All
+    four acceptance tests pass — a clean, controlled divergence attributable solely to
+    the SBML coupling.
+  main_insight: >-
+    With real topology the divergence is visible in tissue size and morphology (the
+    tumor arm physically grows a single central clone), not only in cell-type labels;
+    the only difference between the two arms is the COPASI coupling.
+  caveat: >-
+    Qualitative comparison — geometry and flux->event scales are not fit to data; the
+    tumor arm requires the pandas-3-compatible tyssue fork; final counts vary by a few
+    cells run-to-run.
+  key_metrics:
+  - {label: baseline total cells, value: "206 (fixed)", status: pass}
+  - {label: tumor-arm total cells, value: "206 → 312", status: pass}
+  - {label: tumor-arm tumor cells, value: "0 → 112", status: pass}
+  - {label: healthy fraction (tumor arm), value: "1.00 → 0.64", status: pass}
+runtime:
+  default_emitter: sqlite
+  subprocess_timeout_s: 1200
+enforced_params:
+  params:
+    interval: 0.01
+    division_crit: 2.0
+    shape_index: 3.6
+  source: >-
+    interval 0.01 applies to both arms; division_crit 2.0 and shape index 3.6 (solid
+    regime) are inherited by the tumor arm from the tumor-composite study (2026-06-17
+    reviewer settings: single central seed, time-step 0.01, shape index <= 3.6,
+    division crit_area 2.0).
+literature_anchors:
+- expectation: >-
+    A tumor-vs-healthy population competition drives a shift in composition — tumor
+    cells expand while the healthy fraction falls — when the coupling is active.
+  model_observable: tumor_count rising (0 -> 112) and healthy_fraction falling (1.00 -> 0.64)
+  source: Solís-Pérez et al. 2019 (BIOMD0000000903, breast-cancer competition ODE)
+  status_in_workspace: >-
+    Verified by the controlled contrast — the tumor arm diverges from the static
+    baseline (tumor 0->112, healthy_fraction 1.00->0.64); the baseline stays 100% healthy.
+- expectation: >-
+    A shape index ~3.6 places the sheet in the solid (rigid) regime, so the baseline
+    relaxes mechanically without spontaneous rearrangement or events.
+  model_observable: baseline total_count fixed at 206 with zero births/deaths
+  source: Bi et al. 2015 (shape-index rigidity transition); Farhadifar et al. 2007 (vertex-model mechanics)
+  status_in_workspace: >-
+    Enforced — the baseline arm holds at 206 healthy cells with no events; the tumor
+    arm's growth comes from the coupling, not the mechanics.
+model_change:
+  base_model: >-
+    vivarium_tyssue.composites.epithelium_2d — a mechanics-only flat 2D SheetGeometry
+    sheet (test_square, 206 cells) driven by the EulerSolver only.
+  new_processes:
+  - >-
+    TumorCoupling — the COPASI BIOMD0000000903 flux->cell-fate process that routes
+    population fluxes into cell_division and apoptosis_extrusion (topology_ops) via the
+    pandas-3-compatible tyssue fork. This is the only difference between the two arms.
+  modified_processes: []
+  new_parameters:
+  - single central tumor seed
+  - topology_ops (cell_division / apoptosis_extrusion enabled)
+  notes: >-
+    The tumor arm is the `tumor` composite shared from the sibling tumor-composite study,
+    so it inherits that composite's settings (interval 0.01, division_crit 2.0, shape
+    index 3.6). The baseline arm is the identical sheet with the coupling removed, making
+    the COPASI flux->cell-fate process the single controlled variable.
+implementation_requirements:
+- id: two-arm-runner
+  kind: data
+  title: Matched two-arm runner
+  effort: M
+  description: >-
+    Run both composites (tumor and epithelium_2d) for matched 150-step runs at interval
+    0.01 on the same flat sheet so any divergence is attributable to the coupling. DONE.
+- id: per-source-viz-selection
+  kind: listener
+  title: Per-source viz selection fix
+  effort: S
+  description: >-
+    Fixed a viz bug where both snapshot panels could show the same arm; the mesh viz now
+    select their simulation by source so baseline and tumor panels show the correct arm
+    (per the 2026-06-15 feedback). DONE.
+- id: shared-tumor-composite
+  kind: composite
+  title: Shared tumor-composite settings
+  effort: S
+  description: >-
+    The tumor arm reuses the `tumor` composite from the tumor-composite study (single
+    central seed, interval 0.01, division_crit 2.0, shape index 3.6), inheriting every
+    change from its 2026-06-17 review. DONE.
+design_pivot_required:
+- id: tumor-dose-response
+  status: open
+  question: >-
+    Should we run a dose-response sweep of the tumor-induction scale (or suppress a flux
+    as a "treatment") to chart healthy_fraction / clone radius vs the swept value?
+  alternatives:
+  - A. Sweep the induction scale on this clean two-arm substrate and chart the response.
+  - B. Keep the single tumor-vs-baseline contrast and defer the sweep.
+  requested_response: Whether the next study should run the dose-response sweep.
+- id: tumor-seeding-geometry
+  status: open
+  question: >-
+    Is the outgrowth geometry-dependent — does edge-vs-centre seeding change the
+    divergence, and what is the mechanical footprint of division-driven growth?
+  alternatives:
+  - A. Add an edge-seeded arm alongside the central seed to test geometry-dependence.
+  - B. Keep the single central seed as the canonical configuration.
+  requested_response: Whether to add edge-vs-centre seeding as a follow-up.
+- id: tumor-mechanical-vs-compositional
+  status: open
+  question: >-
+    Is the divergence partly mechanical (the tumor arm's extra cells alone deform the
+    sheet) rather than purely compositional?
+  alternatives:
+  - A. Compare baseline-vs-tumor cell-area distributions and tumor-margin stress to discriminate.
+  - B. Treat the divergence as compositional (cell-type driven) as currently framed.
+  requested_response: Expert opinion on whether the mechanical contribution needs isolating.
+# v4 section 3 — concrete run plan (replaces v3 baseline+conditions+variants; those stay
+# for back-compat). A two-arm controlled comparison: tumor vs mechanics-only baseline.
+simulation_set:
+- name: tumor
+  kind: single
+  status: completed
+  base_model: vivarium_tyssue.composites.tumor
+  duration_steps: 150
+  interval: 0.01
+  seeds: [0]
+  params:
+    topology_ops: true
+    seed: single central tumor cell
+    division_crit: 2.0
+    shape_index: 3.6
+  metrics: [total_count, tumor_count, healthy_fraction, tumor_births, healthy_deaths]
+  pass_fail_tests: [tumor_arm_diverges, tumor_arm_grows_tissue, healthy_fraction_gap]
+  description: >-
+    The COPASI BIOMD0000000903-coupled tumor arm — a single central tumor seed on the
+    flat test_square sheet with real topology (cell_division / apoptosis_extrusion).
+    Shares the `tumor` composite from the sibling tumor-composite study.
+- name: baseline
+  kind: single
+  status: completed
+  base_model: vivarium_tyssue.composites.epithelium_2d
+  duration_steps: 150
+  interval: 0.01
+  seeds: [0]
+  params:
+    topology_ops: false
+  metrics: [total_count, healthy_count, healthy_fraction]
+  pass_fail_tests: [baseline_stays_uniform]
+  description: >-
+    The mechanics-only baseline arm — the identical flat test_square sheet with the
+    coupling removed (EulerSolver only, no cell-fate events). The control.
+# v4 planned/executed runs. Both arms are completed (runs.db is the canonical source of
+# truth; the deprecated runs: field is intentionally omitted).
+planned_runs:
+- name: tumor
+  status: completed
+  composite: vivarium_tyssue.composites.tumor
+  n_steps: 150
+  seeds: [0]
+  details: >-
+    Single central tumor seed; the sheet grows 206->312 cells via 175 divisions (112
+    tumor, healthy fraction 0.64). All three tumor-arm tests pass. Run history in runs.db.
+- name: baseline
+  status: completed
+  composite: vivarium_tyssue.composites.epithelium_2d
+  n_steps: 150
+  seeds: [0]
+  details: >-
+    Mechanics-only control; stays fixed at 206 healthy cells with zero events.
+    baseline_stays_uniform passes. Run history in runs.db.

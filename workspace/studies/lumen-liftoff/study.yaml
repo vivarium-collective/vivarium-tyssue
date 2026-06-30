@@ -101,10 +101,10 @@ readouts:
 - {name: boundary_cell_z,  store_path: boundary_cell_z,  units: length}
 - {name: interior_cell_z,  store_path: interior_cell_z,  units: length}
 - {name: dome_height,      store_path: dome_height,      units: length}
-- {name: vert_df, store_path: Datasets/vert_df, description: mesh vertices (3D geometry)}
-- {name: edge_df, store_path: Datasets/edge_df, description: mesh edges (segment, src/tgt)}
-- {name: face_df, store_path: Datasets/face_df, description: apical/basal/lateral faces}
-- {name: cell_df, store_path: Datasets/cell_df, description: polyhedral cells (volume, z)}
+# The mesh dataframes (vert_df/edge_df/face_df/cell_df) are emitted to runs.db
+# Datasets/* and consumed by the TissueSheetGif/Snapshots viz directly; they are
+# whole-DataFrame stores, not canonical scalar selectors, so they are not listed
+# as readouts (which are evaluable observables for behavior_tests).
 visualizations:
 - name: Lift-off side profile
   address: local:TissueSheetGif
@@ -165,15 +165,24 @@ behavior_tests:
   question: Does the apical surface leave the plane?
   measure: {kind: last, path: apical_amplitude}
   pass_if: {op: gt, threshold: 1.0}
+  cites: [lecuit2007, martin2014]
   result: PASS
-  notes: apical_amplitude reaches ~2.3 by the last step (threshold 1.0).
+  notes: >-
+    apical_amplitude reaches ~2.3 by the last step (threshold 1.0). The band is a
+    qualitative lift-off threshold; the mechanism (differential apical tension /
+    apical constriction drives out-of-plane folding) is anchored to lecuit2007 and
+    martin2014.
 - name: interior_invaginates
   classification: quantitative
   question: Do interior cells sink below the boundary rim (dome/pit geometry)?
   measure: {kind: last, path: dome_height}
   pass_if: {op: lt, threshold: -0.5}
+  cites: [martin2014, lecuit2007]
   result: PASS
-  notes: dome_height reaches ~-1.5 (interior below rim) by the last step.
+  notes: >-
+    dome_height reaches ~-1.5 (interior below rim) by the last step. The invagination
+    geometry (interior of the contracting patch sinking relative to its rim) is the
+    canonical apical-constriction folding signature (martin2014, lecuit2007).
 findings:
 - id: F1
   kind: computational
@@ -383,4 +392,52 @@ key_assumptions:
   not calibrated to any measured tissue.
 - The mesh 'segment' labels (apical / basal / lateral) correctly identify the apical
   surface that the purse-string tension targets.
-runs: []
+# v4 section 3 — concrete run plan (replaces v3 baseline+variants; those stay for
+# back-compat). One canonical single-arm run; the flat control is a planned follow-up.
+simulation_set:
+- name: reference
+  kind: single
+  status: completed
+  base_model: vivarium_tyssue.composites.monolayer_liftoff
+  duration_steps: 100
+  interval: 0.1
+  seeds: [0]
+  params:
+    line_tension: {apical: 1.0, default: 0.0}
+    vol_elasticity: 1.0
+    face_contractility: 0.05
+    auto_reconnect: false
+  metrics: [apical_amplitude, apical_mean_z, dome_height]
+  pass_fail_tests: [apical_liftoff_occurs, interior_invaginates]
+  description: >-
+    Canonical 100-step relaxation (interval 0.1) of the 3D monolayer with an
+    apical-edge purse-string line tension; the only configuration evaluated.
+- name: flat-control
+  kind: single
+  status: planned
+  base_model: vivarium_tyssue.composites.monolayer_liftoff
+  duration_steps: 100
+  interval: 0.1
+  seeds: [0]
+  params:
+    line_tension: {apical: 0.0, default: 0.0}
+  description: >-
+    Planned negative control — apical line tension 0 — to confirm the lift-off is
+    tension-driven (tumor-vs-baseline-style contrast). Not yet run.
+# v4 planned/executed runs. The reference run is completed (runs.db is canonical
+# source of truth; the deprecated runs: field is intentionally omitted).
+planned_runs:
+- name: reference
+  status: completed
+  composite: vivarium_tyssue.composites.monolayer_liftoff
+  n_steps: 100
+  seeds: [0]
+  details: >-
+    Canonical apical-purse-string relaxation; both pre-registered tests pass
+    (apical_amplitude 0->~2.3, dome_height 0->~-1.5). Run history in runs.db.
+- name: flat-control
+  status: planned
+  composite: vivarium_tyssue.composites.monolayer_liftoff
+  n_steps: 100
+  seeds: [0]
+  details: Apical line tension 0 negative control to prove tension-drives-lift-off.
