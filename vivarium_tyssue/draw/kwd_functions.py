@@ -50,6 +50,25 @@ def crypt_cell_type_kwds(sheet, alpha=1.0):
     }
     return kwds
 
+def line_tension_edge_kwds(color_range=(-0.3, 0.3), colormap="coolwarm", width=1.5):
+    """Draw kwds that colour each edge by its current ``line_tension``.
+
+    ``color`` is a callable so tyssue's ``_parse_edge_specs`` re-evaluates it on
+    every frame — the only way to get per-frame edge colours out of the 2-D
+    ``create_gif`` (which, unlike ``create_gif_3d``, has no ``dynamic_draw_kwds``
+    hook). ``color_range`` fixes the tension->colour mapping across all frames so a
+    given colour always means the same tension.
+    """
+    return {
+        "edge": {
+            "visible": True,
+            "color": lambda sheet: sheet.edge_df["line_tension"].to_numpy(),
+            "colormap": colormap,
+            "color_range": color_range,
+            "width": width,
+        }
+    }
+
 if __name__ == "__main__":
     from vivarium_tyssue.models.crypt_gillespie.crypt_params import spatial_prob, assign_cell_types
     from tyssue import Sheet
