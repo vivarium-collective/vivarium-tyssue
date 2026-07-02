@@ -42,4 +42,4 @@ RUN uv sync --no-install-project || uv sync
 
 EXPOSE 9863
 
-CMD ["uv", "run", "vivarium-dashboard", "serve", "--workspace", "/app", "--host", "0.0.0.0", "--port", "9863"]
+CMD ["uv", "run", "vivarium-workbench", "serve", "--workspace", "/app", "--host", "0.0.0.0", "--port", "9863"]

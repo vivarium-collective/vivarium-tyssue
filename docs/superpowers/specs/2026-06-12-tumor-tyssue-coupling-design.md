@@ -130,7 +130,7 @@ Compare on four metrics (drive the verdict + charts):
 ## Plumbing
 
 - **Dependencies:** add `pbg-copasi` and `pbg-biomodels` to `pyproject.toml` as
-  `git+https` direct references (matching the existing `vivarium-dashboard` /
+  `git+https` direct references (matching the existing `vivarium-workbench` /
   `pbg-emitters` pattern); refresh `uv.lock`.
 - **Model caching:** fetch once via `pbg_biomodels.load_biomodel("BIOMD0000000903")`
   and commit the SBML to `workspace/datasets/BIOMD0000000903.xml` so runs are
