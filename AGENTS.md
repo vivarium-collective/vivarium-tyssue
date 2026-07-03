@@ -51,7 +51,7 @@ Two conventions:
    GitHub PR list.
 
 2. **Draft state** — open with `gh pr create --draft …` (or, when
-   creating from the vivarium-dashboard GitHub tab, the `draft=True`
+   creating from the vivarium-workbench GitHub tab, the `draft=True`
    default applies automatically). Draft signals "don't merge me" to
    both reviewers and to GitHub's auto-merge / branch-policy machinery.
 
