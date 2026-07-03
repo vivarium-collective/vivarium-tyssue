@@ -87,14 +87,6 @@ build-backend = "hatchling.build"
 [tool.uv]
 override-dependencies = [
     "vivarium-workbench @ git+https://github.com/vivarium-collective/vivarium-dashboard.git",
-    # Temporary bridge: pbg-biomodels (pulled only by the [fetch] extra) has NOT
-    # yet migrated to the new name and still declares a dependency on the old
-    # `vivarium-dashboard` dist with a broken local-path source. This override
-    # neutralizes that broken path source so `uv lock` resolves. The default
-    # install (no [fetch]) builds vivarium-workbench and never touches this entry.
-    # `uv sync --extra fetch` remains blocked until pbg-biomodels renames its dep
-    # to vivarium-workbench, at which point this line can be deleted.
-    "vivarium-dashboard @ git+https://github.com/vivarium-collective/vivarium-dashboard.git",
     "pbg-tellurium @ git+https://github.com/vivarium-collective/pbg-tellurium.git",
     "pbg-simbio @ git+https://github.com/vivarium-collective/pbg-simbio.git",
     "pbg-copasi @ git+https://github.com/vivarium-collective/pbg-copasi.git",
