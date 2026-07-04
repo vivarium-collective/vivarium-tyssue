@@ -1,0 +1,76 @@
+{
+  "models": [
+    {
+      "file": "anisotropic.json",
+      "slug": "anisotropic",
+      "name": "Anisotropic elongation",
+      "is3d": false,
+      "n_cells": 206,
+      "n_frames": 70
+    },
+    {
+      "file": "stochastic.json",
+      "slug": "stochastic",
+      "name": "Stochastic line tension",
+      "is3d": false,
+      "n_cells": 206,
+      "n_frames": 70
+    },
+    {
+      "file": "gradient.json",
+      "slug": "gradient",
+      "name": "Preferred-perimeter gradient",
+      "is3d": false,
+      "n_cells": 206,
+      "n_frames": 70
+    },
+    {
+      "file": "jamming.json",
+      "slug": "jamming",
+      "name": "Stochastic + jamming",
+      "is3d": false,
+      "n_cells": 206,
+      "n_frames": 70
+    },
+    {
+      "file": "epithelium_2d.json",
+      "slug": "epithelium_2d",
+      "name": "Baseline 2D relaxation",
+      "is3d": false,
+      "n_cells": 206,
+      "n_frames": 50
+    },
+    {
+      "file": "base_solver.json",
+      "slug": "base_solver",
+      "name": "Vessel relaxation (3D)",
+      "is3d": true,
+      "n_cells": 320,
+      "n_frames": 50
+    },
+    {
+      "file": "monolayer_liftoff.json",
+      "slug": "monolayer_liftoff",
+      "name": "Monolayer lift-off (3D)",
+      "is3d": true,
+      "n_cells": 1590,
+      "n_frames": 50
+    },
+    {
+      "file": "gillespie.json",
+      "slug": "gillespie",
+      "name": "Intestinal crypt (3D)",
+      "is3d": true,
+      "n_cells": 704,
+      "n_frames": 40
+    },
+    {
+      "file": "tumor.json",
+      "slug": "tumor",
+      "name": "Tumor growth (COPASI-coupled)",
+      "is3d": false,
+      "n_cells": 322,
+      "n_frames": 70
+    }
+  ]
+}
