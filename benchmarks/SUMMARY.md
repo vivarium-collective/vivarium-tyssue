@@ -6,9 +6,9 @@ Higher `cell·updates/s` = more cells feasible per unit time. Appended by
 
 | geometry | backend | cells | ms/update | updates/s | cell·updates/s | commit |
 |---|---|--:|--:|--:|--:|---|
-| monolayer | python | 1590 | 11.35 | 88 | 140,137 | `5a64e6e+dirty` |
-| sheet | python | 206 | 8.20 | 122 | 25,116 | `5a64e6e+dirty` |
-| sheet | rust | 206 | 3.55 | 282 | 58,098 | `5a64e6e+dirty` |
-| sheet-scan | python | 1482 | 11.19 | 89 | 132,390 | `e52e876` |
-| sheet-scan | rust | 1482 | 10.12 | 99 | 146,371 | `e52e876` |
-| vessel | python | 320 | 10.47 | 96 | 30,557 | `5a64e6e+dirty` |
+| monolayer | python | 1590 | 11.23 | 89 | 141,638 | `41ac2de+dirty` |
+| sheet | python | 206 | 8.11 | 123 | 25,410 | `41ac2de+dirty` |
+| sheet | rust | 206 | 3.39 | 295 | 60,718 | `41ac2de+dirty` |
+| sheet-scan | python | 1482 | 11.51 | 87 | 128,717 | `41ac2de+dirty` |
+| sheet-scan | rust | 1482 | 3.42 | 292 | 432,898 | `41ac2de+dirty` |
+| vessel | python | 320 | 10.05 | 100 | 31,835 | `41ac2de+dirty` |
