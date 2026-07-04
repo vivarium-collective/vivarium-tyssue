@@ -48,8 +48,15 @@ wired into `EulerSolver`. Add a new equivalence test alongside each new kernel.
 |---|---|---|
 | `edge_lengths(pos, srce, trgt)` | tyssue `update_length` | ✅ proven (1e-12) |
 | `scatter_add(values, index, n_vert)` | the two `groupby(...).sum()` in `compute_gradient` (edge→vertex assembly) | ✅ proven (1e-12) |
-| `update_geometry(...)` | `SheetGeometry.update_all` (centroid/area/perimeter/normals) | ⏳ next |
+| `update_geometry(pos, srce, trgt, face, n_face)` | `SheetGeometry.update_all` stateless core: dcoords/length/centroid/normals/area/perimeter | ✅ proven (~1e-15, **~20×**; Sheet + Vessel — see note) |
 | `assemble_gradient(...)` | per-effector kernels + assembly | ⏳ next |
+
+**Geometry-kernel scope:** `update_geometry` implements the `SheetGeometry`
+formula, which `VesselGeometry` inherits unchanged (both match to ~1e-15). It
+excludes `update_ucoords` (divides by the *stale* previous-step length —
+stateful) and `update_vol` (geometry-specific vertex heights); those stay in
+Python. `MonolayerGeometry`/`BulkGeometry` redefine centroid/area/normals and
+need their own kernel — the equivalence test excludes them on purpose.
 
 `srce`/`trgt`/`index` are **positional** vertex indices (0..Nv-1), remapped from
 tyssue's DataFrame index by the caller; positions are C-contiguous `(Nv, dim)`

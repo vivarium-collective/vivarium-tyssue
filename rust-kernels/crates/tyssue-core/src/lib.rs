@@ -49,6 +49,121 @@ pub fn scatter_add(values: &[f64], index: &[u32], n_vert: usize, dim: usize) -> 
     out
 }
 
+/// Full per-step geometry update for a 3D sheet — the stateless core of
+/// tyssue's `SheetGeometry.update_all`, in one pass over the edges.
+///
+/// Reproduces, with identical formulas and order:
+///   * `update_dcoords`  — edge vectors `d = pos[trgt] - pos[srce]`
+///   * `update_length`   — `||d||`
+///   * `update_centroid` — face centroid = mean of source-vertex positions
+///                         over the face's edges; and `r = srce_pos - centroid`
+///   * `update_normals`  — `cross(r, d)` per edge (3D only)
+///   * `update_areas`    — `sub_area = ||normal|| / 2`, `area = Σ sub_area`
+///   * `update_perimeters` — `perimeter = Σ length`
+///
+/// Deliberately excludes `update_ucoords` (divides by the *stale* length from
+/// the previous update — stateful) and `update_vol` (needs geometry-specific
+/// vertex heights). Those stay in Python for now.
+///
+/// `face` is the positional face index (0..n_face) of each edge. `dim` must be
+/// 3 (all demo meshes are 3D sheets/monolayers).
+pub struct Geometry {
+    pub dcoords: Vec<f64>,   // (n_edge, dim)
+    pub length: Vec<f64>,    // (n_edge,)
+    pub centroid: Vec<f64>,  // (n_face, dim)
+    pub rcoords: Vec<f64>,   // (n_edge, dim)  srce_pos - face_centroid
+    pub normals: Vec<f64>,   // (n_edge, 3)
+    pub sub_area: Vec<f64>,  // (n_edge,)
+    pub area: Vec<f64>,      // (n_face,)
+    pub perimeter: Vec<f64>, // (n_face,)
+}
+
+pub fn update_geometry(
+    pos: &[f64],
+    srce: &[u32],
+    trgt: &[u32],
+    face: &[u32],
+    n_face: usize,
+    dim: usize,
+) -> Geometry {
+    assert_eq!(dim, 3, "update_geometry currently supports 3D meshes only");
+    let ne = srce.len();
+
+    let mut dcoords = vec![0.0f64; ne * dim];
+    let mut length = vec![0.0f64; ne];
+    let mut centroid = vec![0.0f64; n_face * dim];
+    let mut rcoords = vec![0.0f64; ne * dim];
+    let mut normals = vec![0.0f64; ne * 3];
+    let mut sub_area = vec![0.0f64; ne];
+    let mut area = vec![0.0f64; n_face];
+    let mut perimeter = vec![0.0f64; n_face];
+    let mut face_count = vec![0u32; n_face];
+
+    // Pass 1: edge vectors + lengths; accumulate face centroid = mean of srce pos.
+    for e in 0..ne {
+        let s = srce[e] as usize * dim;
+        let t = trgt[e] as usize * dim;
+        let f = face[e] as usize;
+        let eo = e * dim;
+        let mut acc = 0.0f64;
+        for d in 0..dim {
+            let delta = pos[t + d] - pos[s + d];
+            dcoords[eo + d] = delta;
+            acc += delta * delta;
+            centroid[f * dim + d] += pos[s + d];
+        }
+        length[e] = acc.sqrt();
+        face_count[f] += 1;
+    }
+    for f in 0..n_face {
+        let c = face_count[f];
+        if c > 0 {
+            let inv = 1.0 / c as f64;
+            for d in 0..dim {
+                centroid[f * dim + d] *= inv;
+            }
+        }
+    }
+
+    // Pass 2: r = srce - centroid; normal = cross(r, d); sub_area; reduce to face.
+    for e in 0..ne {
+        let s = srce[e] as usize * dim;
+        let f = face[e] as usize;
+        let eo = e * dim;
+        let rx = pos[s] - centroid[f * dim];
+        let ry = pos[s + 1] - centroid[f * dim + 1];
+        let rz = pos[s + 2] - centroid[f * dim + 2];
+        rcoords[eo] = rx;
+        rcoords[eo + 1] = ry;
+        rcoords[eo + 2] = rz;
+        let dx = dcoords[eo];
+        let dy = dcoords[eo + 1];
+        let dz = dcoords[eo + 2];
+        // cross(r, d)
+        let nx = ry * dz - rz * dy;
+        let ny = rz * dx - rx * dz;
+        let nz = rx * dy - ry * dx;
+        normals[eo] = nx;
+        normals[eo + 1] = ny;
+        normals[eo + 2] = nz;
+        let sa = (nx * nx + ny * ny + nz * nz).sqrt() / 2.0;
+        sub_area[e] = sa;
+        area[f] += sa;
+        perimeter[f] += length[e];
+    }
+
+    Geometry {
+        dcoords,
+        length,
+        centroid,
+        rcoords,
+        normals,
+        sub_area,
+        area,
+        perimeter,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -67,5 +182,18 @@ mod tests {
         let values = [1.0, 2.0, 10.0, 20.0];
         let out = scatter_add(&values, &[1, 1], 3, 2);
         assert_eq!(out, vec![0.0, 0.0, 11.0, 22.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn geometry_unit_triangle() {
+        // unit right triangle as one face of 3 half-edges
+        let pos = [0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+        let g = update_geometry(&pos, &[0, 1, 2], &[1, 2, 0], &[0, 0, 0], 1, 3);
+        assert!((g.area[0] - 0.5).abs() < 1e-12, "area={}", g.area[0]);
+        assert!((g.perimeter[0] - (2.0 + 2.0f64.sqrt())).abs() < 1e-12);
+        // centroid = mean of the three source vertices
+        assert!((g.centroid[0] - 1.0 / 3.0).abs() < 1e-12);
+        assert!((g.centroid[1] - 1.0 / 3.0).abs() < 1e-12);
+        assert!((g.length[0] - 1.0).abs() < 1e-12);
     }
 }

@@ -27,6 +27,11 @@ MESHES = [
     ("monolayer_box.hf5", "Monolayer", "MonolayerGeometry"),  # 3D monolayer
 ]
 
+# The full-geometry kernel implements the SheetGeometry formula, which
+# VesselGeometry inherits unchanged. MonolayerGeometry (a BulkGeometry) redefines
+# centroid/area/normals, so it needs its own kernel — excluded here on purpose.
+SHEET_MESHES = [m for m in MESHES if m[2] in ("SheetGeometry", "VesselGeometry")]
+
 
 def _load_eptm(mesh, tissue, geom_key):
     """Build + update a demo epithelium exactly as ``EulerSolver.initialize`` does."""
@@ -92,3 +97,40 @@ def test_scatter_add_matches_numpy(mesh, tissue, geom):
     assert np.allclose(got, ref, atol=1e-12, rtol=0.0), (
         f"{mesh}: max|Δ|={np.max(np.abs(got - ref)):.3e}"
     )
+
+
+@pytest.mark.parametrize("mesh,tissue,geom", SHEET_MESHES, ids=lambda x: x if isinstance(x, str) else "")
+def test_update_geometry_matches_tyssue(mesh, tissue, geom):
+    """Rust ``update_geometry`` == ``SheetGeometry.update_all`` output columns.
+
+    Compares every derived quantity (edge vectors, lengths, face centroids,
+    r-vectors, edge normals, sub-areas, face areas, perimeters) against the
+    values tyssue itself wrote into edge_df/face_df. atol=1e-10 is comfortably
+    above the observed ~1e-15 to absorb platform FP variance.
+    """
+    k = pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    eptm = _load_eptm(mesh, tissue, geom)
+    coords = eptm.coords
+    dim = len(coords)
+    pos, srce, trgt, _ = _positional_edges(eptm)
+    fmap = {v: i for i, v in enumerate(eptm.face_df.index)}
+    face = np.ascontiguousarray(eptm.edge_df["face"].map(fmap).values, dtype=np.uint32)
+
+    g = k.update_geometry(pos, srce, trgt, face, eptm.Nf)
+
+    def close(name, got, ref):
+        got = np.asarray(got).ravel()
+        ref = np.asarray(ref, dtype=np.float64).ravel()
+        assert got.shape == ref.shape, f"{name}: shape {got.shape} != {ref.shape}"
+        assert np.allclose(got, ref, atol=1e-10, rtol=0.0), (
+            f"{mesh} {name}: max|Δ|={np.max(np.abs(got - ref)):.3e}"
+        )
+
+    close("length", g["length"], eptm.edge_df["length"].values)
+    close("sub_area", g["sub_area"], eptm.edge_df["sub_area"].values)
+    close("area", g["area"], eptm.face_df["area"].values)
+    close("perimeter", g["perimeter"], eptm.face_df["perimeter"].values)
+    close("dcoords", g["dcoords"], eptm.edge_df[["d" + c for c in coords]].values)
+    close("rcoords", g["rcoords"], eptm.edge_df[["r" + c for c in coords]].values)
+    close("normals", g["normals"], eptm.edge_df[eptm.ncoords].values)
+    close("centroid", g["centroid"], eptm.face_df[coords].values)
