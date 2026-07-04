@@ -336,3 +336,60 @@ def test_supported_composites_run_on_rust(composite):
     # base_solver (vessel) engages geometry + the vessel gradient; sheets both.
     assert proc._rust_gradient is True, f"{composite} did not engage the rust gradient"
     assert proc._rust_geometry is True, f"{composite} did not engage rust geometry"
+
+
+def _build_proc(composite, substeps, interval):
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from pbg_superpowers.composite_spec import build_composite_from_spec, load_spec
+    from vivarium_tyssue.core import build_core
+    spec = load_spec(ROOT / "vivarium_tyssue" / "composites" / f"{composite}.composite.yaml")
+    spec["emitters"] = []
+    spec["state"]["Tyssue"]["config"]["backend"] = "rust"
+    spec["state"]["Tyssue"]["config"]["substeps"] = substeps
+    comp = build_composite_from_spec(spec, overrides={"interval": interval}, core=build_core())
+    return comp.state["Tyssue"]["instance"]
+
+
+def test_native_substeps_match_single_steps():
+    """Phase B: N native substeps in one update(interval) == N single-step updates
+    at dt=interval/N, sampled at the end — the DataFrames are just materialized
+    once instead of per step. Bit-identical (machine eps), not merely close."""
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    import contextlib, io
+
+    N, T = 10, 0.1
+    fine = _build_proc("anisotropic", substeps=1, interval=T / N)
+    coarse = _build_proc("anisotropic", substeps=N, interval=T)
+    assert coarse._native_substeps is True and coarse._substeps == N
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        for i in range(N):
+            fine.update({"behaviors": [], "global_time": i * T / N}, T / N)
+        coarse.update({"behaviors": [], "global_time": 0.0}, T)
+
+    for frame, col in (("vert_df", None), ("face_df", "area"), ("edge_df", "length")):
+        a = getattr(fine.eptm, frame)
+        b = getattr(coarse.eptm, frame)
+        va = a[fine.eptm.coords].values if col is None else a[col].values
+        vb = b[coarse.eptm.coords].values if col is None else b[col].values
+        assert np.allclose(va, vb, atol=1e-11, rtol=0.0), (
+            f"{frame}{'' if col is None else '.'+col} diverged: "
+            f"max|Δ|={np.max(np.abs(va - vb)):.3e}"
+        )
+
+
+def test_to_dataframes_materializes_and_returns_eptm():
+    """The public converter returns the epithelium with geometry frames current."""
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    import contextlib, io
+
+    proc = _build_proc("anisotropic", substeps=5, interval=0.05)
+    with contextlib.redirect_stdout(io.StringIO()):
+        proc.update({"behaviors": [], "global_time": 0.0}, 0.05)
+    eptm = proc.to_dataframes()
+    assert eptm is proc.eptm
+    # face area equals the native stash it was materialized from
+    assert np.allclose(eptm.face_df["area"].values, proc._geom_stash["area"], atol=0, rtol=0)

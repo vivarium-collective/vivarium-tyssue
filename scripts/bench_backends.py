@@ -39,6 +39,13 @@ CONFIGS = [
     ("monolayer", "monolayer_liftoff", ["python"]),      # MonolayerGeometry / bulk (rust N/A)
 ]
 
+# Phase B native sub-stepping: integrate N solver steps per update(), DataFrames
+# materialized once. Metric is per-*solver-step* cost, so it's comparable to the
+# substeps=1 rows above (fold in the ~N× fewer materializations).
+SUBSTEP_CONFIGS = [
+    ("sheet-substep", "anisotropic", 10),
+]
+
 
 def git_commit():
     """Short HEAD hash, marked +dirty only if *code* (not the benchmark's own
@@ -53,31 +60,38 @@ def git_commit():
         return "unknown"
 
 
-def bench_one(composite, backend, interval, warmup, updates):
+def bench_one(composite, backend, interval, warmup, updates, substeps=1):
     from pbg_superpowers.composite_spec import build_composite_from_spec, load_spec
     from vivarium_tyssue.core import build_core
 
     spec = load_spec(ROOT / "vivarium_tyssue" / "composites" / f"{composite}.composite.yaml")
     spec["emitters"] = []
     spec["state"]["Tyssue"]["config"]["backend"] = backend
-    comp = build_composite_from_spec(spec, overrides={"interval": interval}, core=build_core())
+    spec["state"]["Tyssue"]["config"]["substeps"] = substeps
+    # per-update interval integrates `substeps` solver steps of size `interval`
+    comp = build_composite_from_spec(spec, overrides={"interval": interval * substeps}, core=build_core())
     proc = comp.state["Tyssue"]["instance"]
     if backend == "rust" and not (getattr(proc, "_rust_gradient", False) or getattr(proc, "_rust_geometry", False)):
         return None  # kernel not built or model unsupported — skip, don't fake it
+    if substeps > 1 and not getattr(proc, "_native_substeps", False):
+        return None  # native sub-stepping didn't engage — don't report a fake win
     eptm = proc.eptm
+    upd_interval = interval * substeps
     times = []
     with contextlib.redirect_stdout(io.StringIO()):
         for i in range(warmup):
-            proc.update({"behaviors": [], "global_time": i * interval}, interval)
+            proc.update({"behaviors": [], "global_time": i * upd_interval}, upd_interval)
         for i in range(updates):
             t = time.perf_counter()
-            proc.update({"behaviors": [], "global_time": (warmup + i) * interval}, interval)
+            proc.update({"behaviors": [], "global_time": (warmup + i) * upd_interval}, upd_interval)
             times.append(time.perf_counter() - t)
-    ms = statistics.median(times) * 1e3
+    # normalize to per-solver-step so substeps rows compare against substeps=1
+    ms = statistics.median(times) * 1e3 / substeps
     return {
         "cells": int(eptm.Nf),
         "verts": int(eptm.Nv),
         "edges": int(eptm.Ne),
+        "substeps": substeps,
         "per_update_ms": round(ms, 4),
         "updates_per_sec": round(1000 / ms, 1),
         "cell_updates_per_sec": round(eptm.Nf * 1000 / ms),
@@ -268,6 +282,29 @@ def main():
             print(f"{geometry:10s} {backend:7s} {res['cells']:>6d} {res['per_update_ms']:>8.3f} "
                   f"{res['updates_per_sec']:>7.0f} {res['cell_updates_per_sec']:>12,d}  {delta}")
             new_records.append(rec)
+
+    # Phase B native sub-stepping (rust only): per-solver-step cost with the
+    # DataFrames materialized once per `substeps` steps instead of every step.
+    for geometry, composite, substeps in SUBSTEP_CONFIGS:
+        try:
+            res = bench_one(composite, "rust", args.interval, args.warmup, args.updates, substeps=substeps)
+        except Exception as e:
+            print(f"{geometry:10s} {'rust':7s}  ERROR: {type(e).__name__}: {str(e)[:50]}")
+            continue
+        if res is None:
+            print(f"{geometry:10s} {'rust':7s}  (native sub-stepping unavailable — skipped)")
+            continue
+        rec = {"commit": commit, "label": args.label, "geometry": geometry,
+               "backend": "rust", "composite": composite, **res}
+        prev = last_for(prior, commit, geometry, "rust")
+        if prev:
+            d = (prev["per_update_ms"] - res["per_update_ms"]) / prev["per_update_ms"] * 100
+            delta = f"{d:+.0f}% faster" if d >= 0 else f"{-d:+.0f}% slower"
+        else:
+            delta = "(first record)"
+        print(f"{geometry:10s} {'rust':7s} {res['cells']:>6d} {res['per_update_ms']:>8.3f} "
+              f"{res['updates_per_sec']:>7.0f} {res['cell_updates_per_sec']:>12,d}  {delta} (substeps={substeps}, /step)")
+        new_records.append(rec)
 
     if not args.no_write and new_records:
         with RESULTS.open("a") as f:

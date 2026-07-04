@@ -14,12 +14,15 @@ from vivarium_tyssue.maps import *
 from vivarium_tyssue.core_maps import GEOMETRY_MAP
 from vivarium_tyssue.processes.utils import (
     SUPPORTED_EFFECTORS,
+    compute_geometry,
     geometry_supported,
     gradient_supported,
     has_vessel_effector,
+    materialize_geometry,
     rust_geometry_update,
     rust_sheet_gradient,
 )
+import numpy as np
 
 from tyssue.behaviors.event_manager import EventManager
 from tyssue.behaviors.sheet.basic_events import reconnect
@@ -66,6 +69,10 @@ class EulerSolver(Process):
         "backend": "string", # "python" (default) or "rust": route compute_gradient
                              # through the tyssue_kernels sheet_gradient kernel when
                              # the model is supported; falls back to python otherwise.
+        "substeps": "integer", # >1 integrates this many native Euler steps of
+                               # dt=interval/substeps per update(), materializing
+                               # the DataFrames only once at the end (rust sheet
+                               # models). Default 1 = one step, bit-identical.
     }
 
     def initialize(self, config):
@@ -124,6 +131,11 @@ class EulerSolver(Process):
         self._active_full = False  # every vertex active & in order -> fast pos I/O
         self._geom_stash = None  # geometry arrays from the last rust set_pos, fed
         # straight to the next gradient (skips re-reading them from pandas)
+        self._substeps = max(1, int(config.get("substeps") or 1))
+        # Native multi-substep integration (DataFrames materialized once per
+        # update instead of per step) needs both rust halves and a plain sheet
+        # model — the vessel term reads position-derived vertex columns we don't
+        # refresh mid-loop, so vessel/python fall back to per-step materializing.
         if self._backend == "rust":
             self._rust_geometry = geometry_supported(self.geom.__name__, self.eptm.dim)
             if gradient_supported(config["effectors"], config["factory"], self.eptm.dim):
@@ -137,6 +149,14 @@ class EulerSolver(Process):
                     f"{sorted(SUPPORTED_EFFECTORS)}, a supported factory, a 3D mesh, "
                     "and the compiled tyssue_kernels module) — falling back to Python."
                 )
+        self._native_substeps = (
+            self._rust_gradient and self._rust_geometry and not self._with_vessel
+        )
+        if self._substeps > 1 and not self._native_substeps:
+            warnings.warn(
+                "substeps>1 needs the rust sheet backend (geometry+gradient, "
+                "non-vessel); integrating one step per update instead."
+            )
         # Normalize any StringDtype columns from parameter assignment (pandas 3.0).
         self._coerce_string_columns()
 
@@ -243,6 +263,49 @@ class EulerSolver(Process):
             eptm, self.geom, srce, trgt, face, pos=kernel_pos
         )
 
+    def _integrate_native(self, interval, substeps):
+        """Integrate ``substeps`` explicit-Euler steps of ``dt = interval/substeps``
+        entirely in native arrays, touching the DataFrames only once at the end.
+
+        Bit-identical to running ``substeps`` single-step updates at ``dt`` and
+        sampling the last — the intermediate states simply aren't materialized.
+        Sheet (non-vessel) rust models only (see ``_native_substeps``)."""
+        eptm = self.eptm
+        coords = eptm.coords
+        srce, trgt, face, active_pos = self._topo_arrays()
+        dt = interval / substeps
+        vpos = np.ascontiguousarray(eptm.vert_df[coords].values, dtype=np.float64)
+        visc = eptm.vert_df["viscosity"].values[active_pos][:, None]
+        geom = self._geom_stash
+        if geom is None:  # first update: seed geometry from the current frame
+            old_len = eptm.edge_df["length"].values.copy()
+            geom = compute_geometry(eptm, srce, trgt, face, vpos, old_len)
+        topo = (srce, trgt, face)
+        for _ in range(substeps):
+            grad = rust_sheet_gradient(eptm, self._is_bound, False, topo=topo, geom=geom)
+            dot_r = -grad[active_pos] / visc
+            if self.bounds is not None:
+                dot_r = np.clip(dot_r, *self.bounds)
+            vpos[active_pos] += dot_r * dt
+            geom = compute_geometry(eptm, srce, trgt, face, vpos, geom["length"])
+        # Single materialization at the interface (positions + geometry frames).
+        if self._active_full:
+            eptm.vert_df[coords] = vpos
+        else:
+            eptm.vert_df.loc[eptm.active_verts, coords] = vpos[active_pos]
+        materialize_geometry(eptm, geom, which=("edge", "face"))
+        self._geom_stash = geom
+
+    def to_dataframes(self, which=("edge", "face")):
+        """Materialize the current native geometry into the epithelium DataFrames
+        and return the epithelium. Public "convert only where you need it" hook:
+        after a native run the frames hold positions + the last geometry already,
+        but call this any time to force a fresh conversion (e.g. for inspection).
+        No-op geometry write on the python backend (frames are always current)."""
+        if self._geom_stash is not None:
+            materialize_geometry(self.eptm, self._geom_stash, which=which)
+        return self.eptm
+
     def ode_func(self):
         """Computes the models' gradient.
         Returns
@@ -320,12 +383,16 @@ class EulerSolver(Process):
                     self.manager.append(func, **kwargs)
             behavior_update = {"_remove": "all"}
 
-        pos = self.current_pos
-        dot_r = self.ode_func()
-        if self.bounds is not None:
-            dot_r = np.clip(dot_r, *self.bounds)
-        pos = pos + dot_r * interval
-        self.set_pos(pos)
+        if self._native_substeps and self._substeps > 1:
+            # Many native Euler steps per update; DataFrames materialized once.
+            self._integrate_native(interval, self._substeps)
+        else:
+            pos = self.current_pos
+            dot_r = self.ode_func()
+            if self.bounds is not None:
+                dot_r = np.clip(dot_r, *self.bounds)
+            pos = pos + dot_r * interval
+            self.set_pos(pos)
 
         if self.manager is not None:
             self.manager.execute(self.eptm)

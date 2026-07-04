@@ -78,70 +78,91 @@ def rust_geometry_update(eptm, geom, srce, trgt, face, pos=None):
     return stash
 
 
-def rust_update_geometry(eptm, srce, trgt, face, pos=None):
-    """In-place replacement for ``SheetGeometry.update_all`` via the Rust kernel.
+def compute_geometry(eptm, srce, trgt, face, pos, old_len):
+    """Pure-native geometry compute via the Rust kernel — writes **no** DataFrames.
 
-    Reproduces every column update_all writes — edge s*/t*/d*/u*/length/f*/r*/
-    normals/sub_area/sub_vol and face centroid/area/perimeter/vol — bit-identical
-    (~1e-15), including tyssue's stale-length ``ucoords`` quirk (ucoords uses the
-    *previous* step's length). Does NOT recompute the boundary index / opposite
-    edges: those are topology-invariant, so the caller refreshes them only on a
-    topology change (a full python update_all after division/reconnect).
+    Returns a ``geom`` dict of every array ``SheetGeometry.update_all`` would put
+    in the edge/face frames (scoords/tcoords/dcoords/ucoords/length/centroid/
+    fcoords/rcoords/normals/sub_area/area/perimeter), bit-identical (~1e-15),
+    including tyssue's stale-length ``ucoords`` quirk — hence ``old_len`` (the
+    *previous* step's edge length) is passed explicitly rather than read from the
+    frame, so a native sub-step loop can chain steps without touching pandas.
 
-    ``srce``/``trgt``/``face`` are positional index arrays for the current
-    topology (rebuild them when the mesh changes).
+    ``pos`` is the full ``(Nv, dim)`` vertex-position array in index order;
+    ``srce``/``trgt``/``face`` are positional index arrays for the topology. The
+    returned dict is also exactly what ``rust_sheet_gradient(geom=...)`` consumes.
     """
     import tyssue_kernels as tk
 
-    coords = eptm.coords
-    ed, fd = eptm.edge_df, eptm.face_df
-    if pos is None:
-        pos = np.ascontiguousarray(eptm.vert_df[coords].values, dtype=np.float64)
-    else:
-        pos = np.ascontiguousarray(pos, dtype=np.float64)
-    old_len = ed["length"].values.copy()  # stale length feeds ucoords, as in update_all
+    pos = np.ascontiguousarray(pos, dtype=np.float64)
     g = tk.update_geometry(pos, srce, trgt, face, eptm.Nf)
     d = np.asarray(g["dcoords"]).reshape(-1, 3)
     cen = np.asarray(g["centroid"]).reshape(-1, 3)
-
-    tcoords = pos[trgt]
-    ucoords = d / old_len[:, None]
-    fcoords = cen[face]
-    rcoords = np.asarray(g["rcoords"]).reshape(-1, 3)
-    normals = np.asarray(g["normals"]).reshape(-1, 3)
-    sub_area = np.asarray(g["sub_area"])
-    area = np.asarray(g["area"])
-    perimeter = np.asarray(g["perimeter"])
-
-    ed[["s" + c for c in coords]] = pos[srce]
-    ed[["t" + c for c in coords]] = tcoords
-    ed[["d" + c for c in coords]] = d
-    ed[["u" + c for c in coords]] = ucoords
-    ed["length"] = np.asarray(g["length"])
-    fd[coords] = cen
-    ed[["f" + c for c in coords]] = fcoords
-    ed[["r" + c for c in coords]] = rcoords
-    ed[eptm.ncoords] = normals
-    ed["sub_area"] = sub_area
-    fd["area"] = area
-    fd["perimeter"] = perimeter
-    if "height" in eptm.vert_df.columns:
-        ed["sub_vol"] = eptm.upcast_srce(eptm.vert_df["height"]) * ed["sub_area"]
-        fd["vol"] = eptm.sum_face(ed["sub_vol"])
-
-    # Hand the gradient the geometry arrays we just computed, so it need not
-    # re-read these (Ne×3) coordinate blocks back out of pandas next step. These
-    # are the *same* float64 arrays written above -> bit-identical to re-reading.
     return {
-        "ucoords": ucoords,
-        "normals": normals,
-        "sub_area": sub_area,
-        "rcoords": rcoords,
-        "tcoords": tcoords,
-        "fcoords": fcoords,
-        "area": area,
-        "perimeter": perimeter,
+        "scoords": pos[srce],
+        "tcoords": pos[trgt],
+        "dcoords": d,
+        "ucoords": d / old_len[:, None],
+        "length": np.asarray(g["length"]),
+        "centroid": cen,
+        "fcoords": cen[face],
+        "rcoords": np.asarray(g["rcoords"]).reshape(-1, 3),
+        "normals": np.asarray(g["normals"]).reshape(-1, 3),
+        "sub_area": np.asarray(g["sub_area"]),
+        "area": np.asarray(g["area"]),
+        "perimeter": np.asarray(g["perimeter"]),
     }
+
+
+def materialize_geometry(eptm, geom, which=("edge", "face")):
+    """Modular converter: write native geometry arrays (from ``compute_geometry``)
+    back into the epithelium's tyssue DataFrames — the single place the Rust path
+    touches pandas for geometry.
+
+    This is the user-facing "convert to DataFrames only where it matters" hook:
+    the native integration keeps ``geom`` in arrays and calls this only at an
+    interface (emit, inspection, before behaviours that read the frames). ``which``
+    selects which frames to write (``"edge"``, ``"face"``); the result is
+    bit-identical to ``SheetGeometry.update_all``'s column writes.
+    """
+    coords = eptm.coords
+    ed, fd = eptm.edge_df, eptm.face_df
+    if "edge" in which:
+        ed[["s" + c for c in coords]] = geom["scoords"]
+        ed[["t" + c for c in coords]] = geom["tcoords"]
+        ed[["d" + c for c in coords]] = geom["dcoords"]
+        ed[["u" + c for c in coords]] = geom["ucoords"]
+        ed["length"] = geom["length"]
+        ed[["f" + c for c in coords]] = geom["fcoords"]
+        ed[["r" + c for c in coords]] = geom["rcoords"]
+        ed[eptm.ncoords] = geom["normals"]
+        ed["sub_area"] = geom["sub_area"]
+    if "face" in which:
+        fd[coords] = geom["centroid"]
+        fd["area"] = geom["area"]
+        fd["perimeter"] = geom["perimeter"]
+    if "height" in eptm.vert_df.columns and "edge" in which:
+        ed["sub_vol"] = eptm.upcast_srce(eptm.vert_df["height"]) * ed["sub_area"]
+        if "face" in which:
+            fd["vol"] = eptm.sum_face(ed["sub_vol"])
+
+
+def rust_update_geometry(eptm, srce, trgt, face, pos=None):
+    """In-place replacement for ``SheetGeometry.update_all`` via the Rust kernel:
+    ``compute_geometry`` then ``materialize_geometry`` (both edge and face frames).
+
+    Reproduces every column update_all writes, bit-identical (~1e-15). Does NOT
+    recompute the boundary index / opposite edges — topology-invariant, refreshed
+    by the caller only on a topology change. Returns the ``geom`` dict so the
+    caller can feed it straight to ``rust_sheet_gradient`` (skips re-reading the
+    Ne×3 coordinate blocks from pandas)."""
+    coords = eptm.coords
+    if pos is None:
+        pos = eptm.vert_df[coords].values
+    old_len = eptm.edge_df["length"].values.copy()  # stale length feeds ucoords
+    geom = compute_geometry(eptm, srce, trgt, face, pos, old_len)
+    materialize_geometry(eptm, geom, which=("edge", "face"))
+    return geom
 
 
 def rust_sheet_gradient(eptm, is_bound, with_vessel=False, topo=None, geom=None):
