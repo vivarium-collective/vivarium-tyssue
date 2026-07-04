@@ -20,7 +20,6 @@ from vivarium_tyssue.processes.utils import (
 
 from tyssue.behaviors.event_manager import EventManager
 from tyssue.behaviors.sheet.basic_events import reconnect
-from tyssue.core.history import History
 from tyssue.io.hdf5 import load_datasets
 from tyssue import config
 
@@ -80,7 +79,6 @@ class EulerSolver(Process):
         self.geom.update_all(self.eptm)
         effectors = [self.maps["EFFECTORS_MAP"][effector] for effector in config["effectors"]]
         self.model = self.maps["FACTORY_MAP"][config["factory"]](effectors, self.maps["EFFECTORS_MAP"][config["ref_effector"]])
-        self.history = History(self.eptm)
         if len(config["parameters"]) > 0:
             for dataframe, parameters in config["parameters"].items():
                 df = getattr(self.eptm, dataframe)
@@ -193,9 +191,6 @@ class EulerSolver(Process):
         """Updates the eptm vertices position"""
         return self._set_pos(self.eptm, self.geom, pos)
 
-    def record(self, t):
-        self.history.record(time_stamp=t)
-
     def ode_func(self):
         """Computes the models' gradient.
         Returns
@@ -220,24 +215,33 @@ class EulerSolver(Process):
             "global_time": "float",
         }
 
+    def _frame_schema_cached(self, name, df):
+        """``get_frame_schema`` re-introspects every column each call, and the
+        engine invokes ``outputs()`` on every process update — but the schema
+        only changes when a df's columns or dtypes change (division adds columns,
+        StringDtype coercion changes dtypes). Cache on a cheap (name, dtype)
+        signature and recompute only when it actually changes."""
+        sig = tuple(zip(map(str, df.columns), map(str, df.dtypes)))
+        cache = getattr(self, "_schema_cache", None)
+        if cache is None:
+            cache = self._schema_cache = {}
+        hit = cache.get(name)
+        if hit is None or hit[0] != sig:
+            cache[name] = (sig, get_frame_schema(df))
+        return cache[name][1]
+
     def outputs(self):
         datasets = {
             "_type": "tyssue_data",
-            "vert_df": {
-                "_columns": get_frame_schema(self.eptm.vert_df)
-            },
-            "edge_df": {
-                "_columns": get_frame_schema(self.eptm.edge_df)
-            },
-            "face_df": {
-                "_columns": get_frame_schema(self.eptm.face_df)
-            },
+            "vert_df": {"_columns": self._frame_schema_cached("vert_df", self.eptm.vert_df)},
+            "edge_df": {"_columns": self._frame_schema_cached("edge_df", self.eptm.edge_df)},
+            "face_df": {"_columns": self._frame_schema_cached("face_df", self.eptm.face_df)},
         }
         # cell_df is None for a 2D Sheet but a (non-empty) DataFrame for a 3D
         # Monolayer — test explicitly, since `if df:` is ambiguous on a frame.
         cell_df = getattr(self.eptm, "cell_df", None)
         if cell_df is not None and len(cell_df) > 0:
-            datasets["cell_df"] = {"_columns": get_frame_schema(cell_df)}
+            datasets["cell_df"] = {"_columns": self._frame_schema_cached("cell_df", cell_df)}
         else:
             datasets["cell_df"] = {}
         return {
@@ -247,7 +251,7 @@ class EulerSolver(Process):
         }
 
     def update(self, inputs, interval):
-        print(inputs["global_time"])
+        log.debug("EulerSolver step t=%s", inputs["global_time"])
         behavior_update = []
         if len(inputs["behaviors"]) > 0:
             for kwargs in inputs["behaviors"]:
@@ -270,7 +274,14 @@ class EulerSolver(Process):
 
         if self.manager is not None:
             self.manager.execute(self.eptm)
-            self.geom.update_all(self.eptm)
+            # Only rebuild geometry if a behavior actually changed the mesh.
+            # Every topology-changing path (division, T1/T2, reconnect) sets
+            # network_changed (both tyssue's topology ops and our behaviors do);
+            # parameter-only behaviors (e.g. line-tension setters) don't move
+            # vertices, so the geometry from set_pos above is still current and
+            # a second full update_all is pure waste (~half of update_all cost).
+            if self.eptm.network_changed:
+                self.geom.update_all(self.eptm)
             self.manager.update()
 
         if self.eptm.network_changed:
@@ -283,8 +294,6 @@ class EulerSolver(Process):
         # Behaviors (differentiation, division) may re-introduce StringDtype
         # cell_type columns under pandas 3.0; coerce before schema/emission.
         self._coerce_string_columns()
-
-        self.record(inputs["global_time"])
 
         dfs = self.output_dfs()
 
