@@ -109,7 +109,7 @@ def rust_update_geometry(eptm, srce, trgt, face):
         fd["vol"] = eptm.sum_face(ed["sub_vol"])
 
 
-def rust_sheet_gradient(eptm, is_bound, with_vessel=False):
+def rust_sheet_gradient(eptm, is_bound, with_vessel=False, topo=None):
     """Return ``model.compute_gradient(eptm)`` for the standard sheet model as a
     ``(Nv, 3)`` ndarray in ``vert_df`` order, computed by the Rust kernel.
 
@@ -117,14 +117,26 @@ def rust_sheet_gradient(eptm, is_bound, with_vessel=False):
     ``ucoords`` exactly). ``is_bound`` selects the boundary-vertex clamp that
     distinguishes ``model_factory_bound`` from ``model_factory``. ``with_vessel``
     adds the VesselSurfaceElasticity vertex term (a cheap radial numpy term).
+
+    ``topo`` is an optional ``(srce, trgt, face)`` tuple of positional uint32
+    index arrays for the current topology (from ``EulerSolver._topo_arrays``).
+    Pass it to skip rebuilding the vertex/face lookup dicts and the three pandas
+    ``.map`` calls every step — a pure per-update saving. When ``None`` they're
+    derived here (keeps the standalone/equivalence-test call sites simple).
     """
     import tyssue_kernels as tk
 
     coords = eptm.coords
     ed, fd = eptm.edge_df, eptm.face_df
-    vmap = {v: i for i, v in enumerate(eptm.vert_df.index)}
-    fmap = {v: i for i, v in enumerate(fd.index)}
     C = np.ascontiguousarray
+    if topo is None:
+        vmap = {v: i for i, v in enumerate(eptm.vert_df.index)}
+        fmap = {v: i for i, v in enumerate(fd.index)}
+        srce = C(ed["srce"].map(vmap).values, dtype=np.uint32)
+        trgt = C(ed["trgt"].map(vmap).values, dtype=np.uint32)
+        face = C(ed["face"].map(fmap).values, dtype=np.uint32)
+    else:
+        srce, trgt, face = topo
 
     norm_factor = float(eptm.specs["settings"].get("nrj_norm_factor", 1.0))
     r_aj = ed[["t" + c for c in coords]].values - ed[["f" + c for c in coords]].values
@@ -139,9 +151,9 @@ def rust_sheet_gradient(eptm, is_bound, with_vessel=False):
         C(ed["sub_area"].values, dtype=np.float64),
         C(ed[["r" + c for c in coords]].values, dtype=np.float64),
         C(r_aj, dtype=np.float64),
-        C(ed["srce"].map(vmap).values, dtype=np.uint32),
-        C(ed["trgt"].map(vmap).values, dtype=np.uint32),
-        C(ed["face"].map(fmap).values, dtype=np.uint32),
+        srce,
+        trgt,
+        face,
         C((ed["line_tension"] * ed["is_active"]).values, dtype=np.float64),
         C(
             (fd["perimeter_elasticity"] * fd["is_alive"] * (fd["perimeter"] - fd["prefered_perimeter"])).values,

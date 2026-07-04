@@ -196,8 +196,13 @@ class EulerSolver(Process):
         ].values.ravel()
 
     def _topo_arrays(self):
-        """Positional (srce, trgt, face) index arrays for the current topology,
-        cached and rebuilt only when the mesh signature (Nv, Ne, Nf) changes."""
+        """Cached topology lookups for the current mesh, rebuilt only when the
+        signature (Nv, Ne, Nf) changes. Returns ``(srce, trgt, face, active_pos)``:
+        the positional uint32 srce/trgt/face index arrays the kernels consume, plus
+        ``active_pos`` — the positions of ``active_verts`` in ``vert_df`` order, so
+        the gradient can be sliced to the active DOFs without rebuilding a lookup
+        dict every step. ``active_verts`` is a stable epithelium attribute reset
+        only on an index reset, which is exactly when our signature changes."""
         e = self.eptm
         sig = (e.Nv, e.Ne, e.Nf)
         if self._topo is None or self._topo[0] != sig:
@@ -206,8 +211,10 @@ class EulerSolver(Process):
             srce = np.ascontiguousarray(e.edge_df["srce"].map(vmap).values, dtype=np.uint32)
             trgt = np.ascontiguousarray(e.edge_df["trgt"].map(vmap).values, dtype=np.uint32)
             face = np.ascontiguousarray(e.edge_df["face"].map(fmap).values, dtype=np.uint32)
-            self._topo = (sig, srce, trgt, face)
-        return self._topo[1], self._topo[2], self._topo[3]
+            active = e.active_verts
+            active_pos = np.fromiter((vmap[v] for v in active), dtype=np.intp, count=len(active))
+            self._topo = (sig, srce, trgt, face, active_pos)
+        return self._topo[1], self._topo[2], self._topo[3], self._topo[4]
 
     def set_pos(self, pos):
         """Updates the eptm vertices position, then refreshes geometry."""
@@ -215,7 +222,7 @@ class EulerSolver(Process):
             return self._set_pos(self.eptm, self.geom, pos)
         eptm = self.eptm
         eptm.vert_df.loc[eptm.active_verts, eptm.coords] = pos.reshape((-1, eptm.dim))
-        srce, trgt, face = self._topo_arrays()
+        srce, trgt, face, _ = self._topo_arrays()
         rust_geometry_update(eptm, self.geom, srce, trgt, face)
 
     def ode_func(self):
@@ -226,9 +233,11 @@ class EulerSolver(Process):
         """
         active = self.eptm.active_verts
         if self._rust_gradient:
-            grad = rust_sheet_gradient(self.eptm, self._is_bound, self._with_vessel)  # (Nv, dim)
-            pos_of = {v: i for i, v in enumerate(self.eptm.vert_df.index)}
-            grad_U = grad[[pos_of[v] for v in active]]
+            srce, trgt, face, active_pos = self._topo_arrays()
+            grad = rust_sheet_gradient(
+                self.eptm, self._is_bound, self._with_vessel, topo=(srce, trgt, face)
+            )  # (Nv, dim)
+            grad_U = grad[active_pos]
         else:
             grad_U = self.model.compute_gradient(self.eptm).loc[active].values
         return (
