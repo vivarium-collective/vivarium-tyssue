@@ -63,8 +63,9 @@ SHOWCASE = [
     ("monolayer_liftoff", "Monolayer lift-off (3D)",
      "A 3D monolayer with apical/basal surfaces: an apical purse-string (line tension "
      "on every apical edge) contracts the top face while cell volume is conserved, so "
-     "the sheet buckles into a dome. Orbit to watch it lift off; colour by cell area to "
-     "see the apical faces shrink.", 0.05, 0.2, 50),
+     "the sheet buckles into a dome and the apical opening cinches shut into a "
+     "lumenoid (~99% closed by the end). Orbit to watch it curl up and close.",
+     0.02, 2.0, 60),
     ("gillespie", "Intestinal crypt (3D)",
      "Crypt model on a cylinder: mechanics plus a Gillespie process firing "
      "stochastic cell-type transitions (stem→progenitor→enterocyte/goblet) under "
