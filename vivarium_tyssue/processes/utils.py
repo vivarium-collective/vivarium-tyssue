@@ -58,23 +58,27 @@ def geometry_supported(geom_name, dim):
     return dim == 3 and geom_name in _GEOM_SUPPORTED and rust_kernels_available()
 
 
-def rust_geometry_update(eptm, geom, srce, trgt, face):
+def rust_geometry_update(eptm, geom, srce, trgt, face, pos=None):
     """Rust replacement for ``geom.update_all``: the SheetGeometry core via the
     kernel, plus any cheap geometry-specific vertex steps. VesselGeometry adds
     ``update_tangents`` + ``update_vert_distance`` (vectorized numpy, no groupby),
     replayed here so the result is bit-identical to the python update_all.
 
+    ``pos`` is an optional full ``(Nv, dim)`` float64 vertex-position array the
+    caller already holds (from the integration step), passed to skip re-reading
+    it out of ``vert_df``. Only valid when it covers *all* vertices in index order.
+
     Returns the ``stash`` dict of gradient-input arrays from the kernel (see
     ``rust_update_geometry``) so the caller can feed it straight into
     ``rust_sheet_gradient`` and skip re-reading those columns from pandas."""
-    stash = rust_update_geometry(eptm, srce, trgt, face)
+    stash = rust_update_geometry(eptm, srce, trgt, face, pos=pos)
     if geom.__name__ == "VesselGeometry":
         geom.update_tangents(eptm)
         geom.update_vert_distance(eptm)
     return stash
 
 
-def rust_update_geometry(eptm, srce, trgt, face):
+def rust_update_geometry(eptm, srce, trgt, face, pos=None):
     """In-place replacement for ``SheetGeometry.update_all`` via the Rust kernel.
 
     Reproduces every column update_all writes — edge s*/t*/d*/u*/length/f*/r*/
@@ -91,7 +95,10 @@ def rust_update_geometry(eptm, srce, trgt, face):
 
     coords = eptm.coords
     ed, fd = eptm.edge_df, eptm.face_df
-    pos = np.ascontiguousarray(eptm.vert_df[coords].values, dtype=np.float64)
+    if pos is None:
+        pos = np.ascontiguousarray(eptm.vert_df[coords].values, dtype=np.float64)
+    else:
+        pos = np.ascontiguousarray(pos, dtype=np.float64)
     old_len = ed["length"].values.copy()  # stale length feeds ucoords, as in update_all
     g = tk.update_geometry(pos, srce, trgt, face, eptm.Nf)
     d = np.asarray(g["dcoords"]).reshape(-1, 3)

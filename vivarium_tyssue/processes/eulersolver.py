@@ -121,6 +121,7 @@ class EulerSolver(Process):
         self._rust_gradient = False
         self._rust_geometry = False
         self._topo = None  # cached (signature, srce, trgt, face, active_pos) arrays
+        self._active_full = False  # every vertex active & in order -> fast pos I/O
         self._geom_stash = None  # geometry arrays from the last rust set_pos, fed
         # straight to the next gradient (skips re-reading them from pandas)
         if self._backend == "rust":
@@ -193,9 +194,10 @@ class EulerSolver(Process):
 
     @property
     def current_pos(self):
-        return self.eptm.vert_df.loc[
-            self.eptm.active_verts, self.eptm.coords
-        ].values.ravel()
+        vd, coords = self.eptm.vert_df, self.eptm.coords
+        if self._active_full:  # all verts active & in index order
+            return vd[coords].values.ravel()
+        return vd.loc[self.eptm.active_verts, coords].values.ravel()
 
     def _topo_arrays(self):
         """Cached topology lookups for the current mesh, rebuilt only when the
@@ -215,6 +217,10 @@ class EulerSolver(Process):
             face = np.ascontiguousarray(e.edge_df["face"].map(fmap).values, dtype=np.uint32)
             active = e.active_verts
             active_pos = np.fromiter((vmap[v] for v in active), dtype=np.intp, count=len(active))
+            # When every vertex is active and in index order, position read/write
+            # can use whole-column pandas access (~20× faster than label-based
+            # ``.loc[active_verts]``, which pays index-alignment every step).
+            self._active_full = len(active) == e.Nv and active.equals(e.vert_df.index)
             self._topo = (sig, srce, trgt, face, active_pos)
         return self._topo[1], self._topo[2], self._topo[3], self._topo[4]
 
@@ -223,9 +229,19 @@ class EulerSolver(Process):
         if not self._rust_geometry:
             return self._set_pos(self.eptm, self.geom, pos)
         eptm = self.eptm
-        eptm.vert_df.loc[eptm.active_verts, eptm.coords] = pos.reshape((-1, eptm.dim))
-        srce, trgt, face, _ = self._topo_arrays()
-        self._geom_stash = rust_geometry_update(eptm, self.geom, srce, trgt, face)
+        srce, trgt, face, _ = self._topo_arrays()  # also refreshes _active_full
+        p = pos.reshape((-1, eptm.dim))
+        if self._active_full:  # whole-column write, ~20× cheaper than .loc[active]
+            eptm.vert_df[eptm.coords] = p
+            # p already IS the full vertex-position array — hand it to the kernel
+            # so it needn't re-read what we just wrote.
+            kernel_pos = p
+        else:
+            eptm.vert_df.loc[eptm.active_verts, eptm.coords] = p
+            kernel_pos = None  # inactive verts also feed edges; let the kernel read all
+        self._geom_stash = rust_geometry_update(
+            eptm, self.geom, srce, trgt, face, pos=kernel_pos
+        )
 
     def ode_func(self):
         """Computes the models' gradient.
@@ -337,7 +353,10 @@ class EulerSolver(Process):
 
         # Behaviors (differentiation, division) may re-introduce StringDtype
         # cell_type columns under pandas 3.0; coerce before schema/emission.
-        self._coerce_string_columns()
+        # Nothing else adds string columns mid-run (init already coerced), so
+        # skip the all-column scan on plain integration steps — the common case.
+        if inputs["behaviors"] or network_changed:
+            self._coerce_string_columns()
 
         dfs = self.output_dfs()
 
