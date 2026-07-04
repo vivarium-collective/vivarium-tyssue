@@ -216,6 +216,7 @@ def run_sweep(args, commit, prior):
         with RESULTS.open("a") as f:
             for rec in records:
                 f.write(json.dumps(rec) + "\n")
+        write_summary(prior + records)
         print(f"\nappended {len(records)} sweep records -> {RESULTS.relative_to(ROOT)}")
 
 
