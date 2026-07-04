@@ -69,8 +69,8 @@
       "slug": "hra_crypt_field",
       "name": "HRA crypt field (2D)",
       "is3d": false,
-      "n_cells": 8316,
-      "n_frames": 2
+      "n_cells": 6720,
+      "n_frames": 12
     },
     {
       "file": "hra_colon_surface.json",
