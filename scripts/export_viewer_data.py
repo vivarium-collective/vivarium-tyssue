@@ -36,35 +36,52 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 OUT = ROOT / "viewer" / "data"
 
-# slug -> (composite, human name, blurb, emit interval, n frames)
+# slug -> (composite, human name, blurb, dt, frame_span, n frames).
+# `dt` is the solver step (interval override — small enough that explicit Euler
+# stays stable for stiff 3D meshes); `frame_span` is how much sim-time each emitted
+# frame advances (frame_span/dt solver steps per frame). Models that error or blow
+# up to NaN are truncated/omitted (see run_model).
 SHOWCASE = [
     ("anisotropic", "Anisotropic elongation",
      "Flat sheet biased by axis-dependent line tension — oriented (anisotropic) "
-     "tissue elongation. Colour by cell area to watch cells stretch.", 0.4, 60),
+     "tissue elongation. Colour by cell area to watch cells stretch.", 0.1, 0.4, 60),
     ("stochastic", "Stochastic line tension",
      "Flat sheet with Ornstein–Uhlenbeck line-tension noise on every edge — "
-     "jittery, fluctuating cell shapes.", 0.4, 60),
+     "jittery, fluctuating cell shapes.", 0.1, 0.4, 60),
     ("gradient", "Preferred-perimeter gradient",
      "Flat sheet with a linear spatial gradient of preferred perimeter along x, "
-     "so cell size varies smoothly across the sheet.", 0.4, 60),
+     "so cell size varies smoothly across the sheet.", 0.1, 0.4, 60),
+    ("jamming", "Stochastic + jamming",
+     "Flat sheet with stochastic line tension plus a CellJamming event that ramps "
+     "preferred perimeter toward a rigid, jammed regime.", 0.1, 0.4, 60),
+    ("epithelium_2d", "Baseline 2D relaxation",
+     "Plain flat (square) sheet relaxing to mechanical equilibrium — the baseline "
+     "2D epithelium, no behaviours.", 0.05, 0.2, 50),
     ("base_solver", "Vessel relaxation (3D)",
      "Cylindrical (vessel) sheet relaxing to mechanical equilibrium — a true 3D "
-     "surface. Orbit to inspect the tube.", 0.5, 50),
-    # NOTE: "regulation" (cylinder + cell division) is omitted — it hits a
-    # pre-existing empty-cell-pick bug in behaviors/regulations.py, unrelated to
-    # the viewer. Re-add it here once that's fixed to showcase changing topology.
+     "surface. Orbit to inspect the tube.", 0.02, 0.1, 50),
+    ("monolayer_liftoff", "Monolayer lift-off (3D)",
+     "A 3D monolayer with apical/basal surfaces — volumetric cells lifting off a "
+     "substrate. Orbit to see the layered geometry.", 0.01, 0.05, 40),
+    ("gillespie", "Intestinal crypt (3D)",
+     "Crypt model on a cylinder: mechanics plus a Gillespie process firing "
+     "stochastic cell-type transitions under Wnt/density regulation.", 0.005, 0.02, 40),
+    ("tumor", "Tumor growth (COPASI-coupled)",
+     "Flat sheet coupled to a breast-cancer population ODE in COPASI; cells divide "
+     "as the tumour grows (needs the COPASI process).", 0.01, 0.05, 40),
 ]
 
 
-def build(composite, backend="rust"):
+def build(composite, backend="rust", interval=None):
     from pbg_superpowers.composite_spec import build_composite_from_spec, load_spec
     from vivarium_tyssue.core import build_core
 
     spec = load_spec(ROOT / "vivarium_tyssue" / "composites" / f"{composite}.composite.yaml")
     spec["emitters"] = []  # we snapshot directly; no parquet sink needed
     spec["state"]["Tyssue"]["config"]["backend"] = backend
+    overrides = {"interval": interval} if interval is not None else {}
     with contextlib.redirect_stdout(io.StringIO()):
-        comp = build_composite_from_spec(spec, core=build_core())
+        comp = build_composite_from_spec(spec, overrides=overrides, core=build_core())
     return comp
 
 
@@ -94,11 +111,17 @@ def snapshot(eptm, t, r=4):
             fields[col] = np.round(eptm.face_df[col].values.astype(float), 6).tolist()
     fields["num_sides"] = eptm.edge_df.groupby("face").size().reindex(eptm.face_df.index).fillna(0).astype(int).tolist()
 
+    # categorical cell type (or monolayer face segment), if the mesh carries one —
+    # kept as raw strings here; run_model maps them to stable integer ids.
+    tcol = next((c for c in ("cell_type", "segment") if c in eptm.face_df.columns), None)
+    cell_type_raw = eptm.face_df[tcol].astype(str).tolist() if tcol else None
+
     return {
         "t": round(float(t), 4),
         "verts": np.round(V, r).ravel().tolist(),
         "centroids": np.round(C, r).ravel().tolist(),
         "fields": fields,
+        "cell_type_raw": cell_type_raw,
         # topology — hoisted to model level by run_model when constant
         "tris": tris,
         "edges": edges,
@@ -106,17 +129,30 @@ def snapshot(eptm, t, r=4):
     }
 
 
-def run_model(slug, composite, name, blurb, interval, nframes):
-    comp = build(composite)
+def _finite(fr):
+    return np.isfinite(np.asarray(fr["verts"])).all() and np.isfinite(np.asarray(fr["centroids"])).all()
+
+
+def run_model(slug, composite, name, blurb, dt, frame_span, nframes):
+    comp = build(composite, interval=dt)  # solver dt (small enough to stay stable)
     proc = comp.state["Tyssue"]["instance"]
     eptm = proc.eptm
     frames = [snapshot(eptm, 0.0)]
     t = 0.0
+    truncated = False
     for _ in range(nframes - 1):
-        t += interval
+        t += frame_span
         with contextlib.redirect_stdout(io.StringIO()):
-            comp.run(interval)
-        frames.append(snapshot(proc.eptm, t))
+            comp.run(frame_span)
+        fr = snapshot(proc.eptm, t)
+        if not _finite(fr):  # explicit-Euler blow-up — keep the stable frames only
+            truncated = True
+            break
+        frames.append(fr)
+    if truncated:
+        print(f"  {slug:14s} (blew up after {len(frames)} frames — truncated to the stable portion)")
+    if len(frames) < 2:
+        raise RuntimeError("model unstable from the first step; nothing stable to show")
 
     verts = np.asarray(frames[0]["verts"]).reshape(-1, 3)
     zspan = float(verts[:, 2].max() - verts[:, 2].min())
@@ -125,12 +161,26 @@ def run_model(slug, composite, name, blurb, interval, nframes):
     allv = np.concatenate([np.asarray(f["verts"]).reshape(-1, 3) for f in frames])
     bounds = [allv.min(0).round(4).tolist(), allv.max(0).round(4).tolist()]
 
+    # Categorical cell type: gather the categories across all frames into a stable
+    # id map (a cell's type can change over time, e.g. gillespie differentiation),
+    # then store an integer cell_type field per frame + the index->name list.
+    type_names = None
+    if frames[0].get("cell_type_raw") is not None:
+        cats = sorted({v for f in frames for v in f["cell_type_raw"]})
+        tmap = {c: i for i, c in enumerate(cats)}
+        type_names = cats
+        for f in frames:
+            f["fields"]["cell_type"] = [tmap[v] for v in f["cell_type_raw"]]
+    for f in frames:
+        f.pop("cell_type_raw", None)
+
     n_cells = max(len(f["fields"]["num_sides"]) for f in frames)
     model = {
         "name": name, "blurb": blurb, "is3d": is3d,
         "n_cells": int(n_cells), "n_verts": int(len(verts)),
         "bounds": bounds,
         "face_fields": [k for k in ("area", "perimeter", "num_sides")],
+        "type_names": type_names,
         "frames": frames,
     }
     # Hoist topology to model level when it never changes (no division/T1) — the
@@ -164,13 +214,13 @@ def main():
     only = set(s.strip() for s in args.only.split(",") if s.strip())
     manifest = []
     print("exporting tyssue viewer data ->", OUT.relative_to(ROOT))
-    for slug, name, blurb, interval, nframes in SHOWCASE:
+    for slug, name, blurb, dt, frame_span, nframes in SHOWCASE:
         if only and slug not in only:
             continue
         if args.frames:
             nframes = args.frames
         try:
-            manifest.append(run_model(slug, slug, name, blurb, interval, nframes))
+            manifest.append(run_model(slug, slug, name, blurb, dt, frame_span, nframes))
         except Exception as e:
             print(f"  {slug:14s} ERROR {type(e).__name__}: {str(e)[:70]}")
 

@@ -110,6 +110,7 @@
       <h3>Visualization</h3>
       <div class="row"><label>Color by</label>
         <select id="colormode">
+          <option value="type">cell type</option>
           <option value="area">cell area</option>
           <option value="perimeter">cell perimeter</option>
           <option value="num_sides">neighbours (sides)</option>
@@ -120,6 +121,11 @@
       <div class="toggle"><input type="checkbox" id="showedges" checked> show cell edges</div>
       <div class="toggle"><input type="checkbox" id="showverts"> show vertices</div>
       <div class="toggle"><input type="checkbox" id="spin"> auto-rotate (3D)</div>
+    </div>
+
+    <div class="section" id="legend-section" style="display:none">
+      <h3>Cell types</h3>
+      <div id="legend"></div>
     </div>
 
     <div class="section">

@@ -5,6 +5,13 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
+// Surface any runtime error on-page (a blank WebGL canvas is otherwise silent).
+window.addEventListener("error", (e) => {
+  const el = document.getElementById("loading");
+  if (el) { el.style.display = "flex"; el.style.color = "#ff6b6b";
+    el.textContent = "viewer error: " + (e.message || e.error); }
+});
+
 const $ = (s) => document.querySelector(s);
 const wrap = $("#canvas-wrap");
 const loadingEl = $("#loading");
@@ -15,6 +22,7 @@ const frameLabel = $("#framelabel"), colormodeEl = $("#colormode");
 const showEdgesEl = $("#showedges"), showVertsEl = $("#showverts"), spinEl = $("#spin");
 const statsEl = $("#stats"), sparkCanvas = $("#spark"), sparkLabel = $("#sparklabel");
 const cbar = $("#colorbar"), cbLabel = $("#cbLabel"), cbMin = $("#cbMin"), cbMax = $("#cbMax");
+const legendSection = $("#legend-section"), legendEl = $("#legend");
 
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
@@ -25,7 +33,7 @@ const raycaster = new THREE.Raycaster();
 const ndc = new THREE.Vector2();
 
 let camera, controls, current = null, playing = false, frameIdx = 0, lastStep = 0;
-let colorMode = "area", hoveredFace = -1;
+let colorMode = "type", hoveredFace = -1;
 
 // ---- color helpers ----
 function heat(t) {
@@ -39,6 +47,16 @@ function cellJit(f) {
   const j = ((f * 2654435761) >>> 0) / 4294967295;
   const c = new THREE.Color(); c.setHSL(j, 0.55, 0.55);
   return [c.r, c.g, c.b];
+}
+// categorical palette for cell types
+const TYPE_HUES = [0.58, 0.09, 0.33, 0.78, 0.50, 0.00, 0.16, 0.66, 0.42, 0.88, 0.25, 0.72];
+function typeRGB(t) {
+  const c = new THREE.Color(); c.setHSL(TYPE_HUES[t % TYPE_HUES.length], 0.6, 0.55);
+  return [c.r, c.g, c.b];
+}
+function typeSwatch(t) {
+  const c = typeRGB(t);
+  return `rgb(${(c[0]*255)|0},${(c[1]*255)|0},${(c[2]*255)|0})`;
 }
 const FLAT = [0.30, 0.62, 0.86];
 
@@ -108,8 +126,8 @@ function setupModel(model) {
   const pts = new THREE.Points(vg, new THREE.PointsMaterial({ color: 0xe6edf3, size: 3, sizeAttenuation: false }));
   pts.visible = false; scene.add(pts);
 
-  const center = model.bounds.map((_, i) => (model.bounds[0][i] + model.bounds[1][i]) / 2);
-  const span = Math.max(...model.bounds[1].map((v, i) => v - model.bounds[0][i]), 1e-3);
+  const center = [0, 1, 2].map((i) => (model.bounds[0][i] + model.bounds[1][i]) / 2);
+  const span = Math.max(...[0, 1, 2].map((i) => model.bounds[1][i] - model.bounds[0][i]), 1e-3);
   setupCamera(model, center, span);
 
   current = {
@@ -127,10 +145,12 @@ function setupModel(model) {
       const T = tp.tris, fot = tp.face_of_tri, ntri = T.length / 3;
       const rng = this.ranges[colorMode];
       const fld = fr.fields[colorMode];
+      const ctype = fr.fields.cell_type;
       for (let t = 0; t < ntri; t++) {
         const f = fot[t];
         let rgb;
-        if (colorMode === "cell") rgb = cellJit(f);
+        if (colorMode === "type") rgb = ctype ? typeRGB(ctype[f]) : cellJit(f);
+        else if (colorMode === "cell") rgb = cellJit(f);
         else if (colorMode === "uniform") rgb = FLAT;
         else rgb = heat((fld[f] - rng.mn) / (rng.mx - rng.mn));
         if (f === hoveredFace) rgb = [1, 1, 1];
@@ -240,11 +260,24 @@ function updateStats() {
 
 // ---------- color bar ----------
 function updateColorbar() {
-  if (colorMode === "cell" || colorMode === "uniform") { cbar.style.display = "none"; return; }
+  if (colorMode === "cell" || colorMode === "uniform" || colorMode === "type") {
+    cbar.style.display = "none"; return;
+  }
   const r = current.ranges[colorMode];
   cbar.style.display = ""; cbLabel.textContent = colorMode.replace("_", " ");
   cbMin.textContent = r.mn.toFixed(colorMode === "num_sides" ? 0 : 2);
   cbMax.textContent = r.mx.toFixed(colorMode === "num_sides" ? 0 : 2);
+}
+
+// legend for cell types — shown when the model has named types and type mode is on
+function buildLegend() {
+  const names = current.model.type_names;
+  if (!names || colorMode !== "type") { legendSection.style.display = "none"; return; }
+  legendSection.style.display = "";
+  legendEl.innerHTML = names.map((nm, t) =>
+    `<div class="stat"><span><span style="display:inline-block;width:11px;height:11px;` +
+    `border-radius:3px;margin-right:7px;vertical-align:-1px;background:${typeSwatch(t)}"></span>` +
+    `${nm || "(none)"}</span></div>`).join("");
 }
 
 // ---------- model loading ----------
@@ -252,12 +285,12 @@ async function loadModel(entry) {
   loadingEl.style.display = "flex"; loadingEl.textContent = `loading ${entry.name}…`;
   const model = await (await fetch("./data/" + entry.file)).json();
   playing = false; playBtn.textContent = "▶"; hoveredFace = -1; tip.style.display = "none";
-  colorMode = "area"; colormodeEl.value = "area";
+  colorMode = "type"; colormodeEl.value = "type";
   setupModel(model);
   frameIdx = 0; scrub.max = String(model.frames.length - 1); scrub.value = "0";
   computeSpark(); current.render(0);
   current.lines.visible = showEdgesEl.checked; current.pts.visible = showVertsEl.checked;
-  updateFrameLabel(); updateStats(); updateColorbar();
+  updateFrameLabel(); updateStats(); updateColorbar(); buildLegend();
   $("#info").innerHTML = `<h2>${model.name}</h2><div class="desc">${model.blurb || ""}</div>` +
     `<div class="meta">${model.n_cells.toLocaleString()} cells · ${model.n_verts} vertices · ` +
     `${model.frames.length} frames · ${model.is3d ? "3D surface" : "2D sheet"}</div>`;
@@ -286,7 +319,7 @@ $("#first").addEventListener("click", () => { pause(); showFrame(0); });
 $("#stepback").addEventListener("click", () => { pause(); showFrame(frameIdx-1); });
 $("#stepfwd").addEventListener("click", () => { pause(); showFrame(frameIdx+1); });
 colormodeEl.addEventListener("change", () => {
-  colorMode = colormodeEl.value; current.render(frameIdx); updateColorbar();
+  colorMode = colormodeEl.value; current.render(frameIdx); updateColorbar(); buildLegend();
 });
 showEdgesEl.addEventListener("change", () => { if (current) current.lines.visible = showEdgesEl.checked; });
 showVertsEl.addEventListener("change", () => { if (current) current.pts.visible = showVertsEl.checked; });
@@ -306,7 +339,9 @@ wrap.addEventListener("mousemove", (e) => {
   const area = fr.fields.area ? fr.fields.area[face].toFixed(3) : "—";
   const per = fr.fields.perimeter ? fr.fields.perimeter[face].toFixed(3) : "—";
   const sides = fr.fields.num_sides ? fr.fields.num_sides[face] : "—";
-  tip.innerHTML = `<b>cell ${face}</b><br>area ${area} · perim ${per} · ${sides} sides`;
+  const names = current.model.type_names, ct = fr.fields.cell_type;
+  const typeLine = names && ct ? `${names[ct[face]] || "(none)"} · ` : "";
+  tip.innerHTML = `<b>cell ${face}</b> · ${typeLine}${sides} sides<br>area ${area} · perim ${per}`;
   tip.style.display = "block";
   const wr = wrap.getBoundingClientRect();
   let lx = e.clientX - wr.left + 14, ly = e.clientY - wr.top + 14;
