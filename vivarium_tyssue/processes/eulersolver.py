@@ -14,8 +14,10 @@ from vivarium_tyssue.maps import *
 from vivarium_tyssue.core_maps import GEOMETRY_MAP
 from vivarium_tyssue.processes.utils import (
     SUPPORTED_EFFECTORS,
+    geometry_supported,
     gradient_supported,
     rust_sheet_gradient,
+    rust_update_geometry,
 )
 
 from tyssue.behaviors.event_manager import EventManager
@@ -115,10 +117,14 @@ class EulerSolver(Process):
         self._backend = (config.get("backend") or "python").lower()
         self._is_bound = config["factory"] == "model_factory_bound"
         self._rust_gradient = False
+        self._rust_geometry = False
+        self._topo = None  # cached (signature, srce, trgt, face) positional arrays
         if self._backend == "rust":
+            self._rust_geometry = geometry_supported(self.geom.__name__, self.eptm.dim)
             if gradient_supported(config["effectors"], config["factory"], self.eptm.dim):
                 self._rust_gradient = True
-                log.info("EulerSolver: using Rust sheet_gradient backend")
+                log.info("EulerSolver: using Rust backend (gradient%s)",
+                         " + geometry" if self._rust_geometry else "")
             else:
                 warnings.warn(
                     "backend='rust' requested but this model is unsupported by the "
@@ -187,9 +193,28 @@ class EulerSolver(Process):
             self.eptm.active_verts, self.eptm.coords
         ].values.ravel()
 
+    def _topo_arrays(self):
+        """Positional (srce, trgt, face) index arrays for the current topology,
+        cached and rebuilt only when the mesh signature (Nv, Ne, Nf) changes."""
+        e = self.eptm
+        sig = (e.Nv, e.Ne, e.Nf)
+        if self._topo is None or self._topo[0] != sig:
+            vmap = {v: i for i, v in enumerate(e.vert_df.index)}
+            fmap = {v: i for i, v in enumerate(e.face_df.index)}
+            srce = np.ascontiguousarray(e.edge_df["srce"].map(vmap).values, dtype=np.uint32)
+            trgt = np.ascontiguousarray(e.edge_df["trgt"].map(vmap).values, dtype=np.uint32)
+            face = np.ascontiguousarray(e.edge_df["face"].map(fmap).values, dtype=np.uint32)
+            self._topo = (sig, srce, trgt, face)
+        return self._topo[1], self._topo[2], self._topo[3]
+
     def set_pos(self, pos):
-        """Updates the eptm vertices position"""
-        return self._set_pos(self.eptm, self.geom, pos)
+        """Updates the eptm vertices position, then refreshes geometry."""
+        if not self._rust_geometry:
+            return self._set_pos(self.eptm, self.geom, pos)
+        eptm = self.eptm
+        eptm.vert_df.loc[eptm.active_verts, eptm.coords] = pos.reshape((-1, eptm.dim))
+        srce, trgt, face = self._topo_arrays()
+        rust_update_geometry(eptm, srce, trgt, face)
 
     def ode_func(self):
         """Computes the models' gradient.
@@ -281,7 +306,11 @@ class EulerSolver(Process):
             # vertices, so the geometry from set_pos above is still current and
             # a second full update_all is pure waste (~half of update_all cost).
             if self.eptm.network_changed:
+                # Topology changed: full python update_all rebuilds geometry AND
+                # the boundary/opposite index for the new mesh; drop the cached
+                # positional arrays so the next set_pos rebuilds them.
                 self.geom.update_all(self.eptm)
+                self._topo = None
             self.manager.update()
 
         if self.eptm.network_changed:

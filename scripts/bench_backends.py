@@ -107,20 +107,32 @@ def make_flat_sheet(n):
 
 def bench_sweep_one(n, backend, warmup, updates):
     """Per-update MATH cost (geom.update_all + gradient) on a generated sheet."""
+    import numpy as np
+
     from tyssue import SheetGeometry
-    from vivarium_tyssue.processes.utils import rust_kernels_available, rust_sheet_gradient
+    from vivarium_tyssue.processes.utils import (
+        rust_kernels_available,
+        rust_sheet_gradient,
+        rust_update_geometry,
+    )
 
     s, model = make_flat_sheet(n)
     if backend == "rust":
         if not rust_kernels_available():
             return None
-        grad = lambda: rust_sheet_gradient(s, False)  # noqa: E731
-    else:
-        grad = lambda: model.compute_gradient(s)  # noqa: E731
+        vmap = {v: i for i, v in enumerate(s.vert_df.index)}
+        fmap = {v: i for i, v in enumerate(s.face_df.index)}
+        srce = np.ascontiguousarray(s.edge_df["srce"].map(vmap).values, np.uint32)
+        trgt = np.ascontiguousarray(s.edge_df["trgt"].map(vmap).values, np.uint32)
+        face = np.ascontiguousarray(s.edge_df["face"].map(fmap).values, np.uint32)
 
-    def one():
-        SheetGeometry.update_all(s)
-        grad()
+        def one():  # what the rust backend actually runs each step
+            rust_update_geometry(s, srce, trgt, face)
+            rust_sheet_gradient(s, False)
+    else:
+        def one():
+            SheetGeometry.update_all(s)
+            model.compute_gradient(s)
 
     times = []
     for _ in range(warmup):
