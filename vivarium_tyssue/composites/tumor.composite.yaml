@@ -70,6 +70,10 @@ state:
       bounds: {}
       output_columns: {}
       maps: {}
+      # Rust hot kernels (safe, bit-identical). No substeps knob here: interval is
+      # shared with the COPASI coupling (CopasiUTCProcess integrates duration=interval),
+      # so sub-stepping the mechanics alone would desync the two.
+      backend: rust
     inputs:
       behaviors:
       - Behaviors

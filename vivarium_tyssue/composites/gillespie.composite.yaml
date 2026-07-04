@@ -29,7 +29,11 @@ parameters:
   interval:
     type: float
     default: 0.005
-    description: Solver / Gillespie step interval (dt).
+    description: Emit / update interval. Solver dt = interval / substeps.
+  substeps:
+    type: int
+    default: 1
+    description: "Native Euler steps per update (unused here \u2014 vessel gradient falls back to python)."
 state:
   Tyssue:
     _type: process
@@ -69,6 +73,8 @@ state:
       bounds: {}
       output_columns: {}
       maps: {}
+      backend: rust
+      substeps: ${substeps}
     inputs:
       behaviors:
       - Behaviors

@@ -61,6 +61,10 @@ def cylinder_config():
         "bounds": {},
         "output_columns": {},
         "maps": {},
+        # Rust geometry + vessel gradient (native sub-stepping is sheet-only, so
+        # substeps>1 falls back here — kept at 1).
+        "backend": "rust",
+        "substeps": "${substeps}",
     }
 
 
@@ -93,6 +97,12 @@ def flat_config():
         "bounds": {},
         "output_columns": {},
         "maps": {},
+        # Rust hot-kernel backend (transparent python fallback for anything the
+        # kernel doesn't reproduce). substeps>1 integrates that many native Euler
+        # steps per update, materializing DataFrames once — a speed knob that also
+        # coarsens behaviour/emit cadence, so it stays 1 by default.
+        "backend": "rust",
+        "substeps": "${substeps}",
     }
 
 
@@ -141,7 +151,10 @@ def write(name, *, description, tags, processes, state, parameters=None):
             "paths": ["Datasets/vert_df", "Datasets/face_df",
                       "Datasets/edge_df", "Datasets/cell_df"],
         }],
-        "parameters": parameters or {"interval": {"type": "float", "default": 0.1, "description": "Solver / step interval (dt)."}},
+        "parameters": parameters or {
+            "interval": {"type": "float", "default": 0.1, "description": "Emit / update interval. Solver dt = interval / substeps."},
+            "substeps": {"type": "int", "default": 1, "description": "Native Euler steps per update (rust sheet models). >1 materializes DataFrames once per update instead of per step; coarsens behaviour/emit cadence."},
+        },
         "state": state,
     }
     path = OUT / f"{name}.composite.yaml"
@@ -329,7 +342,10 @@ write(
     "enterocyte/goblet, extrusion) under Wnt- and density-dependent regulation.",
     tags=["tissue", "multi-cell", "cells", "kinetics"],
     processes=["EulerSolver", "Gillespie"],
-    parameters={"interval": {"type": "float", "default": 0.005, "description": "Solver / Gillespie step interval (dt)."}},
+    parameters={
+        "interval": {"type": "float", "default": 0.005, "description": "Emit / update interval. Solver dt = interval / substeps."},
+        "substeps": {"type": "int", "default": 1, "description": "Native Euler steps per update (unused here — vessel gradient falls back to python)."},
+    },
     state={
         "Tyssue": tyssue_node(gillespie_cfg),
         "Gillespie": {

@@ -18,9 +18,14 @@ parameters:
   interval:
     type: float
     default: 0.01
-    description: Solver / step interval (dt). 0.01 to match the tumor arm in the
-      tumor-vs-baseline comparison (reviewer 2026-06-17); mechanics-only here, so the
-      sheet just relaxes regardless of dt.
+    description: Emit / update interval. Solver dt = interval / substeps. 0.01 to match
+      the tumor arm in the tumor-vs-baseline comparison (reviewer 2026-06-17);
+      mechanics-only here, so the sheet just relaxes regardless of dt.
+  substeps:
+    type: int
+    default: 1
+    description: Native Euler steps per update (rust sheet models). >1 materializes
+      DataFrames once per update instead of per step; coarsens emit cadence.
 state:
   Tyssue:
     _type: process
@@ -56,6 +61,8 @@ state:
       bounds: {}
       output_columns: {}
       maps: {}
+      backend: rust
+      substeps: ${substeps}
     inputs:
       behaviors:
       - Behaviors
