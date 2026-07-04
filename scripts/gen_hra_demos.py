@@ -39,15 +39,19 @@ COMPOSITES = ROOT / "vivarium_tyssue" / "composites"
 
 
 def composite_doc(name, description, eptm_rel, tissue_type="Sheet", interval=0.02,
-                  line_tension=0.02, max_displacement=0.1):
+                  line_tension=0.02, max_displacement=0.1, frozen=False):
     """A relaxation composite on the rust EulerSolver (no cell_type param, so
     the per-cell HRA types in the .hf5 are preserved).
 
     ``max_displacement`` clamps each vertex's per-step motion — a safety net that
     lets the irregular real-data mesh relax stably under explicit Euler (a stray
     stiff cell can't blow the whole mesh up in one step).
+
+    ``frozen=True`` zeroes the moduli so the mesh doesn't move — a faithful
+    structural display of the raw real-data cells (relaxing the irregular real
+    geometry would distort the true layout).
     """
-    ka, kp, lt = 1.0, 0.1, line_tension
+    ka, kp, lt = (0.0, 0.0, 0.0) if frozen else (1.0, 0.1, line_tension)
     return {
         "name": name,
         "description": description,
@@ -112,19 +116,24 @@ def main():
     DATASETS.mkdir(parents=True, exist_ok=True)
     print("Building HRA-initialized demos...")
 
-    # --- 2D: field of real intestinal crypts ------------------------------- #
-    print("2D crypt field (HRA 2D-FTU crypt of Lieberkühn, tiled):")
-    # ~190 cells / tile after sanitize; tile to ~8k cells.
-    sheet, meta = sheet_from_ftu("crypt of Lieberkuhn", tile=(7, 6))
+    # --- 2D: one faithful intestinal crypt --------------------------------- #
+    # A single crypt of Lieberkühn straight from the HRA 2D-FTU illustration —
+    # the real cell layout and its zonation (stem + neuroendocrine at the narrow
+    # base, absorptive/goblet up the column, tuft near the flared villus top).
+    # Shown frozen: this is a faithful structural display of the real HRA cells,
+    # not a mechanics run (relaxing the raw real geometry would distort it).
+    print("2D intestinal crypt (HRA 2D-FTU crypt of Lieberkühn, faithful):")
+    sheet, meta = sheet_from_ftu("crypt of Lieberkuhn", tile=(1, 1))
     save_datasets(str(DATASETS / "hra_crypt_field.hf5"), sheet)
     print(f"  {sheet.face_df.shape[0]} cells, types={meta['type_names']}")
     write_composite("hra_crypt_field", composite_doc(
-        "HRA crypt field (2D)",
-        "A 2D epithelium built as a 7×6 field of intestinal crypts of Lieberkühn, "
-        "each an exact copy of the Human Reference Atlas 2D-FTU cell layout "
-        "(real Absorptive / Goblet / Stem / Neuroendocrine / Tuft cells). "
-        "Colour by cell type to see the HRA cell identities; scales to ~7k cells.",
-        "workspace/datasets/hra_crypt_field.hf5", interval=0.02))
+        "HRA intestinal crypt (2D)",
+        "A single intestinal crypt of Lieberkühn, initialized straight from the "
+        "Human Reference Atlas 2D-FTU illustration — the real cell layout coloured "
+        "by real HRA cell type. Note the zonation: stem + neuroendocrine cells at "
+        "the narrow base, absorptive and goblet cells up the column, tuft cells "
+        "near the flared villus top.",
+        "workspace/datasets/hra_crypt_field.hf5", interval=0.02, frozen=True))
 
     # --- 3D: epithelium on the real colon surface -------------------------- #
     print("3D colon surface (HRA large-intestine reference organ GLB):")

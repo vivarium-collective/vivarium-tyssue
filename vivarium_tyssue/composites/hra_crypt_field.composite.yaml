@@ -1,8 +1,8 @@
-name: HRA crypt field (2D)
-description: A 2D epithelium built as a 7×6 field of intestinal crypts of 
-  Lieberkühn, each an exact copy of the Human Reference Atlas 2D-FTU cell layout
-  (real Absorptive / Goblet / Stem / Neuroendocrine / Tuft cells). Colour by 
-  cell type to see the HRA cell identities; scales to ~7k cells.
+name: HRA intestinal crypt (2D)
+description: 'A single intestinal crypt of Lieberkühn, initialized straight from the
+  Human Reference Atlas 2D-FTU illustration — the real cell layout coloured by real
+  HRA cell type. Note the zonation: stem + neuroendocrine cells at the narrow base,
+  absorptive and goblet cells up the column, tuft cells near the flared villus top.'
 tags:
 - tissue
 - mechanics
@@ -28,16 +28,16 @@ state:
     _type: process
     address: local:EulerSolver
     config:
-      name: HRA crypt field (2D)
+      name: HRA intestinal crypt (2D)
       eptm: workspace/datasets/hra_crypt_field.hf5
       tissue_type: Sheet
       parameters:
         face_df:
-          area_elasticity: 1.0
-          perimeter_elasticity: 0.1
+          area_elasticity: 0.0
+          perimeter_elasticity: 0.0
           is_alive: 1.0
         edge_df:
-          line_tension: 0.02
+          line_tension: 0.0
           is_active: 1.0
         vert_df:
           viscosity: 1.0

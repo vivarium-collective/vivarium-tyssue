@@ -154,48 +154,35 @@ def sheet_from_ftu(match: str = "crypt of Lieberkuhn", tile=(1, 1), gap: float =
     from tyssue import Sheet, SheetGeometry
     from tyssue.generation import from_2d_voronoi
 
-    cents, cell_types, onto = _ftu_cell_centroids(match)
-    # A raw Voronoï of the real centroids has sliver cells (cocircular / near-
-    # collinear points) so stiff they make explicit-Euler mechanics blow up. A
-    # couple of Lloyd (centroidal-Voronoï) iterations regularize the cell shapes
-    # while keeping the real crypt arrangement and per-cell types (points keep
-    # their order/type). Gentle: just enough to kill slivers.
-    cents = _lloyd(cents, n_iter=2)
-
-    # One clean unit. The crypt is a tall, narrow column, so MOST of its cells
-    # sit near the point-cloud boundary — a plain Voronoï gives them huge (even
-    # if bounded) cells that render as big spurious triangles. Surround the real
-    # centroids with a ring of guard points a couple of cell-widths out: every
-    # real cell then becomes bounded AND clipped to a normal size, while the
-    # guard cells (which we discard) absorb the unbounded exterior. from_2d_voronoi
-    # returns one face per input point in order, so the first len(cents) faces are
-    # the real cells (aligned with the cell-type list); we keep only those.
     from scipy.spatial import cKDTree
 
+    cents, cell_types, onto = _ftu_cell_centroids(match)
+    # Faithful tessellation. The raw HRA centroids carry the real crypt structure:
+    # stem + neuroendocrine cells at the narrow base, absorptive/goblet up the
+    # column, flaring to a wide villus top. We deliberately do NOT Lloyd-relax
+    # (that homogenizes spacing and erases the base→villus zonation) and do NOT
+    # remove cells by area (the flared-top cells are legitimately large). Instead:
+    # guard-ring the cloud so every real cell is bounded, Voronoï-tessellate, then
+    # keep exactly the one face nearest each real centroid — that selects the real
+    # cells (with their true shapes + types) and discards the huge guard/exterior
+    # faces.
     guard = _guard_ring(cents)
-    allpts = np.vstack([cents, guard])
-    vor = Voronoi(allpts)
+    vor = Voronoi(np.vstack([cents, guard]))
     with contextlib.redirect_stdout(io.StringIO()):
         dsets = from_2d_voronoi(vor)
         unit = Sheet(_slug(match), dsets, coords=["x", "y"])
     unit = _promote_to_flat_3d(unit, _slug(match))
     SheetGeometry.update_all(unit)
-    # Drop the guard/exterior monster faces (the huge, many-sided regions the
-    # guard ring absorbs) — everything real is now a normal, clipped cell.
-    sides = unit.edge_df.groupby("face").size().reindex(unit.face_df.index).fillna(0)
-    med = float(np.median(unit.face_df["area"]))
-    clean = unit.face_df.index[(unit.face_df["area"].values < 5 * med) & (sides.values <= 12)]
-    unit = _keep_faces(unit, np.asarray(clean))
-    SheetGeometry.update_all(unit)
-    # Label every surviving cell by its nearest real centroid (keeps all types).
     fc = unit.face_df[["x", "y"]].values
-    _, idx = cKDTree(cents).query(fc)
-    unit.face_df["cell_type"] = np.asarray(cell_types)[idx]
-    # Weld coincident Voronoï vertices: cocircular real centroids produce
-    # near-zero-length edges whose geometry gradient is singular (they blow the
-    # mechanics up). Merge vertices within a fraction of the median edge length,
-    # then drop the collapsed edges and any face left with < 3 sides.
-    unit = _weld(unit, tol=0.05 * float(unit.edge_df["length"].median()))
+    _, face_of_cell = cKDTree(fc).query(cents)
+    unit.face_df["cell_type"] = "guard"
+    for i, fid in enumerate(face_of_cell):
+        unit.face_df.loc[fid, "cell_type"] = cell_types[i]
+    unit = _keep_faces(unit, np.array(sorted(set(face_of_cell))))
+    SheetGeometry.update_all(unit)
+    # Light weld only for exactly-coincident Voronoï vertices (keeps the real
+    # shapes; just removes zero-length edges that would break geometry).
+    unit = _weld(unit, tol=0.01 * float(unit.edge_df["length"].median()))
     SheetGeometry.update_all(unit)
     _rescale_to_unit_area(unit)  # median cell area ~1 before baking targets
     # Bake per-cell REST targets so no cell carries a large area/perimeter

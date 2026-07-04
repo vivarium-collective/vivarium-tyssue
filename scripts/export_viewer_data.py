@@ -71,13 +71,12 @@ SHOWCASE = [
      "Wnt/density regulation, with division growing the tissue and apoptotic "
      "extrusion removing cells. Colour by cell type to watch the fate cascade and "
      "cell death over a long run.", 0.02, 1.5, 48),
-    ("hra_crypt_field", "HRA crypt field (2D)",
-     "A 2D epithelium initialized from the Human Reference Atlas: a field of "
-     "intestinal crypts of Lieberkühn, each an exact copy of the HRA 2D-FTU cell "
-     "layout — ~6,700 real Absorptive / Goblet / Stem / Neuroendocrine / Tuft "
-     "cells relaxing under vertex mechanics. Colour by cell type to see the real "
-     "HRA cell identities at scale.",
-     0.02, 0.5, 12),
+    ("hra_crypt_field", "HRA intestinal crypt (2D)",
+     "A single intestinal crypt of Lieberkühn, initialized straight from the "
+     "Human Reference Atlas 2D-FTU illustration — the real cell layout coloured by "
+     "real HRA cell type. Zonation: stem + neuroendocrine at the narrow base, "
+     "absorptive/goblet up the column, tuft near the flared villus top.",
+     0.02, 0.1, 2),
     ("hra_colon_surface", "HRA colon surface (3D)",
      "A 3D epithelial sheet draped over the real HRA large-intestine reference "
      "organ surface (GLB, decimated to ~3k cells), labelled by the crypt's ASCT+B "
