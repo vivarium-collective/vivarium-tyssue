@@ -39,18 +39,15 @@ COMPOSITES = ROOT / "vivarium_tyssue" / "composites"
 
 
 def composite_doc(name, description, eptm_rel, tissue_type="Sheet", interval=0.02,
-                  line_tension=0.02, frozen=False):
+                  line_tension=0.02, max_displacement=0.1):
     """A relaxation composite on the rust EulerSolver (no cell_type param, so
     the per-cell HRA types in the .hf5 are preserved).
 
-    ``frozen=True`` zeroes the elastic moduli and line tension so the mesh does
-    not move — a structural display of a raw real-data mesh (whose irregular
-    cells are too stiff for stable explicit-Euler relaxation). The tissue is
-    shown exactly as HRA initialized it.
+    ``max_displacement`` clamps each vertex's per-step motion — a safety net that
+    lets the irregular real-data mesh relax stably under explicit Euler (a stray
+    stiff cell can't blow the whole mesh up in one step).
     """
-    ka = 0.0 if frozen else 1.0
-    kp = 0.0 if frozen else 0.1
-    lt = 0.0 if frozen else line_tension
+    ka, kp, lt = 1.0, 0.1, line_tension
     return {
         "name": name,
         "description": description,
@@ -89,6 +86,7 @@ def composite_doc(name, description, eptm_rel, tissue_type="Sheet", interval=0.0
                     "auto_reconnect": False,  # keep topology static: stable + small viewer files
                     "bounds": {}, "output_columns": {}, "maps": {},
                     "backend": "rust", "substeps": "${substeps}",
+                    "max_displacement": max_displacement,
                 },
                 "inputs": {"behaviors": ["Behaviors"], "global_time": ["global_time"]},
                 "outputs": {"datasets": ["Datasets"], "network_changed": ["Network Changed"],
@@ -125,8 +123,8 @@ def main():
         "A 2D epithelium built as a 7×6 field of intestinal crypts of Lieberkühn, "
         "each an exact copy of the Human Reference Atlas 2D-FTU cell layout "
         "(real Absorptive / Goblet / Stem / Neuroendocrine / Tuft cells). "
-        "Colour by cell type to see the HRA cell identities; scales to ~8k cells.",
-        "workspace/datasets/hra_crypt_field.hf5", interval=0.02, frozen=True))
+        "Colour by cell type to see the HRA cell identities; scales to ~7k cells.",
+        "workspace/datasets/hra_crypt_field.hf5", interval=0.02))
 
     # --- 3D: epithelium on the real colon surface -------------------------- #
     print("3D colon surface (HRA large-intestine reference organ GLB):")

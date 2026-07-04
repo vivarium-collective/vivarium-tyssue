@@ -162,29 +162,35 @@ def sheet_from_ftu(match: str = "crypt of Lieberkuhn", tile=(1, 1), gap: float =
     # their order/type). Gentle: just enough to kill slivers.
     cents = _lloyd(cents, n_iter=2)
 
-    # One clean unit: Voronoï-tessellate the real centroids, tag each face with
-    # its cell type (faces come back in point order), then trim the unbounded
-    # border regions. Tiling the *centroids* and re-tessellating would fuse tiles
-    # into giant inter-unit cells, so we build one clean unit and replicate the
-    # mesh (below).
-    vor = Voronoi(cents)
-    # A cell is well-formed iff its Voronoï region is bounded (no vertex at
-    # infinity). from_2d_voronoi returns one face per input point in order, so
-    # this mask aligns with both the faces and the cell-type list — keeping every
-    # interior cell (incl. the rare stem/neuroendocrine cells) and dropping only
-    # the unbounded border regions that would otherwise fling a vertex to infinity.
-    bounded = np.array([
-        bool(reg := vor.regions[vor.point_region[i]]) and -1 not in reg
-        for i in range(len(cents))])
+    # One clean unit. The crypt is a tall, narrow column, so MOST of its cells
+    # sit near the point-cloud boundary — a plain Voronoï gives them huge (even
+    # if bounded) cells that render as big spurious triangles. Surround the real
+    # centroids with a ring of guard points a couple of cell-widths out: every
+    # real cell then becomes bounded AND clipped to a normal size, while the
+    # guard cells (which we discard) absorb the unbounded exterior. from_2d_voronoi
+    # returns one face per input point in order, so the first len(cents) faces are
+    # the real cells (aligned with the cell-type list); we keep only those.
+    from scipy.spatial import cKDTree
+
+    guard = _guard_ring(cents)
+    allpts = np.vstack([cents, guard])
+    vor = Voronoi(allpts)
     with contextlib.redirect_stdout(io.StringIO()):
         dsets = from_2d_voronoi(vor)
         unit = Sheet(_slug(match), dsets, coords=["x", "y"])
-        unit.face_df["cell_type"] = pd.Series(
-            [cell_types[i] if i < len(cell_types) else "unknown"
-             for i in range(unit.face_df.shape[0])], index=unit.face_df.index)
-    unit = _keep_faces(unit, np.asarray(unit.face_df.index[bounded[: unit.face_df.shape[0]]]))
     unit = _promote_to_flat_3d(unit, _slug(match))
     SheetGeometry.update_all(unit)
+    # Drop the guard/exterior monster faces (the huge, many-sided regions the
+    # guard ring absorbs) — everything real is now a normal, clipped cell.
+    sides = unit.edge_df.groupby("face").size().reindex(unit.face_df.index).fillna(0)
+    med = float(np.median(unit.face_df["area"]))
+    clean = unit.face_df.index[(unit.face_df["area"].values < 5 * med) & (sides.values <= 12)]
+    unit = _keep_faces(unit, np.asarray(clean))
+    SheetGeometry.update_all(unit)
+    # Label every surviving cell by its nearest real centroid (keeps all types).
+    fc = unit.face_df[["x", "y"]].values
+    _, idx = cKDTree(cents).query(fc)
+    unit.face_df["cell_type"] = np.asarray(cell_types)[idx]
     # Weld coincident Voronoï vertices: cocircular real centroids produce
     # near-zero-length edges whose geometry gradient is singular (they blow the
     # mechanics up). Merge vertices within a fraction of the median edge length,
@@ -308,6 +314,26 @@ def _promote_to_flat_3d(sheet, name: str = "sheet"):
         s3.reset_index()
         s3.reset_topo()
     return s3
+
+
+def _guard_ring(cents: np.ndarray) -> np.ndarray:
+    """A rectangular frame of dummy points ~2 cell-widths outside the centroid
+    cloud. Feeding these into the Voronoï bounds every real cell to a normal
+    size (the frame absorbs the unbounded exterior regions)."""
+    from scipy.spatial import cKDTree
+
+    d, _ = cKDTree(cents).query(cents, k=2)
+    step = float(np.median(d[:, 1]))  # typical cell spacing
+    lo = cents.min(0) - 2 * step
+    hi = cents.max(0) + 2 * step
+    xs = np.arange(lo[0], hi[0] + step, step)
+    ys = np.arange(lo[1], hi[1] + step, step)
+    return np.vstack([
+        np.c_[xs, np.full(len(xs), lo[1])],
+        np.c_[xs, np.full(len(xs), hi[1])],
+        np.c_[np.full(len(ys), lo[0]), ys],
+        np.c_[np.full(len(ys), hi[0]), ys],
+    ])
 
 
 def _lloyd(pts: np.ndarray, n_iter: int = 2) -> np.ndarray:

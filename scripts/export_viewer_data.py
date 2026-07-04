@@ -74,10 +74,10 @@ SHOWCASE = [
     ("hra_crypt_field", "HRA crypt field (2D)",
      "A 2D epithelium initialized from the Human Reference Atlas: a field of "
      "intestinal crypts of Lieberkühn, each an exact copy of the HRA 2D-FTU cell "
-     "layout — ~8,300 real Absorptive / Goblet / Stem / Neuroendocrine / Tuft "
-     "cells. Colour by cell type to see the real HRA cell identities at scale. "
-     "Shown frozen — a structural display of the raw real-data mesh at scale.",
-     0.02, 0.1, 2),
+     "layout — ~6,700 real Absorptive / Goblet / Stem / Neuroendocrine / Tuft "
+     "cells relaxing under vertex mechanics. Colour by cell type to see the real "
+     "HRA cell identities at scale.",
+     0.02, 0.5, 12),
     ("hra_colon_surface", "HRA colon surface (3D)",
      "A 3D epithelial sheet draped over the real HRA large-intestine reference "
      "organ surface (GLB, decimated to ~3k cells), labelled by the crypt's ASCT+B "

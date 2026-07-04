@@ -2,7 +2,7 @@ name: HRA crypt field (2D)
 description: A 2D epithelium built as a 7×6 field of intestinal crypts of 
   Lieberkühn, each an exact copy of the Human Reference Atlas 2D-FTU cell layout
   (real Absorptive / Goblet / Stem / Neuroendocrine / Tuft cells). Colour by 
-  cell type to see the HRA cell identities; scales to ~8k cells.
+  cell type to see the HRA cell identities; scales to ~7k cells.
 tags:
 - tissue
 - mechanics
@@ -33,11 +33,11 @@ state:
       tissue_type: Sheet
       parameters:
         face_df:
-          area_elasticity: 0.0
-          perimeter_elasticity: 0.0
+          area_elasticity: 1.0
+          perimeter_elasticity: 0.1
           is_alive: 1.0
         edge_df:
-          line_tension: 0.0
+          line_tension: 0.02
           is_active: 1.0
         vert_df:
           viscosity: 1.0
@@ -57,6 +57,7 @@ state:
       maps: {}
       backend: rust
       substeps: ${substeps}
+      max_displacement: 0.1
     inputs:
       behaviors:
       - Behaviors

@@ -57,6 +57,7 @@ state:
       maps: {}
       backend: rust
       substeps: ${substeps}
+      max_displacement: 0.1
     inputs:
       behaviors:
       - Behaviors
