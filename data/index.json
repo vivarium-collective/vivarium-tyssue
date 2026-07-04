@@ -62,7 +62,23 @@
       "name": "Intestinal crypt (3D)",
       "is3d": true,
       "n_cells": 704,
-      "n_frames": 40
+      "n_frames": 48
+    },
+    {
+      "file": "hra_crypt_field.json",
+      "slug": "hra_crypt_field",
+      "name": "HRA crypt field (2D)",
+      "is3d": false,
+      "n_cells": 8316,
+      "n_frames": 2
+    },
+    {
+      "file": "hra_colon_surface.json",
+      "slug": "hra_colon_surface",
+      "name": "HRA colon surface (3D)",
+      "is3d": true,
+      "n_cells": 3062,
+      "n_frames": 30
     },
     {
       "file": "tumor.json",
