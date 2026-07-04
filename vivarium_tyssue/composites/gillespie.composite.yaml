@@ -52,7 +52,15 @@ state:
           line_tension: 0.0
           is_active: 1.0
         vert_df:
-          viscosity: 0.05
+          # 0.2 (was 0.05): the stiff PerimeterElasticity term buckles the crypt
+          # tube's free top rim under explicit Euler at low viscosity — the top
+          # cells evert and blow up to NaN by ~t=4.5 (reproducible with ZERO
+          # Gillespie events, so it is a mechanics/stability issue, not a topology
+          # bug). Raising the vertex viscosity shortens the effective explicit
+          # step (dot_r = -grad/viscosity) and keeps the tube well-conditioned to
+          # t>=72. base_solver uses 0.1 with only the soft vessel effector; this
+          # composite's stiffer effector set needs a larger value.
+          viscosity: 0.2
           vessel_elasticity: 1.0
           prefered_radius: 2.5
           is_alive: 1.0
@@ -75,6 +83,12 @@ state:
       maps: {}
       backend: rust
       substeps: ${substeps}
+      # Explicit-Euler safety net: clamp any single vertex's per-step displacement
+      # to 0.2 (normal motion is ~0.02; edge length ~1.2). A division / extrusion
+      # remove_face transient can briefly produce a large local gradient; without
+      # the clamp one such step at ~t=49 blows the whole mesh to NaN. Clamping lets
+      # that transient relax over a few steps and the crypt runs stably past t=72.
+      max_displacement: 0.2
     inputs:
       behaviors:
       - Behaviors

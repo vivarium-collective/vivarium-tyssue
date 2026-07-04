@@ -75,6 +75,14 @@ class EulerSolver(Process):
                                # dt=interval/substeps per update(), materializing
                                # the DataFrames only once at the end (rust sheet
                                # models). Default 1 = one step, bit-identical.
+        "max_displacement": "float", # >0 clamps the per-step |Δposition| of every
+                               # vertex to this value (explicit-Euler safety net).
+                               # Default 0 = off (unchanged behavior). Used by the
+                               # gillespie crypt model, where a division / extrusion
+                               # (remove_face) transient can momentarily produce a
+                               # huge local gradient that would otherwise explode to
+                               # NaN in one step; clamping lets it relax over a few
+                               # steps instead.
     }
 
     def initialize(self, config):
@@ -134,6 +142,8 @@ class EulerSolver(Process):
         self._geom_stash = None  # geometry arrays from the last rust set_pos, fed
         # straight to the next gradient (skips re-reading them from pandas)
         self._substeps = max(1, int(config.get("substeps") or 1))
+        # Explicit-Euler safety clamp on per-step vertex displacement (0 = off).
+        self._max_disp = float(config.get("max_displacement") or 0.0)
         # Native multi-substep integration (DataFrames materialized once per
         # update instead of per step) needs both rust halves and a plain sheet
         # model — the vessel term reads position-derived vertex columns we don't
@@ -405,7 +415,13 @@ class EulerSolver(Process):
             dot_r = self.ode_func()
             if self.bounds is not None:
                 dot_r = np.clip(dot_r, *self.bounds)
-            pos = pos + dot_r * interval
+            delta = dot_r * interval
+            if self._max_disp:
+                # Bound any single-step motion (division / extrusion transient)
+                # so a momentary huge gradient relaxes over several steps instead
+                # of exploding to NaN. Component-wise clamp keeps it cheap.
+                np.clip(delta, -self._max_disp, self._max_disp, out=delta)
+            pos = pos + delta
             self.set_pos(pos)
 
         if self.manager is not None:

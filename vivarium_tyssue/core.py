@@ -26,6 +26,16 @@ def build_core():
     except Exception as exc:  # noqa: BLE001
         print(f"vivarium_tyssue.core: tyssue compat shim not applied ({type(exc).__name__}: {exc})")
 
+    # tyssue topology robustness: guard drop_two_sided_faces (orphan-face
+    # Unalignable-boolean crash) and split_vert (degenerate-face unpack crash)
+    # so long crypt runs with many divisions / extrusions / reconnects don't
+    # abort. See vivarium_tyssue.behaviors.tyssue_patches for the bug details.
+    try:
+        from vivarium_tyssue.behaviors.tyssue_patches import apply_tyssue_topology_patches
+        apply_tyssue_topology_patches()
+    except Exception as exc:  # noqa: BLE001
+        print(f"vivarium_tyssue.core: tyssue topology patches not applied ({type(exc).__name__}: {exc})")
+
     # Custom schema types (tyssue_data, behaviors, tyssue_dset, frame).
     from vivarium_tyssue.data_types import register_types
     core = register_types(core)
