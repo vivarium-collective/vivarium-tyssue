@@ -44,22 +44,22 @@ OUT = ROOT / "viewer" / "data"
 SHOWCASE = [
     ("anisotropic", "Anisotropic elongation",
      "Flat sheet biased by axis-dependent line tension — oriented (anisotropic) "
-     "tissue elongation. Colour by cell area to watch cells stretch.", 0.1, 0.4, 60),
+     "tissue elongation. Colour by cell area to watch cells stretch.", 0.1, 0.6, 70),
     ("stochastic", "Stochastic line tension",
      "Flat sheet with Ornstein–Uhlenbeck line-tension noise on every edge — "
-     "jittery, fluctuating cell shapes.", 0.1, 0.4, 60),
+     "jittery, fluctuating cell shapes.", 0.1, 0.6, 70),
     ("gradient", "Preferred-perimeter gradient",
      "Flat sheet with a linear spatial gradient of preferred perimeter along x, "
-     "so cell size varies smoothly across the sheet.", 0.1, 0.4, 60),
+     "so cell size varies smoothly across the sheet.", 0.1, 0.6, 70),
     ("jamming", "Stochastic + jamming",
      "Flat sheet with stochastic line tension plus a CellJamming event that ramps "
-     "preferred perimeter toward a rigid, jammed regime.", 0.1, 0.4, 60),
+     "preferred perimeter toward a rigid, jammed regime.", 0.1, 0.6, 70),
     ("epithelium_2d", "Baseline 2D relaxation",
      "Plain flat (square) sheet relaxing to mechanical equilibrium — the baseline "
-     "2D epithelium, no behaviours.", 0.05, 0.2, 50),
+     "2D epithelium, no behaviours.", 0.05, 0.3, 50),
     ("base_solver", "Vessel relaxation (3D)",
      "Cylindrical (vessel) sheet relaxing to mechanical equilibrium — a true 3D "
-     "surface. Orbit to inspect the tube.", 0.02, 0.1, 50),
+     "surface. Orbit to inspect the tube.", 0.02, 0.3, 50),
     ("monolayer_liftoff", "Monolayer lift-off (3D)",
      "A 3D monolayer with apical/basal surfaces: an apical purse-string (line tension "
      "on every apical edge) contracts the top face while cell volume is conserved, so "
@@ -67,10 +67,26 @@ SHOWCASE = [
      "see the apical faces shrink.", 0.05, 0.2, 50),
     ("gillespie", "Intestinal crypt (3D)",
      "Crypt model on a cylinder: mechanics plus a Gillespie process firing "
-     "stochastic cell-type transitions under Wnt/density regulation.", 0.005, 0.02, 40),
+     "stochastic cell-type transitions (stem→progenitor→enterocyte/goblet) under "
+     "Wnt/density regulation, with division growing the tissue and apoptotic "
+     "extrusion removing cells. Colour by cell type to watch the fate cascade and "
+     "cell death over a long run.", 0.02, 1.5, 48),
+    ("hra_crypt_field", "HRA crypt field (2D)",
+     "A 2D epithelium initialized from the Human Reference Atlas: a field of "
+     "intestinal crypts of Lieberkühn, each an exact copy of the HRA 2D-FTU cell "
+     "layout — ~8,300 real Absorptive / Goblet / Stem / Neuroendocrine / Tuft "
+     "cells. Colour by cell type to see the real HRA cell identities at scale. "
+     "Shown frozen — a structural display of the raw real-data mesh at scale.",
+     0.02, 0.1, 2),
+    ("hra_colon_surface", "HRA colon surface (3D)",
+     "A 3D epithelial sheet draped over the real HRA large-intestine reference "
+     "organ surface (GLB, decimated to ~3k cells), labelled by the crypt's ASCT+B "
+     "cell-type proportions. Orbit to inspect real anatomy — not a generated mesh.",
+     0.02, 0.2, 30),
     ("tumor", "Tumor growth (COPASI-coupled)",
-     "Flat sheet coupled to a breast-cancer population ODE in COPASI; cells divide "
-     "as the tumour grows (needs the COPASI process).", 0.01, 0.05, 40),
+     "Flat sheet coupled to a breast-cancer population ODE in COPASI; a central seed "
+     "divides into a growing tumour clone (1 → ~120 tumour cells) as healthy tissue is "
+     "displaced. Colour by cell type to watch the clone expand.", 0.05, 2.0, 70),
 ]
 
 

@@ -1,0 +1,74 @@
+name: HRA colon surface (3D)
+description: A 3D epithelial sheet draped over the real Human Reference Atlas 
+  large-intestine reference organ surface (decimated to ~3k cells), with cells 
+  labelled by the crypt's ASCT+B cell-type proportions. Orbit to inspect the 
+  anatomy; this is a real organ shape, not a generated mesh.
+tags:
+- tissue
+- mechanics
+- hra
+requires:
+  processes:
+  - EulerSolver
+  types:
+  - tyssue_data
+  - behaviors
+emitters: []
+parameters:
+  interval:
+    type: float
+    default: 0.02
+    description: Emit / update interval. Solver dt = interval / substeps.
+  substeps:
+    type: int
+    default: 1
+    description: Native Euler steps per update (rust sheet models).
+state:
+  Tyssue:
+    _type: process
+    address: local:EulerSolver
+    config:
+      name: HRA colon surface (3D)
+      eptm: workspace/datasets/hra_colon_surface.hf5
+      tissue_type: Sheet
+      parameters:
+        face_df:
+          area_elasticity: 1.0
+          perimeter_elasticity: 0.1
+          is_alive: 1.0
+        edge_df:
+          line_tension: 0.02
+          is_active: 1.0
+        vert_df:
+          viscosity: 1.0
+          is_alive: 1.0
+      geom: SheetGeometry
+      effectors:
+      - LineTension
+      - FaceAreaElasticity
+      - PerimeterElasticity
+      ref_effector: FaceAreaElasticity
+      factory: model_factory
+      settings:
+        threshold_length: 0.03
+      auto_reconnect: false
+      bounds: {}
+      output_columns: {}
+      maps: {}
+      backend: rust
+      substeps: ${substeps}
+    inputs:
+      behaviors:
+      - Behaviors
+      global_time:
+      - global_time
+    outputs:
+      datasets:
+      - Datasets
+      network_changed:
+      - Network Changed
+      behaviors_update:
+      - Behaviors
+    interval: ${interval}
+  Network Changed: false
+  Behaviors: {}

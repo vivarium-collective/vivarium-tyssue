@@ -1,0 +1,74 @@
+name: HRA crypt field (2D)
+description: A 2D epithelium built as a 7×6 field of intestinal crypts of 
+  Lieberkühn, each an exact copy of the Human Reference Atlas 2D-FTU cell layout
+  (real Absorptive / Goblet / Stem / Neuroendocrine / Tuft cells). Colour by 
+  cell type to see the HRA cell identities; scales to ~8k cells.
+tags:
+- tissue
+- mechanics
+- hra
+requires:
+  processes:
+  - EulerSolver
+  types:
+  - tyssue_data
+  - behaviors
+emitters: []
+parameters:
+  interval:
+    type: float
+    default: 0.02
+    description: Emit / update interval. Solver dt = interval / substeps.
+  substeps:
+    type: int
+    default: 1
+    description: Native Euler steps per update (rust sheet models).
+state:
+  Tyssue:
+    _type: process
+    address: local:EulerSolver
+    config:
+      name: HRA crypt field (2D)
+      eptm: workspace/datasets/hra_crypt_field.hf5
+      tissue_type: Sheet
+      parameters:
+        face_df:
+          area_elasticity: 0.0
+          perimeter_elasticity: 0.0
+          is_alive: 1.0
+        edge_df:
+          line_tension: 0.0
+          is_active: 1.0
+        vert_df:
+          viscosity: 1.0
+          is_alive: 1.0
+      geom: SheetGeometry
+      effectors:
+      - LineTension
+      - FaceAreaElasticity
+      - PerimeterElasticity
+      ref_effector: FaceAreaElasticity
+      factory: model_factory
+      settings:
+        threshold_length: 0.03
+      auto_reconnect: false
+      bounds: {}
+      output_columns: {}
+      maps: {}
+      backend: rust
+      substeps: ${substeps}
+    inputs:
+      behaviors:
+      - Behaviors
+      global_time:
+      - global_time
+    outputs:
+      datasets:
+      - Datasets
+      network_changed:
+      - Network Changed
+      behaviors_update:
+      - Behaviors
+    interval: ${interval}
+  Network Changed: false
+  Behaviors: {}
