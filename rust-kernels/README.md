@@ -49,7 +49,17 @@ wired into `EulerSolver`. Add a new equivalence test alongside each new kernel.
 | `edge_lengths(pos, srce, trgt)` | tyssue `update_length` | ✅ proven (1e-12) |
 | `scatter_add(values, index, n_vert)` | the two `groupby(...).sum()` in `compute_gradient` (edge→vertex assembly) | ✅ proven (1e-12) |
 | `update_geometry(pos, srce, trgt, face, n_face)` | `SheetGeometry.update_all` stateless core: dcoords/length/centroid/normals/area/perimeter | ✅ proven (~1e-15, **~20×**; Sheet + Vessel — see note) |
-| `assemble_gradient(...)` | per-effector kernels + assembly | ⏳ next |
+| `sheet_gradient(...)` | all of `compute_gradient` for the standard 3-effector sheet model (LineTension + PerimeterElasticity + FaceAreaElasticity) incl. edge→vertex assembly | ✅ proven (~1e-15; both factories — see note) |
+
+**Gradient-kernel scope:** `sheet_gradient` fuses the three standard sheet
+effectors and the two `groupby.sum()` reductions into one pass, consuming
+tyssue's geometry columns as-is (so it reproduces even the stale-length
+`ucoords` quirk). It matches both `model_factory` and `model_factory_bound` to
+~1e-15 — the caller supplies the boundary mask (bound factory zeros boundary
+vertices; plain does not). Models with other effectors (e.g. base_solver's
+`VesselSurfaceElasticity`) fall back to Python. The ~2.4× measured is limited by
+marshalling ~10 pandas columns per call; in Phase B those inputs live in Rust
+and the pure kernel is far faster.
 
 **Geometry-kernel scope:** `update_geometry` implements the `SheetGeometry`
 formula, which `VesselGeometry` inherits unchanged (both match to ~1e-15). It

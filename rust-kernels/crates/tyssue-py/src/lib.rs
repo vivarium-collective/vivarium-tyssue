@@ -92,11 +92,54 @@ fn update_geometry<'py>(
     Ok(out)
 }
 
+/// Fused gradient for the standard 3-effector sheet model + edge->vertex
+/// assembly (all of `compute_gradient`). Takes tyssue's geometry columns as-is;
+/// returns grad_i as (n_vert*3,) float64 (reshape to (-1, 3) on the Python side).
+#[allow(clippy::too_many_arguments)]
+#[pyfunction]
+fn sheet_gradient<'py>(
+    py: Python<'py>,
+    ucoords: PyReadonlyArray2<'py, f64>,
+    normals: PyReadonlyArray2<'py, f64>,
+    sub_area: PyReadonlyArray1<'py, f64>,
+    r_ak: PyReadonlyArray2<'py, f64>,
+    r_aj: PyReadonlyArray2<'py, f64>,
+    srce: PyReadonlyArray1<'py, u32>,
+    trgt: PyReadonlyArray1<'py, u32>,
+    face: PyReadonlyArray1<'py, u32>,
+    line_active: PyReadonlyArray1<'py, f64>,
+    gamma_face: PyReadonlyArray1<'py, f64>,
+    ka_face: PyReadonlyArray1<'py, f64>,
+    boundary: PyReadonlyArray1<'py, u8>,
+    n_vert: usize,
+    norm_factor: f64,
+) -> PyResult<Bound<'py, PyArray1<f64>>> {
+    let c = |a: &str| PyValueError::new_err(format!("{a} must be C-contiguous"));
+    let out = core::sheet_gradient(
+        ucoords.as_slice().map_err(|_| c("ucoords"))?,
+        normals.as_slice().map_err(|_| c("normals"))?,
+        sub_area.as_slice().map_err(|_| c("sub_area"))?,
+        r_ak.as_slice().map_err(|_| c("r_ak"))?,
+        r_aj.as_slice().map_err(|_| c("r_aj"))?,
+        srce.as_slice().map_err(|_| c("srce"))?,
+        trgt.as_slice().map_err(|_| c("trgt"))?,
+        face.as_slice().map_err(|_| c("face"))?,
+        line_active.as_slice().map_err(|_| c("line_active"))?,
+        gamma_face.as_slice().map_err(|_| c("gamma_face"))?,
+        ka_face.as_slice().map_err(|_| c("ka_face"))?,
+        boundary.as_slice().map_err(|_| c("boundary"))?,
+        n_vert,
+        norm_factor,
+    );
+    Ok(out.into_pyarray_bound(py))
+}
+
 #[pymodule]
 fn tyssue_kernels(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__doc__", "Rust numeric kernels for the tyssue vertex-model hot loop.")?;
     m.add_function(wrap_pyfunction!(edge_lengths, m)?)?;
     m.add_function(wrap_pyfunction!(scatter_add, m)?)?;
     m.add_function(wrap_pyfunction!(update_geometry, m)?)?;
+    m.add_function(wrap_pyfunction!(sheet_gradient, m)?)?;
     Ok(())
 }

@@ -164,6 +164,88 @@ pub fn update_geometry(
     }
 }
 
+/// Fused gradient for the standard 3-effector sheet model
+/// (LineTension + PerimeterElasticity + FaceAreaElasticity) plus the
+/// edge->vertex assembly — i.e. all of `model.compute_gradient` for that model.
+///
+/// It *consumes* the geometry columns tyssue already wrote (ucoords, normals,
+/// sub_area, r_ak = srce-face, r_aj = trgt-face) rather than recomputing them,
+/// so it reproduces `compute_gradient` exactly — including tyssue's quirk that
+/// `ucoords` is normalized by the previous step's (stale) length. It only
+/// replaces the pandas arithmetic + the two `groupby.sum()` reductions.
+///
+/// Per-edge tension coefficient is `0.5*line_active + gamma_face[f]`
+/// (LineTension carries the 0.5 on half-edges; PerimeterElasticity does not).
+/// Area term is `ka_face[f] * inv_area * cross(...)`, `inv_area = 1/(4*sub_area)`
+/// (0 where sub_area==0). Returns grad_i as (n_vert, 3), divided by norm_factor.
+#[allow(clippy::too_many_arguments)]
+pub fn sheet_gradient(
+    ucoords: &[f64],     // (n_edge, 3) unit edge vectors, as tyssue stored them
+    normals: &[f64],     // (n_edge, 3)
+    sub_area: &[f64],    // (n_edge,)
+    r_ak: &[f64],        // (n_edge, 3) srce_pos - face_pos
+    r_aj: &[f64],        // (n_edge, 3) trgt_pos - face_pos
+    srce: &[u32],
+    trgt: &[u32],
+    face: &[u32],
+    line_active: &[f64], // (n_edge,) line_tension * is_active
+    gamma_face: &[f64],  // (n_face,) perim_elasticity*is_alive*(perimeter-prefered)
+    ka_face: &[f64],     // (n_face,) area_elasticity*is_alive*(area-prefered)
+    boundary: &[u8],     // (n_vert,) 1 => clamp this vertex's gradient to 0
+                         // (model_factory_bound); all-zeros for model_factory.
+    n_vert: usize,
+    norm_factor: f64,
+) -> Vec<f64> {
+    let ne = srce.len();
+    let mut grad = vec![0.0f64; n_vert * 3];
+    for e in 0..ne {
+        let f = face[e] as usize;
+        let eo = e * 3;
+        let coeff = 0.5 * line_active[e] + gamma_face[f];
+        let sa = sub_area[e];
+        let inv_area = if sa != 0.0 { 1.0 / (4.0 * sa) } else { 0.0 };
+        let kia = ka_face[f] * inv_area;
+
+        let (ux, uy, uz) = (ucoords[eo], ucoords[eo + 1], ucoords[eo + 2]);
+        let (nx, ny, nz) = (normals[eo], normals[eo + 1], normals[eo + 2]);
+        let (akx, aky, akz) = (r_ak[eo], r_ak[eo + 1], r_ak[eo + 2]);
+        let (ajx, ajy, ajz) = (r_aj[eo], r_aj[eo + 1], r_aj[eo + 2]);
+
+        // area gradient: srce uses cross(r_aj, normal), trgt uses cross(normal, r_ak)
+        let cs_x = ajy * nz - ajz * ny;
+        let cs_y = ajz * nx - ajx * nz;
+        let cs_z = ajx * ny - ajy * nx;
+        let ct_x = ny * akz - nz * aky;
+        let ct_y = nz * akx - nx * akz;
+        let ct_z = nx * aky - ny * akx;
+
+        let gs = [-ux * coeff + kia * cs_x, -uy * coeff + kia * cs_y, -uz * coeff + kia * cs_z];
+        let gt = [ux * coeff + kia * ct_x, uy * coeff + kia * ct_y, uz * coeff + kia * ct_z];
+
+        let sv = srce[e] as usize * 3;
+        let tv = trgt[e] as usize * 3;
+        for d in 0..3 {
+            grad[sv + d] += gs[d];
+            grad[tv + d] += gt[d];
+        }
+    }
+    // model_factory_bound: clamp boundary vertices to zero after assembly.
+    for v in 0..n_vert {
+        if boundary.get(v).copied().unwrap_or(0) == 1 {
+            grad[v * 3] = 0.0;
+            grad[v * 3 + 1] = 0.0;
+            grad[v * 3 + 2] = 0.0;
+        }
+    }
+    if norm_factor != 1.0 {
+        let inv = 1.0 / norm_factor;
+        for g in grad.iter_mut() {
+            *g *= inv;
+        }
+    }
+    grad
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
