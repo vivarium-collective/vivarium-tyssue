@@ -34,8 +34,8 @@ SUMMARY = ROOT / "benchmarks" / "SUMMARY.md"
 
 # geometry family -> (representative composite, backends to try)
 CONFIGS = [
-    ("sheet", "anisotropic", ["python", "rust"]),        # SheetGeometry, 3-effector
-    ("vessel", "base_solver", ["python"]),               # VesselGeometry (4-effector: rust N/A)
+    ("sheet", "anisotropic", ["python", "rust"]),        # SheetGeometry: rust geometry + gradient
+    ("vessel", "base_solver", ["python", "rust"]),       # VesselGeometry: rust geometry (4-effector -> python gradient)
     ("monolayer", "monolayer_liftoff", ["python"]),      # MonolayerGeometry / bulk (rust N/A)
 ]
 
@@ -62,7 +62,7 @@ def bench_one(composite, backend, interval, warmup, updates):
     spec["state"]["Tyssue"]["config"]["backend"] = backend
     comp = build_composite_from_spec(spec, overrides={"interval": interval}, core=build_core())
     proc = comp.state["Tyssue"]["instance"]
-    if backend == "rust" and not getattr(proc, "_rust_gradient", False):
+    if backend == "rust" and not (getattr(proc, "_rust_gradient", False) or getattr(proc, "_rust_geometry", False)):
         return None  # kernel not built or model unsupported — skip, don't fake it
     eptm = proc.eptm
     times = []

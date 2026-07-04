@@ -41,13 +41,25 @@ def gradient_supported(effectors, factory, dim):
     )
 
 
-def geometry_supported(geom_name, dim):
-    """Whether the Rust geometry kernel reproduces this geometry's update_all.
+# Geometries whose update_all == SheetGeometry.update_all core (+ cheap vertex
+# steps we replay in python). Monolayer/Bulk redefine the core -> unsupported.
+_GEOM_SUPPORTED = {"SheetGeometry", "VesselGeometry"}
 
-    Only plain ``SheetGeometry`` (dim 3): VesselGeometry/MonolayerGeometry/Bulk
-    override update_all with extra steps the kernel doesn't compute.
-    """
-    return dim == 3 and geom_name == "SheetGeometry" and rust_kernels_available()
+
+def geometry_supported(geom_name, dim):
+    """Whether the Rust geometry path reproduces this geometry's update_all."""
+    return dim == 3 and geom_name in _GEOM_SUPPORTED and rust_kernels_available()
+
+
+def rust_geometry_update(eptm, geom, srce, trgt, face):
+    """Rust replacement for ``geom.update_all``: the SheetGeometry core via the
+    kernel, plus any cheap geometry-specific vertex steps. VesselGeometry adds
+    ``update_tangents`` + ``update_vert_distance`` (vectorized numpy, no groupby),
+    replayed here so the result is bit-identical to the python update_all."""
+    rust_update_geometry(eptm, srce, trgt, face)
+    if geom.__name__ == "VesselGeometry":
+        geom.update_tangents(eptm)
+        geom.update_vert_distance(eptm)
 
 
 def rust_update_geometry(eptm, srce, trgt, face):

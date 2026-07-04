@@ -198,45 +198,48 @@ def test_sheet_gradient_matches_compute_gradient(composite):
     )
 
 
-@pytest.mark.parametrize("mesh,tissue,geom", [m for m in MESHES if m[2] == "SheetGeometry"],
+@pytest.mark.parametrize("mesh,tissue,geom", SHEET_MESHES,  # SheetGeometry + VesselGeometry
                          ids=lambda x: x if isinstance(x, str) else "")
-def test_rust_update_geometry_matches_update_all(mesh, tissue, geom):
-    """rust_update_geometry writes the SAME edge/face columns as SheetGeometry
-    .update_all (bit-for-bit), so it's a drop-in per-step geometry replacement."""
+def test_rust_geometry_update_matches_update_all(mesh, tissue, geom):
+    """rust_geometry_update writes the SAME edge/face/vert columns as
+    geom.update_all (bit-for-bit) — a drop-in per-step geometry replacement for
+    both SheetGeometry and VesselGeometry."""
     pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
     import sys
 
     sys.path.insert(0, str(ROOT))
-    from vivarium_tyssue.processes.utils import rust_update_geometry
+    from vivarium_tyssue.maps import GEOMETRY_MAP
+    from vivarium_tyssue.processes.utils import rust_geometry_update
 
+    geom_cls = GEOMETRY_MAP[geom]
     a = _load_eptm(mesh, tissue, geom)  # deterministic loads -> two identical meshes
     b = _load_eptm(mesh, tissue, geom)
     delta = np.random.default_rng(0).normal(0, 0.02, (a.Nv, len(a.coords)))
     a.vert_df[a.coords] += delta
     b.vert_df[b.coords] += delta
 
-    from tyssue.geometry.sheet_geometry import SheetGeometry
-    SheetGeometry.update_all(a)  # python reference
+    geom_cls.update_all(a)  # python reference
 
     vmap = {v: i for i, v in enumerate(b.vert_df.index)}
     fmap = {v: i for i, v in enumerate(b.face_df.index)}
     srce = np.ascontiguousarray(b.edge_df["srce"].map(vmap).values, np.uint32)
     trgt = np.ascontiguousarray(b.edge_df["trgt"].map(vmap).values, np.uint32)
     face = np.ascontiguousarray(b.edge_df["face"].map(fmap).values, np.uint32)
-    SheetGeometry.update_boundary_index(b)  # boundary set once (topology-invariant)
-    rust_update_geometry(b, srce, trgt, face)
+    geom_cls.update_boundary_index(b)  # boundary set once (topology-invariant)
+    rust_geometry_update(b, geom_cls, srce, trgt, face)
 
-    worst = 0.0
-    for df in ("edge_df", "face_df"):
+    for df in ("edge_df", "face_df", "vert_df"):
         da, db = getattr(a, df), getattr(b, df)
         for col in da.columns:
             if da[col].dtype.kind not in "fi":
                 continue
             assert col in db.columns, f"rust path missing column {df}.{col}"
-            m = np.nanmax(np.abs(da[col].values - db[col].values))
-            assert m < 1e-9, f"{df}.{col}: max|Δ|={m:.3e}"
-            worst = max(worst, m)
-    assert worst < 1e-9
+            va, vb = da[col].values.astype(float), db[col].values.astype(float)
+            # equal_nan: unset parameter columns (e.g. line_tension) are NaN in
+            # both and untouched by update_all — that's a match, not a diff.
+            assert np.allclose(va, vb, atol=1e-9, rtol=0.0, equal_nan=True), (
+                f"{df}.{col}: max|Δ|={np.nanmax(np.abs(va - vb)):.3e}"
+            )
 
 
 # ---------------------------------------------------------------------------

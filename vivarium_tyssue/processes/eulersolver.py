@@ -16,8 +16,8 @@ from vivarium_tyssue.processes.utils import (
     SUPPORTED_EFFECTORS,
     geometry_supported,
     gradient_supported,
+    rust_geometry_update,
     rust_sheet_gradient,
-    rust_update_geometry,
 )
 
 from tyssue.behaviors.event_manager import EventManager
@@ -214,7 +214,7 @@ class EulerSolver(Process):
         eptm = self.eptm
         eptm.vert_df.loc[eptm.active_verts, eptm.coords] = pos.reshape((-1, eptm.dim))
         srce, trgt, face = self._topo_arrays()
-        rust_update_geometry(eptm, srce, trgt, face)
+        rust_geometry_update(eptm, self.geom, srce, trgt, face)
 
     def ode_func(self):
         """Computes the models' gradient.
