@@ -242,6 +242,32 @@ def test_rust_geometry_update_matches_update_all(mesh, tissue, geom):
             )
 
 
+def test_vessel_gradient_matches_compute_gradient():
+    """rust_sheet_gradient(with_vessel=True) == tyssue compute_gradient for the
+    4-effector vessel model (base_solver). Built via the composite so the vessel
+    parameters (vessel_elasticity, prefered_radius) are actually set."""
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from pbg_superpowers.composite_spec import build_composite_from_spec, load_spec
+    from vivarium_tyssue.core import build_core
+    from vivarium_tyssue.processes.utils import rust_sheet_gradient
+
+    spec = load_spec(ROOT / "vivarium_tyssue" / "composites" / "base_solver.composite.yaml")
+    spec["emitters"] = []
+    comp = build_composite_from_spec(spec, overrides={"interval": 0.001}, core=build_core())
+    proc = comp.state["Tyssue"]["instance"]
+    assert proc._with_vessel, "base_solver should carry VesselSurfaceElasticity"
+
+    proc.eptm.edge_df["line_tension"] = np.random.default_rng(2).uniform(0.5, 1.5, proc.eptm.Ne)
+    proc.geom.update_all(proc.eptm)
+    ref = np.asarray(proc.model.compute_gradient(proc.eptm)).astype(np.float64)
+    got = rust_sheet_gradient(proc.eptm, proc._is_bound, proc._with_vessel)
+    assert np.allclose(got, ref, atol=1e-10, rtol=0.0), f"max|Δ|={np.max(np.abs(got - ref)):.3e}"
+
+
 # ---------------------------------------------------------------------------
 # Backend wiring: the `backend: rust` flag on EulerSolver.
 # ---------------------------------------------------------------------------
@@ -256,8 +282,10 @@ def test_gradient_supported_gating():
     if rust_kernels_available():
         assert gradient_supported(std, "model_factory", 3) is True
         assert gradient_supported(list(reversed(std)), "model_factory_bound", 3) is True
-    # unsupported: extra effector, wrong factory, 2D — never engage
-    assert gradient_supported(std + ["VesselSurfaceElasticity"], "model_factory", 3) is False
+        # the vessel 4-effector set is also supported (radial vertex term)
+        assert gradient_supported(std + ["VesselSurfaceElasticity"], "model_factory", 3) is True
+    # unsupported: an effector not in the kernel, wrong factory, 2D — never engage
+    assert gradient_supported(std + ["FaceContractility"], "model_factory", 3) is False
     assert gradient_supported(std, "model_factory_vessel", 3) is False
     assert gradient_supported(std, "model_factory", 2) is False
 
@@ -300,9 +328,11 @@ def test_backend_equivalence_anisotropic():
     )
 
 
-@pytest.mark.parametrize("composite", ["stochastic", "anisotropic", "jamming", "gradient"])
+@pytest.mark.parametrize("composite", ["stochastic", "anisotropic", "jamming", "gradient", "base_solver"])
 def test_supported_composites_run_on_rust(composite):
     """Every rust-supported composite advances a step with the rust backend engaged."""
     pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
-    _, proc = _run_composite_backend(composite, "rust", steps=1, interval=0.01)
-    assert proc._rust_gradient is True, f"{composite} did not engage the rust backend"
+    _, proc = _run_composite_backend(composite, "rust", steps=1, interval=0.001)
+    # base_solver (vessel) engages geometry + the vessel gradient; sheets both.
+    assert proc._rust_gradient is True, f"{composite} did not engage the rust gradient"
+    assert proc._rust_geometry is True, f"{composite} did not engage rust geometry"

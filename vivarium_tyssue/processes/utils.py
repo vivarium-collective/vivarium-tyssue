@@ -10,10 +10,13 @@ The Rust path is opt-in (``backend: "rust"``) and only engages for the standard
 """
 import numpy as np
 
-# The fused gradient kernel implements exactly these three effectors.
+# The fused gradient kernel implements exactly these three edge effectors.
 SUPPORTED_EFFECTORS = frozenset(
     {"LineTension", "FaceAreaElasticity", "PerimeterElasticity"}
 )
+# The cylinder demos add a vertex-based radial effector, handled as a cheap
+# numpy term on top of the kernel (see rust_sheet_gradient).
+VESSEL_EFFECTORS = SUPPORTED_EFFECTORS | {"VesselSurfaceElasticity"}
 SUPPORTED_FACTORIES = frozenset({"model_factory", "model_factory_bound"})
 
 
@@ -28,17 +31,21 @@ def rust_kernels_available():
 
 
 def gradient_supported(effectors, factory, dim):
-    """Whether the Rust gradient kernel can reproduce this model's gradient.
+    """Whether the Rust gradient path can reproduce this model's gradient.
 
-    Requires exactly the three standard sheet effectors (any order), one of the
-    supported factories, a 3D mesh, and the compiled kernel present.
+    The three standard sheet effectors (any order), optionally plus the vessel
+    radial effector; one of the supported factories; a 3D mesh; kernel present.
     """
     return (
         dim == 3
-        and set(effectors) == SUPPORTED_EFFECTORS
+        and set(effectors) in (SUPPORTED_EFFECTORS, VESSEL_EFFECTORS)
         and factory in SUPPORTED_FACTORIES
         and rust_kernels_available()
     )
+
+
+def has_vessel_effector(effectors):
+    return "VesselSurfaceElasticity" in effectors
 
 
 # Geometries whose update_all == SheetGeometry.update_all core (+ cheap vertex
@@ -102,13 +109,14 @@ def rust_update_geometry(eptm, srce, trgt, face):
         fd["vol"] = eptm.sum_face(ed["sub_vol"])
 
 
-def rust_sheet_gradient(eptm, is_bound):
+def rust_sheet_gradient(eptm, is_bound, with_vessel=False):
     """Return ``model.compute_gradient(eptm)`` for the standard sheet model as a
     ``(Nv, 3)`` ndarray in ``vert_df`` order, computed by the Rust kernel.
 
     Consumes tyssue's geometry columns as-is (so it reproduces the stale-length
     ``ucoords`` exactly). ``is_bound`` selects the boundary-vertex clamp that
-    distinguishes ``model_factory_bound`` from ``model_factory``.
+    distinguishes ``model_factory_bound`` from ``model_factory``. ``with_vessel``
+    adds the VesselSurfaceElasticity vertex term (a cheap radial numpy term).
     """
     import tyssue_kernels as tk
 
@@ -118,6 +126,7 @@ def rust_sheet_gradient(eptm, is_bound):
     fmap = {v: i for i, v in enumerate(fd.index)}
     C = np.ascontiguousarray
 
+    norm_factor = float(eptm.specs["settings"].get("nrj_norm_factor", 1.0))
     r_aj = ed[["t" + c for c in coords]].values - ed[["f" + c for c in coords]].values
     boundary = (
         eptm.vert_df["boundary"].values.astype(np.uint8)
@@ -144,6 +153,18 @@ def rust_sheet_gradient(eptm, is_bound):
         ),
         C(boundary, dtype=np.uint8),
         eptm.Nv,
-        float(eptm.specs["settings"].get("nrj_norm_factor", 1.0)),
+        norm_factor,
     )
-    return np.asarray(flat).reshape(eptm.Nv, 3)
+    grad = np.asarray(flat).reshape(eptm.Nv, 3)
+
+    if with_vessel:
+        # VesselSurfaceElasticity: a per-vertex radial force added to grad_i,
+        # ka = vessel_elasticity*is_alive*(distance_origin - prefered_radius),
+        # along the radial unit (ox, oy, 0). Divided by norm_factor like the rest.
+        vd = eptm.vert_df
+        ka = (vd["vessel_elasticity"] * vd["is_alive"] * (vd["distance_origin"] - vd["prefered_radius"])).values
+        radial = np.zeros((eptm.Nv, 3))
+        radial[:, 0] = vd["ox"].values
+        radial[:, 1] = vd["oy"].values
+        grad += (ka[:, None] * radial) / norm_factor
+    return grad

@@ -16,6 +16,7 @@ from vivarium_tyssue.processes.utils import (
     SUPPORTED_EFFECTORS,
     geometry_supported,
     gradient_supported,
+    has_vessel_effector,
     rust_geometry_update,
     rust_sheet_gradient,
 )
@@ -116,6 +117,7 @@ class EulerSolver(Process):
         # fall back to Python transparently (with a warning if rust was asked for).
         self._backend = (config.get("backend") or "python").lower()
         self._is_bound = config["factory"] == "model_factory_bound"
+        self._with_vessel = has_vessel_effector(config["effectors"])
         self._rust_gradient = False
         self._rust_geometry = False
         self._topo = None  # cached (signature, srce, trgt, face) positional arrays
@@ -224,7 +226,7 @@ class EulerSolver(Process):
         """
         active = self.eptm.active_verts
         if self._rust_gradient:
-            grad = rust_sheet_gradient(self.eptm, self._is_bound)  # (Nv, dim), vert_df order
+            grad = rust_sheet_gradient(self.eptm, self._is_bound, self._with_vessel)  # (Nv, dim)
             pos_of = {v: i for i, v in enumerate(self.eptm.vert_df.index)}
             grad_U = grad[[pos_of[v] for v in active]]
         else:
