@@ -41,12 +41,13 @@ CONFIGS = [
 
 
 def git_commit():
+    """Short HEAD hash, marked +dirty only if *code* (not the benchmark's own
+    output files) is uncommitted — writing results.jsonl mustn't self-flag."""
     try:
         h = subprocess.check_output(["git", "rev-parse", "--short", "HEAD"], cwd=ROOT).decode().strip()
-        dirty = (
-            subprocess.call(["git", "diff", "--quiet"], cwd=ROOT) != 0
-            or subprocess.call(["git", "diff", "--cached", "--quiet"], cwd=ROOT) != 0
-        )
+        status = subprocess.check_output(["git", "status", "--porcelain"], cwd=ROOT).decode().splitlines()
+        ignore = {"benchmarks/results.jsonl", "benchmarks/SUMMARY.md"}
+        dirty = any(line[3:].strip() not in ignore for line in status if line.strip())
         return h + ("+dirty" if dirty else "")
     except Exception:
         return "unknown"
