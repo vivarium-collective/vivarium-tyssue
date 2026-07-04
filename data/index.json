@@ -54,14 +54,14 @@
       "name": "Monolayer lift-off (3D)",
       "is3d": true,
       "n_cells": 1590,
-      "n_frames": 50
+      "n_frames": 60
     },
     {
       "file": "gillespie.json",
       "slug": "gillespie",
       "name": "Intestinal crypt (3D)",
       "is3d": true,
-      "n_cells": 704,
+      "n_cells": 733,
       "n_frames": 48
     },
     {
