@@ -6,11 +6,10 @@ Higher `cell·updates/s` = more cells feasible per unit time. Appended by
 
 | geometry | backend | cells | ms/update | updates/s | cell·updates/s | commit |
 |---|---|--:|--:|--:|--:|---|
-| monolayer | python | 1590 | 10.69 | 94 | 148,686 | `1631640+dirty` |
-| sheet | python | 206 | 7.77 | 129 | 26,505 | `1631640+dirty` |
-| sheet | rust | 206 | 1.42 | 706 | 145,425 | `1631640+dirty` |
-| sheet-scan | python | 1482 | 11.77 | 85 | 125,866 | `1631640+dirty` |
-| sheet-scan | rust | 1482 | 1.31 | 766 | 1,135,288 | `1631640+dirty` |
-| sheet-substep | rust | 206 | 0.32 | 3149 | 648,632 | `1631640+dirty` |
-| vessel | python | 320 | 9.32 | 107 | 34,337 | `1631640+dirty` |
-| vessel | rust | 320 | 2.39 | 418 | 133,913 | `1631640+dirty` |
+| monolayer | python | 1590 | 10.73 | 93 | 148,191 | `15ba2be+dirty` |
+| monolayer | rust | 1590 | 5.40 | 185 | 294,675 | `15ba2be+dirty` |
+| sheet | python | 206 | 7.59 | 132 | 27,126 | `15ba2be+dirty` |
+| sheet | rust | 206 | 1.39 | 721 | 148,569 | `15ba2be+dirty` |
+| sheet-substep | rust | 206 | 0.31 | 3276 | 674,894 | `15ba2be+dirty` |
+| vessel | python | 320 | 9.41 | 106 | 34,017 | `15ba2be+dirty` |
+| vessel | rust | 320 | 2.39 | 418 | 133,714 | `15ba2be+dirty` |

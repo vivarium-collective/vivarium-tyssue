@@ -49,13 +49,41 @@ def has_vessel_effector(effectors):
 
 
 # Geometries whose update_all == SheetGeometry.update_all core (+ cheap vertex
-# steps we replay in python). Monolayer/Bulk redefine the core -> unsupported.
+# steps we replay in python). The Rust *sheet* kernel serves these.
 _GEOM_SUPPORTED = {"SheetGeometry", "VesselGeometry"}
+# 3D volumetric geometries (cells with volume) served by the Rust *bulk* kernel —
+# they redefine the core with weighted centroids + per-cell areas/volumes.
+_BULK_GEOM_SUPPORTED = {
+    "BulkGeometry", "RNRGeometry", "MonolayerGeometry", "ClosedMonolayerGeometry",
+}
+
+
+def is_bulk_geometry(geom_name):
+    """True if this geometry needs the Rust *bulk* (Monolayer/Bulk) kernel."""
+    return geom_name in _BULK_GEOM_SUPPORTED
 
 
 def geometry_supported(geom_name, dim):
-    """Whether the Rust geometry path reproduces this geometry's update_all."""
-    return dim == 3 and geom_name in _GEOM_SUPPORTED and rust_kernels_available()
+    """Whether a Rust geometry path (sheet or bulk) reproduces this update_all."""
+    return (
+        dim == 3
+        and (geom_name in _GEOM_SUPPORTED or geom_name in _BULK_GEOM_SUPPORTED)
+        and rust_kernels_available()
+    )
+
+
+def rust_bulk_geometry_update(eptm, srce, trgt, face, cell, pos=None):
+    """In-place Rust replacement for ``MonolayerGeometry/BulkGeometry.update_all``:
+    ``compute_geometry_bulk`` then ``materialize_geometry_bulk`` (edge/face/cell
+    frames). Bit-identical (~1e-13). ``cell`` is the positional cell index of each
+    edge. Returns the ``geom`` dict."""
+    coords = eptm.coords
+    if pos is None:
+        pos = eptm.vert_df[coords].values
+    old_len = eptm.edge_df["length"].values.copy()  # stale length feeds ucoords
+    geom = compute_geometry_bulk(eptm, srce, trgt, face, cell, pos, old_len)
+    materialize_geometry_bulk(eptm, geom, which=("edge", "face", "cell"))
+    return geom
 
 
 def rust_geometry_update(eptm, geom, srce, trgt, face, pos=None):
@@ -145,6 +173,70 @@ def materialize_geometry(eptm, geom, which=("edge", "face")):
         ed["sub_vol"] = eptm.upcast_srce(eptm.vert_df["height"]) * ed["sub_area"]
         if "face" in which:
             fd["vol"] = eptm.sum_face(ed["sub_vol"])
+
+
+def compute_geometry_bulk(eptm, srce, trgt, face, cell, pos, old_len):
+    """Pure-native Bulk/Monolayer geometry via the Rust kernel — writes no
+    DataFrames. Returns every array ``MonolayerGeometry.update_all`` produces
+    (edge s/t/d/u/f/r/c/normals/sub_area/sub_vol/length, face centroid/area/
+    perimeter, cell centroid/area/vol), bit-identical (~1e-13). ``cell`` is the
+    positional cell index of each edge; ``old_len`` the previous edge length
+    (feeds the stale ``ucoords`` quirk)."""
+    import tyssue_kernels as tk
+
+    pos = np.ascontiguousarray(pos, dtype=np.float64)
+    g = tk.update_geometry_bulk(pos, srce, trgt, face, cell, eptm.Nf, eptm.Nc)
+    d = np.asarray(g["dcoords"]).reshape(-1, 3)
+    fcen = np.asarray(g["face_centroid"]).reshape(-1, 3)
+    ccen = np.asarray(g["cell_centroid"]).reshape(-1, 3)
+    return {
+        "scoords": pos[srce],
+        "tcoords": pos[trgt],
+        "dcoords": d,
+        "ucoords": d / old_len[:, None],
+        "length": np.asarray(g["length"]),
+        "face_centroid": fcen,
+        "cell_centroid": ccen,
+        "fcoords": fcen[face],
+        "rcoords": np.asarray(g["rcoords"]).reshape(-1, 3),
+        "ccoords": ccen[cell],
+        "normals": np.asarray(g["normals"]).reshape(-1, 3),
+        "sub_area": np.asarray(g["sub_area"]),
+        "sub_vol": np.asarray(g["sub_vol"]),
+        "face_area": np.asarray(g["face_area"]),
+        "cell_area": np.asarray(g["cell_area"]),
+        "cell_vol": np.asarray(g["cell_vol"]),
+        "perimeter": np.asarray(g["perimeter"]),
+    }
+
+
+def materialize_geometry_bulk(eptm, geom, which=("edge", "face", "cell")):
+    """Write native Bulk/Monolayer geometry arrays (from ``compute_geometry_bulk``)
+    back into the epithelium's edge/face/cell DataFrames — the bulk analogue of
+    ``materialize_geometry``, adding the c-coords, sub_vol, and the whole cell_df
+    (centroid/area/vol)."""
+    coords = eptm.coords
+    ed, fd, cd = eptm.edge_df, eptm.face_df, eptm.cell_df
+    if "edge" in which:
+        ed[["s" + c for c in coords]] = geom["scoords"]
+        ed[["t" + c for c in coords]] = geom["tcoords"]
+        ed[["d" + c for c in coords]] = geom["dcoords"]
+        ed[["u" + c for c in coords]] = geom["ucoords"]
+        ed["length"] = geom["length"]
+        ed[["f" + c for c in coords]] = geom["fcoords"]
+        ed[["r" + c for c in coords]] = geom["rcoords"]
+        ed[["c" + c for c in coords]] = geom["ccoords"]
+        ed[eptm.ncoords] = geom["normals"]
+        ed["sub_area"] = geom["sub_area"]
+        ed["sub_vol"] = geom["sub_vol"]
+    if "face" in which:
+        fd[coords] = geom["face_centroid"]
+        fd["area"] = geom["face_area"]
+        fd["perimeter"] = geom["perimeter"]
+    if "cell" in which:
+        cd[coords] = geom["cell_centroid"]
+        cd["area"] = geom["cell_area"]
+        cd["vol"] = geom["cell_vol"]
 
 
 def rust_update_geometry(eptm, srce, trgt, face, pos=None):

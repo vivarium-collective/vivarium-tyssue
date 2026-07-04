@@ -36,7 +36,7 @@ SUMMARY = ROOT / "benchmarks" / "SUMMARY.md"
 CONFIGS = [
     ("sheet", "anisotropic", ["python", "rust"]),        # SheetGeometry: rust geometry + gradient
     ("vessel", "base_solver", ["python", "rust"]),       # VesselGeometry: rust geometry (4-effector -> python gradient)
-    ("monolayer", "monolayer_liftoff", ["python"]),      # MonolayerGeometry / bulk (rust N/A)
+    ("monolayer", "monolayer_liftoff", ["python", "rust"]),  # 3D bulk: rust geometry (gradient python)
 ]
 
 # Phase B native sub-stepping: integrate N solver steps per update(), DataFrames

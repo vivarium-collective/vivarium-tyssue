@@ -18,7 +18,9 @@ from vivarium_tyssue.processes.utils import (
     geometry_supported,
     gradient_supported,
     has_vessel_effector,
+    is_bulk_geometry,
     materialize_geometry,
+    rust_bulk_geometry_update,
     rust_geometry_update,
     rust_sheet_gradient,
 )
@@ -136,6 +138,7 @@ class EulerSolver(Process):
         # update instead of per step) needs both rust halves and a plain sheet
         # model — the vessel term reads position-derived vertex columns we don't
         # refresh mid-loop, so vessel/python fall back to per-step materializing.
+        self._bulk_geometry = is_bulk_geometry(self.geom.__name__)
         if self._backend == "rust":
             self._rust_geometry = geometry_supported(self.geom.__name__, self.eptm.dim)
             if gradient_supported(config["effectors"], config["factory"], self.eptm.dim):
@@ -241,7 +244,12 @@ class EulerSolver(Process):
             # can use whole-column pandas access (~20× faster than label-based
             # ``.loc[active_verts]``, which pays index-alignment every step).
             self._active_full = len(active) == e.Nv and active.equals(e.vert_df.index)
-            self._topo = (sig, srce, trgt, face, active_pos)
+            # bulk (Monolayer/Bulk) geometry also needs the per-edge cell index
+            cell = None
+            if self._bulk_geometry and "cell" in e.edge_df.columns:
+                cmap = {c: i for i, c in enumerate(e.cell_df.index)}
+                cell = np.ascontiguousarray(e.edge_df["cell"].map(cmap).values, dtype=np.uint32)
+            self._topo = (sig, srce, trgt, face, active_pos, cell)
         return self._topo[1], self._topo[2], self._topo[3], self._topo[4]
 
     def set_pos(self, pos):
@@ -259,9 +267,15 @@ class EulerSolver(Process):
         else:
             eptm.vert_df.loc[eptm.active_verts, eptm.coords] = p
             kernel_pos = None  # inactive verts also feed edges; let the kernel read all
-        self._geom_stash = rust_geometry_update(
-            eptm, self.geom, srce, trgt, face, pos=kernel_pos
-        )
+        if self._bulk_geometry:  # 3D volumetric: bulk kernel, python gradient reads DFs
+            cell = self._topo[5]
+            self._geom_stash = rust_bulk_geometry_update(
+                eptm, srce, trgt, face, cell, pos=kernel_pos
+            )
+        else:
+            self._geom_stash = rust_geometry_update(
+                eptm, self.geom, srce, trgt, face, pos=kernel_pos
+            )
 
     def _integrate_native(self, interval, substeps):
         """Integrate ``substeps`` explicit-Euler steps of ``dt = interval/substeps``

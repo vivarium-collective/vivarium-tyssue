@@ -92,6 +92,49 @@ fn update_geometry<'py>(
     Ok(out)
 }
 
+/// Bulk / Monolayer `update_all` core in one pass. Like `update_geometry` but
+/// with a length-weighted face centroid and per-cell centroids / areas /
+/// volumes. `cell` is the positional cell index of each edge. Returns a dict of
+/// flat float64 arrays: edge (n_edge,) `length`/`sub_area`/`sub_vol`; edge*3
+/// `dcoords`/`rcoords`/`normals`; face (n_face,) `face_area`/`perimeter`; face*3
+/// `face_centroid`; cell (n_cell,) `cell_area`/`cell_vol`; cell*3 `cell_centroid`.
+#[pyfunction]
+fn update_geometry_bulk<'py>(
+    py: Python<'py>,
+    pos: PyReadonlyArray2<'py, f64>,
+    srce: PyReadonlyArray1<'py, u32>,
+    trgt: PyReadonlyArray1<'py, u32>,
+    face: PyReadonlyArray1<'py, u32>,
+    cell: PyReadonlyArray1<'py, u32>,
+    n_face: usize,
+    n_cell: usize,
+) -> PyResult<Bound<'py, PyDict>> {
+    let c = |a: &str| PyValueError::new_err(format!("{a} must be C-contiguous"));
+    let g = core::update_geometry_bulk(
+        pos.as_slice().map_err(|_| c("pos"))?,
+        srce.as_slice().map_err(|_| c("srce"))?,
+        trgt.as_slice().map_err(|_| c("trgt"))?,
+        face.as_slice().map_err(|_| c("face"))?,
+        cell.as_slice().map_err(|_| c("cell"))?,
+        n_face,
+        n_cell,
+    );
+    let out = PyDict::new_bound(py);
+    out.set_item("dcoords", g.dcoords.into_pyarray_bound(py))?;
+    out.set_item("length", g.length.into_pyarray_bound(py))?;
+    out.set_item("face_centroid", g.face_centroid.into_pyarray_bound(py))?;
+    out.set_item("cell_centroid", g.cell_centroid.into_pyarray_bound(py))?;
+    out.set_item("rcoords", g.rcoords.into_pyarray_bound(py))?;
+    out.set_item("normals", g.normals.into_pyarray_bound(py))?;
+    out.set_item("sub_area", g.sub_area.into_pyarray_bound(py))?;
+    out.set_item("face_area", g.face_area.into_pyarray_bound(py))?;
+    out.set_item("cell_area", g.cell_area.into_pyarray_bound(py))?;
+    out.set_item("sub_vol", g.sub_vol.into_pyarray_bound(py))?;
+    out.set_item("cell_vol", g.cell_vol.into_pyarray_bound(py))?;
+    out.set_item("perimeter", g.perimeter.into_pyarray_bound(py))?;
+    Ok(out)
+}
+
 /// Fused gradient for the standard 3-effector sheet model + edge->vertex
 /// assembly (all of `compute_gradient`). Takes tyssue's geometry columns as-is;
 /// returns grad_i as (n_vert*3,) float64 (reshape to (-1, 3) on the Python side).
@@ -140,6 +183,7 @@ fn tyssue_kernels(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(edge_lengths, m)?)?;
     m.add_function(wrap_pyfunction!(scatter_add, m)?)?;
     m.add_function(wrap_pyfunction!(update_geometry, m)?)?;
+    m.add_function(wrap_pyfunction!(update_geometry_bulk, m)?)?;
     m.add_function(wrap_pyfunction!(sheet_gradient, m)?)?;
     Ok(())
 }

@@ -164,6 +164,151 @@ pub fn update_geometry(
     }
 }
 
+/// Result of `update_geometry_bulk` — the Monolayer/Bulk `update_all` core.
+pub struct BulkGeometry {
+    pub dcoords: Vec<f64>,       // (n_edge, 3)   trgt - srce
+    pub length: Vec<f64>,        // (n_edge,)
+    pub face_centroid: Vec<f64>, // (n_face, 3)   length-weighted (RNRGeometry)
+    pub cell_centroid: Vec<f64>, // (n_cell, 3)   mean of srce over the cell
+    pub rcoords: Vec<f64>,       // (n_edge, 3)   srce - face_centroid
+    pub normals: Vec<f64>,       // (n_edge, 3)   cross(r, d)
+    pub sub_area: Vec<f64>,      // (n_edge,)     ||normal|| / 2
+    pub face_area: Vec<f64>,     // (n_face,)     Σ_face sub_area
+    pub cell_area: Vec<f64>,     // (n_cell,)     Σ_cell sub_area
+    pub sub_vol: Vec<f64>,       // (n_edge,)     ((f - c)·n) / 6
+    pub cell_vol: Vec<f64>,      // (n_cell,)     Σ_cell sub_vol
+    pub perimeter: Vec<f64>,     // (n_face,)     Σ_face length
+}
+
+/// Bulk / Monolayer `update_all` core (BulkGeometry + RNRGeometry): like the
+/// sheet kernel but with a **length-weighted** face centroid, per-**cell**
+/// centroids / areas / volumes, and the tetrahedral sub-volume. Reproduces
+/// `MonolayerGeometry.update_all` bit-identically (minus the stale `ucoords`,
+/// which the caller derives from the previous length, exactly as for the sheet).
+///
+/// `cell` is the positional cell index (0..n_cell) of each edge. Excludes the
+/// `update_ucoords` stale-length step (stateful — done in Python).
+pub fn update_geometry_bulk(
+    pos: &[f64],
+    srce: &[u32],
+    trgt: &[u32],
+    face: &[u32],
+    cell: &[u32],
+    n_face: usize,
+    n_cell: usize,
+) -> BulkGeometry {
+    let dim = 3usize;
+    let ne = srce.len();
+    let mut dcoords = vec![0.0f64; ne * dim];
+    let mut length = vec![0.0f64; ne];
+    let mut perimeter = vec![0.0f64; n_face];
+    let mut fc_weighted = vec![0.0f64; n_face * dim]; // Σ mid*length
+    let mut face_centroid = vec![0.0f64; n_face * dim];
+    let mut cell_centroid = vec![0.0f64; n_cell * dim];
+    let mut cell_count = vec![0u32; n_cell];
+    let mut rcoords = vec![0.0f64; ne * dim];
+    let mut normals = vec![0.0f64; ne * dim];
+    let mut sub_area = vec![0.0f64; ne];
+    let mut face_area = vec![0.0f64; n_face];
+    let mut cell_area = vec![0.0f64; n_cell];
+    let mut sub_vol = vec![0.0f64; ne];
+    let mut cell_vol = vec![0.0f64; n_cell];
+
+    // Pass 1: edge vectors + lengths; accumulate perimeter, the length-weighted
+    // face centroid (Σ mid*length), and the cell centroid (Σ srce, count).
+    for e in 0..ne {
+        let s = srce[e] as usize * dim;
+        let t = trgt[e] as usize * dim;
+        let f = face[e] as usize;
+        let c = cell[e] as usize;
+        let eo = e * dim;
+        let mut acc = 0.0f64;
+        for d in 0..dim {
+            let delta = pos[t + d] - pos[s + d];
+            dcoords[eo + d] = delta;
+            acc += delta * delta;
+            cell_centroid[c * dim + d] += pos[s + d];
+        }
+        let len = acc.sqrt();
+        length[e] = len;
+        perimeter[f] += len;
+        cell_count[c] += 1;
+        // weighted face centroid contribution: mid = (srce+trgt)/2, weight = length
+        for d in 0..dim {
+            let mid = (pos[s + d] + pos[t + d]) * 0.5;
+            fc_weighted[f * dim + d] += mid * len;
+        }
+    }
+    for f in 0..n_face {
+        let p = perimeter[f];
+        if p > 0.0 {
+            let inv = 1.0 / p;
+            for d in 0..dim {
+                face_centroid[f * dim + d] = fc_weighted[f * dim + d] * inv;
+            }
+        }
+    }
+    for c in 0..n_cell {
+        let cnt = cell_count[c];
+        if cnt > 0 {
+            let inv = 1.0 / cnt as f64;
+            for d in 0..dim {
+                cell_centroid[c * dim + d] *= inv;
+            }
+        }
+    }
+
+    // Pass 2: r = srce - face_centroid; normal = cross(r, d); sub_area; sub_vol
+    // = ((face_centroid - cell_centroid)·normal)/6; reduce to face and cell.
+    for e in 0..ne {
+        let s = srce[e] as usize * dim;
+        let f = face[e] as usize;
+        let c = cell[e] as usize;
+        let eo = e * dim;
+        let rx = pos[s] - face_centroid[f * dim];
+        let ry = pos[s + 1] - face_centroid[f * dim + 1];
+        let rz = pos[s + 2] - face_centroid[f * dim + 2];
+        rcoords[eo] = rx;
+        rcoords[eo + 1] = ry;
+        rcoords[eo + 2] = rz;
+        let dx = dcoords[eo];
+        let dy = dcoords[eo + 1];
+        let dz = dcoords[eo + 2];
+        let nx = ry * dz - rz * dy;
+        let ny = rz * dx - rx * dz;
+        let nz = rx * dy - ry * dx;
+        normals[eo] = nx;
+        normals[eo + 1] = ny;
+        normals[eo + 2] = nz;
+        let sa = (nx * nx + ny * ny + nz * nz).sqrt() / 2.0;
+        sub_area[e] = sa;
+        face_area[f] += sa;
+        cell_area[c] += sa;
+        // sub_vol = dot(face_centroid - cell_centroid, normal) / 6
+        let fcx = face_centroid[f * dim] - cell_centroid[c * dim];
+        let fcy = face_centroid[f * dim + 1] - cell_centroid[c * dim + 1];
+        let fcz = face_centroid[f * dim + 2] - cell_centroid[c * dim + 2];
+        let sv = (fcx * nx + fcy * ny + fcz * nz) / 6.0;
+        sub_vol[e] = sv;
+        cell_vol[c] += sv;
+    }
+
+    BulkGeometry {
+        dcoords,
+        length,
+        face_centroid,
+        cell_centroid,
+        rcoords,
+        normals,
+        sub_area,
+        face_area,
+        cell_area,
+        sub_vol,
+        cell_vol,
+        perimeter,
+    }
+}
+
 /// Fused gradient for the standard 3-effector sheet model
 /// (LineTension + PerimeterElasticity + FaceAreaElasticity) plus the
 /// edge->vertex assembly — i.e. all of `model.compute_gradient` for that model.

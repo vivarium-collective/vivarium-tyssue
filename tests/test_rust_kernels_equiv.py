@@ -380,6 +380,25 @@ def test_native_substeps_match_single_steps():
         )
 
 
+def test_monolayer_bulk_geometry_rust_matches_python():
+    """3D volumetric: the Monolayer/Bulk geometry kernel reproduces
+    MonolayerGeometry.update_all — python and rust backends trace the same
+    trajectory (incl. cell volumes) on a real monolayer. Gradient stays python
+    (monolayer effectors aren't in the kernel); geometry is rust."""
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    py_pos, pp = _run_composite_backend("monolayer_liftoff", "python", steps=0.06, interval=0.01)
+    ru_pos, pr = _run_composite_backend("monolayer_liftoff", "rust", steps=0.06, interval=0.01)
+    assert pp._bulk_geometry is True and pp._rust_geometry is False
+    assert pr._bulk_geometry is True and pr._rust_geometry is True
+    assert np.allclose(py_pos, ru_pos, atol=1e-9, rtol=0.0), (
+        f"monolayer backends diverged: max|Δ|={np.max(np.abs(py_pos - ru_pos)):.3e}"
+    )
+    assert np.allclose(
+        pp.eptm.cell_df["vol"].values, pr.eptm.cell_df["vol"].values, atol=1e-9, rtol=0.0
+    ), "cell volumes diverged"
+
+
 def test_to_dataframes_materializes_and_returns_eptm():
     """The public converter returns the epithelium with geometry frames current."""
     pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
