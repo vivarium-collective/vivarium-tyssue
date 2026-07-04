@@ -127,9 +127,11 @@ def bench_sweep_one(n, backend, warmup, updates):
         trgt = np.ascontiguousarray(s.edge_df["trgt"].map(vmap).values, np.uint32)
         face = np.ascontiguousarray(s.edge_df["face"].map(fmap).values, np.uint32)
 
-        def one():  # what the rust backend actually runs each step
-            rust_update_geometry(s, srce, trgt, face)
-            rust_sheet_gradient(s, False)
+        topo = (srce, trgt, face)
+
+        def one():  # mirror EulerSolver: stash geometry arrays, reuse in gradient
+            stash = rust_update_geometry(s, srce, trgt, face)
+            rust_sheet_gradient(s, False, topo=topo, geom=stash)
     else:
         def one():
             SheetGeometry.update_all(s)
