@@ -83,6 +83,63 @@ def bench_one(composite, backend, interval, warmup, updates):
     }
 
 
+def make_flat_sheet(n):
+    """Generate a runnable NxN flat 3D sheet with the standard sheet model.
+
+    Depends on the pandas-3 sanitize() fix; promotes the 2D grid to 3D (z=0) so
+    SheetGeometry's normals work. Returns (sheet, model)."""
+    from tyssue import Sheet, SheetGeometry
+    from tyssue.dynamics import effectors, model_factory
+
+    s = Sheet.planar_sheet_2d(f"s{n}", nx=n, ny=n, distx=1, disty=1)
+    s.sanitize(trim_borders=True)
+    s.vert_df["z"] = 0.0
+    s = Sheet(f"s{n}", {"vert": s.vert_df, "edge": s.edge_df, "face": s.face_df}, coords=["x", "y", "z"])
+    model = model_factory(
+        [effectors.LineTension, effectors.FaceAreaElasticity, effectors.PerimeterElasticity],
+        effectors.FaceAreaElasticity,
+    )
+    s.update_specs(model.specs, reset=True)
+    s.vert_df["viscosity"] = 1.0
+    SheetGeometry.update_all(s)
+    return s, model
+
+
+def bench_sweep_one(n, backend, warmup, updates):
+    """Per-update MATH cost (geom.update_all + gradient) on a generated sheet."""
+    from tyssue import SheetGeometry
+    from vivarium_tyssue.processes.utils import rust_kernels_available, rust_sheet_gradient
+
+    s, model = make_flat_sheet(n)
+    if backend == "rust":
+        if not rust_kernels_available():
+            return None
+        grad = lambda: rust_sheet_gradient(s, False)  # noqa: E731
+    else:
+        grad = lambda: model.compute_gradient(s)  # noqa: E731
+
+    def one():
+        SheetGeometry.update_all(s)
+        grad()
+
+    times = []
+    for _ in range(warmup):
+        one()
+    for _ in range(updates):
+        t = time.perf_counter()
+        one()
+        times.append(time.perf_counter() - t)
+    ms = statistics.median(times) * 1e3
+    return {
+        "cells": int(s.Nf),
+        "verts": int(s.Nv),
+        "edges": int(s.Ne),
+        "per_update_ms": round(ms, 4),
+        "updates_per_sec": round(1000 / ms, 1),
+        "cell_updates_per_sec": round(s.Nf * 1000 / ms),
+    }
+
+
 def load_prior():
     if not RESULTS.exists():
         return []
@@ -120,6 +177,36 @@ def write_summary(prior):
     SUMMARY.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def run_sweep(args, commit, prior):
+    """Scaling curve: per-update math cost vs cell count on generated sheets."""
+    sizes = [int(x) for x in args.sizes.split(",")]
+    records = []
+    print(f"commit {commit}  SCALING SWEEP (generated sheets, per-update math)\n")
+    header = f"{'grid':>6s} {'cells':>6s} {'edges':>6s} {'py ms':>8s} {'rust ms':>8s} {'speedup':>8s} {'rust cell·upd/s':>16s}"
+    print(header)
+    print("-" * len(header))
+    for n in sizes:
+        try:
+            py = bench_sweep_one(n, "python", args.warmup, args.updates)
+            ru = bench_sweep_one(n, "rust", args.warmup, args.updates)
+        except Exception as e:
+            print(f"{n}x{n:<3} ERROR: {type(e).__name__}: {str(e)[:50]}")
+            continue
+        speed = f"{py['per_update_ms'] / ru['per_update_ms']:.2f}x" if ru else "n/a"
+        rcu = f"{ru['cell_updates_per_sec']:,}" if ru else "n/a"
+        print(f"{n}x{n:<3} {py['cells']:>6d} {py['edges']:>6d} {py['per_update_ms']:>8.3f} "
+              f"{ru['per_update_ms'] if ru else float('nan'):>8.3f} {speed:>8s} {rcu:>16s}")
+        for backend, res in (("python", py), ("rust", ru)):
+            if res:
+                records.append({"commit": commit, "label": args.label, "geometry": "sheet-scan",
+                                "scope": "math", "backend": backend, "grid": n, **res})
+    if not args.no_write and records:
+        with RESULTS.open("a") as f:
+            for rec in records:
+                f.write(json.dumps(rec) + "\n")
+        print(f"\nappended {len(records)} sweep records -> {RESULTS.relative_to(ROOT)}")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--label", default="", help="what changed since last run")
@@ -127,12 +214,18 @@ def main():
     ap.add_argument("--warmup", type=int, default=5)
     ap.add_argument("--interval", type=float, default=0.001)
     ap.add_argument("--no-write", action="store_true", help="print only, don't append")
+    ap.add_argument("--sweep", action="store_true",
+                    help="cells-vs-time scaling sweep over generated sheet sizes (needs the sanitize fix)")
+    ap.add_argument("--sizes", default="8,16,24,32,40", help="NxN grid sizes for --sweep")
     args = ap.parse_args()
 
     commit = git_commit()
     prior = load_prior()
     RESULTS.parent.mkdir(exist_ok=True)
     new_records = []
+
+    if args.sweep:
+        return run_sweep(args, commit, prior)
 
     print(f"commit {commit}  label={args.label!r}\n")
     header = f"{'geometry':10s} {'backend':7s} {'cells':>6s} {'ms/upd':>8s} {'upd/s':>7s} {'cell·upd/s':>12s}  vs last"
