@@ -138,6 +138,35 @@ def _ftu_cell_centroids(match: str):
     return cents, cell_types, onto
 
 
+def _silhouette_lattice(cents, h, mask=1.15, collar=2.2):
+    """A hex lattice masked to the shape of a point cloud, plus a guard collar.
+
+    Returns ``(inside, guard)`` point arrays. ``inside`` is the subset of a
+    regular hex lattice (spacing ``h``) that falls within ``mask*h`` of a real
+    centroid — so it fills exactly the region the cells occupy (the crypt's
+    narrow column + flared top), but on a *regular* grid. ``guard`` is the ring
+    of lattice points just outside that (within ``collar*h`` of an inside point):
+    Voronoï-tessellating ``inside ∪ guard`` gives clean, uniform hexagonal cells
+    for every inside point, with the collar bounding the boundary cells so none
+    spike outward. This is what turns the irregular real centroids into a mesh
+    that reads like an actual tissue slice.
+    """
+    from scipy.spatial import cKDTree
+
+    lo = cents.min(0) - 3 * h
+    hi = cents.max(0) + 3 * h
+    xs = np.arange(lo[0], hi[0], h)
+    ys = np.arange(lo[1], hi[1], h * np.sqrt(3) / 2)  # hex row pitch
+    lat = np.array([(x + (h / 2 if j % 2 else 0.0), y)
+                    for j, y in enumerate(ys) for x in xs])
+    dc = cKDTree(cents).query(lat)[0]
+    inside = lat[dc < mask * h]
+    outside = lat[dc >= mask * h]
+    dg = cKDTree(inside).query(outside)[0]
+    guard = outside[dg < collar * h]
+    return inside, guard
+
+
 def sheet_from_ftu(match: str = "crypt of Lieberkuhn", tile=(1, 1), gap: float = 1.15):
     """Build a 2D :class:`~tyssue.Sheet` from an HRA 2D FTU illustration.
 
@@ -157,31 +186,37 @@ def sheet_from_ftu(match: str = "crypt of Lieberkuhn", tile=(1, 1), gap: float =
     from scipy.spatial import cKDTree
 
     cents, cell_types, onto = _ftu_cell_centroids(match)
-    # Faithful tessellation. The raw HRA centroids carry the real crypt structure:
-    # stem + neuroendocrine cells at the narrow base, absorptive/goblet up the
-    # column, flaring to a wide villus top. We deliberately do NOT Lloyd-relax
-    # (that homogenizes spacing and erases the base→villus zonation) and do NOT
-    # remove cells by area (the flared-top cells are legitimately large). Instead:
-    # guard-ring the cloud so every real cell is bounded, Voronoï-tessellate, then
-    # keep exactly the one face nearest each real centroid — that selects the real
-    # cells (with their true shapes + types) and discards the huge guard/exterior
-    # faces.
-    guard = _guard_ring(cents)
-    vor = Voronoi(np.vstack([cents, guard]))
+    # Tissue-slice tessellation. The raw HRA centroids are irregularly spaced
+    # artist cell-marks (nearest-neighbour spacing runs 1.8–24), so a Voronoï of
+    # them spikes at every boundary and looks nothing like tissue. What actually
+    # carries the biology is the crypt ARCHITECTURE (a narrow column flaring to a
+    # wide villus top) and the cell-type ZONATION (stem + neuroendocrine at the
+    # base, absorptive/goblet up the column, tuft near the top). We keep both but
+    # re-tile the occupied region with a clean, uniform mesh: lay a hex lattice,
+    # mask it to the crypt silhouette, add a one-ring guard collar so boundary
+    # cells stay bounded, Voronoï-tessellate, then paint each clean cell with the
+    # type of the nearest real HRA centroid. Result: clean packed cells that read
+    # like a tissue slice, carrying the real crypt shape + zonation.
+    h = float(np.median(cKDTree(cents).query(cents, k=2)[0][:, 1]))
+    inside, guard = _silhouette_lattice(cents, h)
+    vor = Voronoi(np.vstack([inside, guard]))
     with contextlib.redirect_stdout(io.StringIO()):
         dsets = from_2d_voronoi(vor)
         unit = Sheet(_slug(match), dsets, coords=["x", "y"])
     unit = _promote_to_flat_3d(unit, _slug(match))
     SheetGeometry.update_all(unit)
     fc = unit.face_df[["x", "y"]].values
-    _, face_of_cell = cKDTree(fc).query(cents)
+    _, face_of_cell = cKDTree(fc).query(inside)  # one clean face per lattice point
+    keep = np.array(sorted(set(face_of_cell)))
+    # Paint each kept cell by the nearest REAL centroid — transfers the true HRA
+    # zonation (base→villus cell types) onto the clean, uniform cells.
+    _, nearest_real = cKDTree(cents).query(unit.face_df.loc[keep, ["x", "y"]].values)
     unit.face_df["cell_type"] = "guard"
-    for i, fid in enumerate(face_of_cell):
-        unit.face_df.loc[fid, "cell_type"] = cell_types[i]
-    unit = _keep_faces(unit, np.array(sorted(set(face_of_cell))))
+    unit.face_df.loc[keep, "cell_type"] = [cell_types[i] for i in nearest_real]
+    unit = _keep_faces(unit, keep)
     SheetGeometry.update_all(unit)
-    # Light weld only for exactly-coincident Voronoï vertices (keeps the real
-    # shapes; just removes zero-length edges that would break geometry).
+    # Light weld only for exactly-coincident Voronoï vertices (removes zero-length
+    # edges that would break geometry).
     unit = _weld(unit, tol=0.01 * float(unit.edge_df["length"].median()))
     SheetGeometry.update_all(unit)
     _rescale_to_unit_area(unit)  # median cell area ~1 before baking targets
@@ -204,12 +239,21 @@ def sheet_from_ftu(match: str = "crypt of Lieberkuhn", tile=(1, 1), gap: float =
 # 3D reference-organ GLB  ->  draped Sheet
 # --------------------------------------------------------------------------- #
 def sheet_from_organ_glb(match: str = "large intestine", keep: float = 0.15,
-                         cell_types=None, seed: int = 0):
+                         target_cells: int = None, cell_types=None, seed: int = 0):
     """Drape a :class:`~tyssue.Sheet` over a real HRA reference-organ surface.
 
-    Downloads the organ's GLB, decimates it to ``keep`` (fraction of faces
-    retained), and rebuilds it as a tyssue half-edge sheet — one face per mesh
-    triangle. If ``cell_types`` (a ``{name: proportion}`` dict, e.g. from
+    Downloads the organ's GLB and rebuilds it as a tyssue half-edge sheet — one
+    face per mesh triangle. Two ways to set the cell resolution:
+
+    - ``target_cells`` (preferred for a fine, tissue-like surface): *subdivide*
+      the full-resolution organ mesh to a single uniform edge length chosen so
+      the sheet has ~``target_cells`` roughly equal-sized cells. This keeps all
+      the real anatomy (nothing is decimated away) and makes every cell small
+      relative to the whole organ.
+    - ``keep`` (legacy): *decimate* the mesh to that fraction of its faces —
+      fewer, larger, non-uniform cells. Only used when ``target_cells`` is None.
+
+    If ``cell_types`` (a ``{name: proportion}`` dict, e.g. from
     :func:`asctb_cell_types`) is given, faces are labelled by sampling it.
 
     Returns ``(sheet, meta)``.
@@ -229,7 +273,23 @@ def sheet_from_organ_glb(match: str = "large intestine", keep: float = 0.15,
 
     V0 = np.asarray(mesh.vertices, float)
     F0 = np.asarray(mesh.faces)
-    V, F = simplify(V0, F0, target_reduction=1.0 - keep)
+    if target_cells:
+        # Uniformly subdivide the FULL organ mesh until every triangle is below a
+        # target edge length picked so the surface carries ~target_cells cells.
+        # Surface area A of ~N equilateral triangles of edge L: A ≈ N·(√3/4)·L²,
+        # so L = sqrt(A / (N·√3/4)). subdivide_to_size only ever *splits* faces
+        # (keeps the real surface), giving many small, roughly uniform cells.
+        full = trimesh.Trimesh(vertices=V0, faces=F0, process=False)
+        max_edge = float(np.sqrt(full.area / (target_cells * (np.sqrt(3) / 4))))
+        V, F = trimesh.remesh.subdivide_to_size(V0, F0, max_edge=max_edge, max_iter=12)
+        # subdivide_to_size only splits, so it overshoots (the organ mesh already
+        # carries many sub-max_edge faces). Decimate the fine, uniform result back
+        # to ~target_cells — still small, uniform cells, but a mesh we can simulate.
+        if len(F) > target_cells * 1.1:
+            V, F = simplify(np.asarray(V, float), np.asarray(F),
+                            target_reduction=1.0 - target_cells / len(F))
+    else:
+        V, F = simplify(V0, F0, target_reduction=1.0 - keep)
     V = np.asarray(V, float)
     F = np.asarray(F)
     sheet = _sheet_from_triangles(V, F, name=_slug(row["label"]))

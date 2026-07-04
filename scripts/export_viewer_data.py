@@ -23,6 +23,7 @@ polygon per cell. `edges` are vertex-index pairs for the wireframe.
 """
 import argparse
 import contextlib
+import hashlib
 import io
 import json
 import sys
@@ -80,9 +81,11 @@ SHOWCASE = [
      0.02, 0.1, 2),
     ("hra_colon_surface", "HRA colon surface (3D)",
      "A 3D epithelial sheet draped over the real HRA large-intestine reference "
-     "organ surface (GLB, decimated to ~3k cells), labelled by the crypt's ASCT+B "
-     "cell-type proportions. Orbit to inspect real anatomy — not a generated mesh.",
-     0.02, 0.2, 30),
+     "organ surface — the full organ mesh subdivided into ~15k small, uniform "
+     "cells, each tiny relative to the whole organ, labelled by the crypt's "
+     "ASCT+B cell-type proportions. Orbit to inspect real anatomy — not a "
+     "generated mesh.",
+     0.02, 0.2, 10),
     ("tumor", "Tumor growth (COPASI-coupled)",
      "Flat sheet coupled to a breast-cancer population ODE in COPASI; a central seed "
      "divides into a growing tumour clone (1 → ~120 tumour cells) as healthy tissue is "
@@ -218,8 +221,12 @@ def run_model(slug, composite, name, blurb, dt, frame_span, nframes):
     path = OUT / f"{slug}.json"
     path.write_text(json.dumps(model), encoding="utf-8")
     kb = path.stat().st_size / 1024
+    # Content hash → cache-bust token. The viewer fetches each model as
+    # `<file>?v=<version>`, so a redeploy that changes the data changes the URL
+    # and browsers fetch the new file instead of serving a stale cached copy.
+    version = hashlib.md5(path.read_bytes()).hexdigest()[:8]
     print(f"  {slug:14s} {'3D' if is3d else '2D'}  {n_cells:>4d} cells  {len(frames):>3d} frames  {kb:7.0f} KB")
-    return {"file": f"{slug}.json", "slug": slug, "name": name,
+    return {"file": f"{slug}.json", "slug": slug, "name": name, "version": version,
             "is3d": is3d, "n_cells": int(n_cells), "n_frames": len(frames)}
 
 

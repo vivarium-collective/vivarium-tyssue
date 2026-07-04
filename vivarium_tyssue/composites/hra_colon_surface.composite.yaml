@@ -1,8 +1,10 @@
 name: HRA colon surface (3D)
 description: A 3D epithelial sheet draped over the real Human Reference Atlas 
-  large-intestine reference organ surface (decimated to ~3k cells), with cells 
-  labelled by the crypt's ASCT+B cell-type proportions. Orbit to inspect the 
-  anatomy; this is a real organ shape, not a generated mesh.
+  large-intestine reference organ surface — the full-resolution organ mesh 
+  subdivided into ~15k small, uniform cells so each cell is tiny relative to the
+  whole organ, with cells labelled by the crypt's ASCT+B cell-type proportions. 
+  Orbit to inspect the anatomy; this is a real organ shape, not a generated 
+  mesh.
 tags:
 - tissue
 - mechanics

@@ -283,7 +283,10 @@ function buildLegend() {
 // ---------- model loading ----------
 async function loadModel(entry) {
   loadingEl.style.display = "flex"; loadingEl.textContent = `loading ${entry.name}…`;
-  const model = await (await fetch("./data/" + entry.file)).json();
+  // Cache-bust per-model on the content hash so a redeploy that changes the data
+  // changes the URL — browsers/CDN can't serve a stale copy of an updated demo.
+  const bust = entry.version ? "?v=" + entry.version : "";
+  const model = await (await fetch("./data/" + entry.file + bust)).json();
   playing = false; playBtn.textContent = "▶"; hoveredFace = -1; tip.style.display = "none";
   colorMode = "type"; colormodeEl.value = "type";
   setupModel(model);
@@ -384,7 +387,9 @@ requestAnimationFrame(animate);
 
 // ---------- boot ----------
 (async function () {
-  const { models } = await (await fetch("./data/index.json")).json();
+  // Always fetch a fresh manifest (it carries each model's current version token);
+  // the models themselves are then cache-busted by that token in loadModel.
+  const { models } = await (await fetch("./data/index.json?t=" + Date.now())).json();
   const ul = $("#models"); ul.innerHTML = "";
   models.forEach((m) => {
     const li = document.createElement("li");

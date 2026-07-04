@@ -138,15 +138,18 @@ def main():
     # --- 3D: epithelium on the real colon surface -------------------------- #
     print("3D colon surface (HRA large-intestine reference organ GLB):")
     comp = asctb_cell_types("crypt of Lieberkuhn")
-    sheet3, meta3 = sheet_from_organ_glb("large intestine", keep=0.15, cell_types=comp)
+    sheet3, meta3 = sheet_from_organ_glb(
+        "large intestine", target_cells=15000, cell_types=comp)
     save_datasets(str(DATASETS / "hra_colon_surface.hf5"), sheet3)
     print(f"  {sheet3.face_df.shape[0]} cells on real anatomy, {meta3['source']}")
     write_composite("hra_colon_surface", composite_doc(
         "HRA colon surface (3D)",
         "A 3D epithelial sheet draped over the real Human Reference Atlas large-"
-        "intestine reference organ surface (decimated to ~3k cells), with cells "
-        "labelled by the crypt's ASCT+B cell-type proportions. Orbit to inspect "
-        "the anatomy; this is a real organ shape, not a generated mesh.",
+        "intestine reference organ surface — the full-resolution organ mesh "
+        "subdivided into ~15k small, uniform cells so each cell is tiny relative "
+        "to the whole organ, with cells labelled by the crypt's ASCT+B cell-type "
+        "proportions. Orbit to inspect the anatomy; this is a real organ shape, "
+        "not a generated mesh.",
         "workspace/datasets/hra_colon_surface.hf5", interval=0.02))
 
     print("done.")
