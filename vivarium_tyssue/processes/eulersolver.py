@@ -120,7 +120,9 @@ class EulerSolver(Process):
         self._with_vessel = has_vessel_effector(config["effectors"])
         self._rust_gradient = False
         self._rust_geometry = False
-        self._topo = None  # cached (signature, srce, trgt, face) positional arrays
+        self._topo = None  # cached (signature, srce, trgt, face, active_pos) arrays
+        self._geom_stash = None  # geometry arrays from the last rust set_pos, fed
+        # straight to the next gradient (skips re-reading them from pandas)
         if self._backend == "rust":
             self._rust_geometry = geometry_supported(self.geom.__name__, self.eptm.dim)
             if gradient_supported(config["effectors"], config["factory"], self.eptm.dim):
@@ -223,7 +225,7 @@ class EulerSolver(Process):
         eptm = self.eptm
         eptm.vert_df.loc[eptm.active_verts, eptm.coords] = pos.reshape((-1, eptm.dim))
         srce, trgt, face, _ = self._topo_arrays()
-        rust_geometry_update(eptm, self.geom, srce, trgt, face)
+        self._geom_stash = rust_geometry_update(eptm, self.geom, srce, trgt, face)
 
     def ode_func(self):
         """Computes the models' gradient.
@@ -235,7 +237,8 @@ class EulerSolver(Process):
         if self._rust_gradient:
             srce, trgt, face, active_pos = self._topo_arrays()
             grad = rust_sheet_gradient(
-                self.eptm, self._is_bound, self._with_vessel, topo=(srce, trgt, face)
+                self.eptm, self._is_bound, self._with_vessel,
+                topo=(srce, trgt, face), geom=self._geom_stash,
             )  # (Nv, dim)
             grad_U = grad[active_pos]
         else:
@@ -322,6 +325,7 @@ class EulerSolver(Process):
                 # positional arrays so the next set_pos rebuilds them.
                 self.geom.update_all(self.eptm)
                 self._topo = None
+                self._geom_stash = None  # stale after a topology change / update_all
             self.manager.update()
 
         if self.eptm.network_changed:

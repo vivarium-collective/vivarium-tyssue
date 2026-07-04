@@ -62,11 +62,16 @@ def rust_geometry_update(eptm, geom, srce, trgt, face):
     """Rust replacement for ``geom.update_all``: the SheetGeometry core via the
     kernel, plus any cheap geometry-specific vertex steps. VesselGeometry adds
     ``update_tangents`` + ``update_vert_distance`` (vectorized numpy, no groupby),
-    replayed here so the result is bit-identical to the python update_all."""
-    rust_update_geometry(eptm, srce, trgt, face)
+    replayed here so the result is bit-identical to the python update_all.
+
+    Returns the ``stash`` dict of gradient-input arrays from the kernel (see
+    ``rust_update_geometry``) so the caller can feed it straight into
+    ``rust_sheet_gradient`` and skip re-reading those columns from pandas."""
+    stash = rust_update_geometry(eptm, srce, trgt, face)
     if geom.__name__ == "VesselGeometry":
         geom.update_tangents(eptm)
         geom.update_vert_distance(eptm)
+    return stash
 
 
 def rust_update_geometry(eptm, srce, trgt, face):
@@ -92,24 +97,47 @@ def rust_update_geometry(eptm, srce, trgt, face):
     d = np.asarray(g["dcoords"]).reshape(-1, 3)
     cen = np.asarray(g["centroid"]).reshape(-1, 3)
 
+    tcoords = pos[trgt]
+    ucoords = d / old_len[:, None]
+    fcoords = cen[face]
+    rcoords = np.asarray(g["rcoords"]).reshape(-1, 3)
+    normals = np.asarray(g["normals"]).reshape(-1, 3)
+    sub_area = np.asarray(g["sub_area"])
+    area = np.asarray(g["area"])
+    perimeter = np.asarray(g["perimeter"])
+
     ed[["s" + c for c in coords]] = pos[srce]
-    ed[["t" + c for c in coords]] = pos[trgt]
+    ed[["t" + c for c in coords]] = tcoords
     ed[["d" + c for c in coords]] = d
-    ed[["u" + c for c in coords]] = d / old_len[:, None]
+    ed[["u" + c for c in coords]] = ucoords
     ed["length"] = np.asarray(g["length"])
     fd[coords] = cen
-    ed[["f" + c for c in coords]] = cen[face]
-    ed[["r" + c for c in coords]] = np.asarray(g["rcoords"]).reshape(-1, 3)
-    ed[eptm.ncoords] = np.asarray(g["normals"]).reshape(-1, 3)
-    ed["sub_area"] = np.asarray(g["sub_area"])
-    fd["area"] = np.asarray(g["area"])
-    fd["perimeter"] = np.asarray(g["perimeter"])
+    ed[["f" + c for c in coords]] = fcoords
+    ed[["r" + c for c in coords]] = rcoords
+    ed[eptm.ncoords] = normals
+    ed["sub_area"] = sub_area
+    fd["area"] = area
+    fd["perimeter"] = perimeter
     if "height" in eptm.vert_df.columns:
         ed["sub_vol"] = eptm.upcast_srce(eptm.vert_df["height"]) * ed["sub_area"]
         fd["vol"] = eptm.sum_face(ed["sub_vol"])
 
+    # Hand the gradient the geometry arrays we just computed, so it need not
+    # re-read these (Ne×3) coordinate blocks back out of pandas next step. These
+    # are the *same* float64 arrays written above -> bit-identical to re-reading.
+    return {
+        "ucoords": ucoords,
+        "normals": normals,
+        "sub_area": sub_area,
+        "rcoords": rcoords,
+        "tcoords": tcoords,
+        "fcoords": fcoords,
+        "area": area,
+        "perimeter": perimeter,
+    }
 
-def rust_sheet_gradient(eptm, is_bound, with_vessel=False, topo=None):
+
+def rust_sheet_gradient(eptm, is_bound, with_vessel=False, topo=None, geom=None):
     """Return ``model.compute_gradient(eptm)`` for the standard sheet model as a
     ``(Nv, 3)`` ndarray in ``vert_df`` order, computed by the Rust kernel.
 
@@ -123,6 +151,13 @@ def rust_sheet_gradient(eptm, is_bound, with_vessel=False, topo=None):
     Pass it to skip rebuilding the vertex/face lookup dicts and the three pandas
     ``.map`` calls every step — a pure per-update saving. When ``None`` they're
     derived here (keeps the standalone/equivalence-test call sites simple).
+
+    ``geom`` is an optional stash of the geometry arrays (``ucoords``, ``normals``,
+    ``sub_area``, ``rcoords``, ``tcoords``, ``fcoords``, ``perimeter``, ``area``)
+    from the geometry kernel this step (``rust_update_geometry``'s return value).
+    Pass it to skip re-reading those (Ne×3) coordinate blocks from pandas — the
+    dominant per-update cost once the kernels themselves are ~free. When ``None``
+    they're read from the DataFrame (bit-identical values either way).
     """
     import tyssue_kernels as tk
 
@@ -139,28 +174,40 @@ def rust_sheet_gradient(eptm, is_bound, with_vessel=False, topo=None):
         srce, trgt, face = topo
 
     norm_factor = float(eptm.specs["settings"].get("nrj_norm_factor", 1.0))
-    r_aj = ed[["t" + c for c in coords]].values - ed[["f" + c for c in coords]].values
+    if geom is None:
+        ucoords = ed[["u" + c for c in coords]].values
+        normals = ed[eptm.ncoords].values
+        sub_area = ed["sub_area"].values
+        rcoords = ed[["r" + c for c in coords]].values
+        r_aj = ed[["t" + c for c in coords]].values - ed[["f" + c for c in coords]].values
+    else:
+        ucoords, normals, sub_area, rcoords = (
+            geom["ucoords"], geom["normals"], geom["sub_area"], geom["rcoords"],
+        )
+        r_aj = geom["tcoords"] - geom["fcoords"]
+    perimeter = geom["perimeter"] if geom is not None else fd["perimeter"].values
+    area = geom["area"] if geom is not None else fd["area"].values
     boundary = (
         eptm.vert_df["boundary"].values.astype(np.uint8)
         if is_bound and "boundary" in eptm.vert_df.columns
         else np.zeros(eptm.Nv, dtype=np.uint8)
     )
     flat = tk.sheet_gradient(
-        C(ed[["u" + c for c in coords]].values, dtype=np.float64),
-        C(ed[eptm.ncoords].values, dtype=np.float64),
-        C(ed["sub_area"].values, dtype=np.float64),
-        C(ed[["r" + c for c in coords]].values, dtype=np.float64),
+        C(ucoords, dtype=np.float64),
+        C(normals, dtype=np.float64),
+        C(sub_area, dtype=np.float64),
+        C(rcoords, dtype=np.float64),
         C(r_aj, dtype=np.float64),
         srce,
         trgt,
         face,
         C((ed["line_tension"] * ed["is_active"]).values, dtype=np.float64),
         C(
-            (fd["perimeter_elasticity"] * fd["is_alive"] * (fd["perimeter"] - fd["prefered_perimeter"])).values,
+            (fd["perimeter_elasticity"] * fd["is_alive"] * (perimeter - fd["prefered_perimeter"])).values,
             dtype=np.float64,
         ),
         C(
-            (fd["area_elasticity"] * fd["is_alive"] * (fd["area"] - fd["prefered_area"])).values,
+            (fd["area_elasticity"] * fd["is_alive"] * (area - fd["prefered_area"])).values,
             dtype=np.float64,
         ),
         C(boundary, dtype=np.uint8),
