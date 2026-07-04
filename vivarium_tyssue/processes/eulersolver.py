@@ -12,6 +12,11 @@ from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 
 from vivarium_tyssue.maps import *
 from vivarium_tyssue.core_maps import GEOMETRY_MAP
+from vivarium_tyssue.processes.utils import (
+    SUPPORTED_EFFECTORS,
+    gradient_supported,
+    rust_sheet_gradient,
+)
 
 from tyssue.behaviors.event_manager import EventManager
 from tyssue.behaviors.sheet.basic_events import reconnect
@@ -56,6 +61,9 @@ class EulerSolver(Process):
         "output_columns": "map[list[string]]", # dict containing lists of column names to emit for each dataframe
         "settings": "map",
         "maps": "map", #map of maps, leave empty if using default
+        "backend": "string", # "python" (default) or "rust": route compute_gradient
+                             # through the tyssue_kernels sheet_gradient kernel when
+                             # the model is supported; falls back to python otherwise.
     }
 
     def initialize(self, config):
@@ -102,6 +110,24 @@ class EulerSolver(Process):
             self.bounds = self.config["bounds"]
         else:
             self.bounds = None
+
+        # Backend selection: route compute_gradient through the Rust kernel when
+        # requested AND the model is one the kernel reproduces exactly. Otherwise
+        # fall back to Python transparently (with a warning if rust was asked for).
+        self._backend = (config.get("backend") or "python").lower()
+        self._is_bound = config["factory"] == "model_factory_bound"
+        self._rust_gradient = False
+        if self._backend == "rust":
+            if gradient_supported(config["effectors"], config["factory"], self.eptm.dim):
+                self._rust_gradient = True
+                log.info("EulerSolver: using Rust sheet_gradient backend")
+            else:
+                warnings.warn(
+                    "backend='rust' requested but this model is unsupported by the "
+                    "gradient kernel (needs the 3 standard sheet effectors "
+                    f"{sorted(SUPPORTED_EFFECTORS)}, a supported factory, a 3D mesh, "
+                    "and the compiled tyssue_kernels module) — falling back to Python."
+                )
         # Normalize any StringDtype columns from parameter assignment (pandas 3.0).
         self._coerce_string_columns()
 
@@ -176,11 +202,16 @@ class EulerSolver(Process):
         -------
         dot_r : 1D np.ndarray of shape (self.eptm.Nv * self.eptm.dim, )
         """
-
-        grad_U = self.model.compute_gradient(self.eptm).loc[self.eptm.active_verts]
+        active = self.eptm.active_verts
+        if self._rust_gradient:
+            grad = rust_sheet_gradient(self.eptm, self._is_bound)  # (Nv, dim), vert_df order
+            pos_of = {v: i for i, v in enumerate(self.eptm.vert_df.index)}
+            grad_U = grad[[pos_of[v] for v in active]]
+        else:
+            grad_U = self.model.compute_gradient(self.eptm).loc[active].values
         return (
-                -grad_U.values
-                / self.eptm.vert_df.loc[self.eptm.active_verts, "viscosity"].values[:, None]
+                -grad_U
+                / self.eptm.vert_df.loc[active, "viscosity"].values[:, None]
         ).ravel()
 
     def inputs(self):

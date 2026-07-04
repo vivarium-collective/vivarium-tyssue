@@ -181,41 +181,84 @@ def _build_model_eptm(composite):
 
 @pytest.mark.parametrize("composite", GRADIENT_COMPOSITES)
 def test_sheet_gradient_matches_compute_gradient(composite):
-    """Rust ``sheet_gradient`` == tyssue ``model.compute_gradient``, bit-for-bit."""
-    k = pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    """The shared ``rust_sheet_gradient`` helper (used by EulerSolver) ==
+    tyssue ``model.compute_gradient``, bit-for-bit. Testing the helper rather
+    than the raw kernel keeps this in lockstep with what the process runs."""
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from vivarium_tyssue.processes.utils import rust_sheet_gradient
+
     eptm, model, is_bound = _build_model_eptm(composite)
-    coords = eptm.coords
-    ed, fd = eptm.edge_df, eptm.face_df
-    vmap = {v: i for i, v in enumerate(eptm.vert_df.index)}
-    fmap = {v: i for i, v in enumerate(fd.index)}
-    C = lambda a, dt: np.ascontiguousarray(a, dtype=dt)  # noqa: E731
-
-    r_aj = ed[["t" + c for c in coords]].values - ed[["f" + c for c in coords]].values
-    boundary = (
-        eptm.vert_df["boundary"].values.astype(np.uint8)
-        if is_bound and "boundary" in eptm.vert_df.columns
-        else np.zeros(eptm.Nv, dtype=np.uint8)
-    )
-    got = np.asarray(
-        k.sheet_gradient(
-            C(ed[["u" + c for c in coords]].values, np.float64),
-            C(ed[eptm.ncoords].values, np.float64),
-            C(ed["sub_area"].values, np.float64),
-            C(ed[["r" + c for c in coords]].values, np.float64),
-            C(r_aj, np.float64),
-            C(ed["srce"].map(vmap).values, np.uint32),
-            C(ed["trgt"].map(vmap).values, np.uint32),
-            C(ed["face"].map(fmap).values, np.uint32),
-            C((ed["line_tension"] * ed["is_active"]).values, np.float64),
-            C((fd["perimeter_elasticity"] * fd["is_alive"] * (fd["perimeter"] - fd["prefered_perimeter"])).values, np.float64),
-            C((fd["area_elasticity"] * fd["is_alive"] * (fd["area"] - fd["prefered_area"])).values, np.float64),
-            C(boundary, np.uint8),
-            eptm.Nv,
-            float(eptm.specs["settings"].get("nrj_norm_factor", 1.0)),
-        )
-    ).reshape(eptm.Nv, 3)
-
+    got = rust_sheet_gradient(eptm, is_bound)
     ref = np.asarray(model.compute_gradient(eptm)).astype(np.float64)
     assert np.allclose(got, ref, atol=1e-10, rtol=0.0), (
         f"{composite} ({'bound' if is_bound else 'plain'}): max|Δ|={np.max(np.abs(got - ref)):.3e}"
     )
+
+
+# ---------------------------------------------------------------------------
+# Backend wiring: the `backend: rust` flag on EulerSolver.
+# ---------------------------------------------------------------------------
+def test_gradient_supported_gating():
+    """The rust backend engages only for the standard 3-effector sheet model."""
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from vivarium_tyssue.processes.utils import gradient_supported, rust_kernels_available
+
+    std = ["LineTension", "FaceAreaElasticity", "PerimeterElasticity"]
+    if rust_kernels_available():
+        assert gradient_supported(std, "model_factory", 3) is True
+        assert gradient_supported(list(reversed(std)), "model_factory_bound", 3) is True
+    # unsupported: extra effector, wrong factory, 2D — never engage
+    assert gradient_supported(std + ["VesselSurfaceElasticity"], "model_factory", 3) is False
+    assert gradient_supported(std, "model_factory_vessel", 3) is False
+    assert gradient_supported(std, "model_factory", 2) is False
+
+
+def _run_composite_backend(composite, backend, steps, interval=0.1):
+    """Build + run a composite on a given backend; return (final positions, process)."""
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from pbg_superpowers.composite_spec import build_composite_from_spec, load_spec
+    from vivarium_tyssue.core import build_core
+
+    core = build_core()
+    spec = load_spec(ROOT / "vivarium_tyssue" / "composites" / f"{composite}.composite.yaml")
+    spec["state"]["Tyssue"]["config"]["backend"] = backend
+    comp = build_composite_from_spec(spec, overrides={"interval": interval}, core=core)
+    comp.run(steps)
+    proc = comp.state["Tyssue"]["instance"]
+    pos = proc.eptm.vert_df[proc.eptm.coords].values.copy()
+    return pos, proc
+
+
+def test_backend_equivalence_anisotropic():
+    """End-to-end: python and rust backends trace the same trajectory.
+
+    anisotropic is the one supported composite with no RNG behavior, so two
+    independent runs are directly comparable. Confirms the flag actually routes
+    (rust engages, python doesn't) and the trajectories agree after several steps.
+    """
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    py_pos, py_proc = _run_composite_backend("anisotropic", "python", steps=5)
+    ru_pos, ru_proc = _run_composite_backend("anisotropic", "rust", steps=5)
+
+    assert py_proc._rust_gradient is False
+    assert ru_proc._rust_gradient is True
+    assert py_pos.shape == ru_pos.shape
+    assert np.allclose(py_pos, ru_pos, atol=1e-8, rtol=0.0), (
+        f"backends diverged after 5 steps: max|Δ|={np.max(np.abs(py_pos - ru_pos)):.3e}"
+    )
+
+
+@pytest.mark.parametrize("composite", ["stochastic", "anisotropic", "jamming", "gradient"])
+def test_supported_composites_run_on_rust(composite):
+    """Every rust-supported composite advances a step with the rust backend engaged."""
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    _, proc = _run_composite_backend(composite, "rust", steps=1, interval=0.01)
+    assert proc._rust_gradient is True, f"{composite} did not engage the rust backend"
