@@ -86,7 +86,7 @@ def rust_bulk_geometry_update(eptm, srce, trgt, face, cell, pos=None):
     return geom
 
 
-def rust_geometry_update(eptm, geom, srce, trgt, face, pos=None):
+def rust_geometry_update(eptm, geom, srce, trgt, face, pos=None, full=True):
     """Rust replacement for ``geom.update_all``: the SheetGeometry core via the
     kernel, plus any cheap geometry-specific vertex steps. VesselGeometry adds
     ``update_tangents`` + ``update_vert_distance`` (vectorized numpy, no groupby),
@@ -99,7 +99,7 @@ def rust_geometry_update(eptm, geom, srce, trgt, face, pos=None):
     Returns the ``stash`` dict of gradient-input arrays from the kernel (see
     ``rust_update_geometry``) so the caller can feed it straight into
     ``rust_sheet_gradient`` and skip re-reading those columns from pandas."""
-    stash = rust_update_geometry(eptm, srce, trgt, face, pos=pos)
+    stash = rust_update_geometry(eptm, srce, trgt, face, pos=pos, full=full)
     if geom.__name__ == "VesselGeometry":
         geom.update_tangents(eptm)
         geom.update_vert_distance(eptm)
@@ -142,7 +142,7 @@ def compute_geometry(eptm, srce, trgt, face, pos, old_len):
     }
 
 
-def materialize_geometry(eptm, geom, which=("edge", "face")):
+def materialize_geometry(eptm, geom, which=("edge", "face"), full=True):
     """Modular converter: write native geometry arrays (from ``compute_geometry``)
     back into the epithelium's tyssue DataFrames — the single place the Rust path
     touches pandas for geometry.
@@ -152,24 +152,40 @@ def materialize_geometry(eptm, geom, which=("edge", "face")):
     interface (emit, inspection, before behaviours that read the frames). ``which``
     selects which frames to write (``"edge"``, ``"face"``); the result is
     bit-identical to ``SheetGeometry.update_all``'s column writes.
+
+    ``full`` selects how many edge columns to write (Phase B — "materialize only
+    what's observed"):
+
+    - ``full=True`` (default): every column ``update_all`` writes, incl. the seven
+      three-wide *intermediate* edge coordinate blocks (s/t/d/u/f/r-coords,
+      normals) + sub_area — the bulk of the per-step pandas cost.
+    - ``full=False``: only the *observable* geometry — edge ``length`` and the
+      whole face frame (centroid/area/perimeter, +vol in 3D). The intermediate
+      blocks are pure gradient inputs; the Rust gradient reads them from the native
+      ``geom`` stash, not pandas, and nothing downstream (emitters, viz, behaviours)
+      reads them, so skipping their write each step is unobservable. They stay
+      materialisable on demand via ``EulerSolver.to_dataframes(full=True)``.
     """
     coords = eptm.coords
     ed, fd = eptm.edge_df, eptm.face_df
+    has_height = "height" in eptm.vert_df.columns
     if "edge" in which:
-        ed[["s" + c for c in coords]] = geom["scoords"]
-        ed[["t" + c for c in coords]] = geom["tcoords"]
-        ed[["d" + c for c in coords]] = geom["dcoords"]
-        ed[["u" + c for c in coords]] = geom["ucoords"]
         ed["length"] = geom["length"]
-        ed[["f" + c for c in coords]] = geom["fcoords"]
-        ed[["r" + c for c in coords]] = geom["rcoords"]
-        ed[eptm.ncoords] = geom["normals"]
-        ed["sub_area"] = geom["sub_area"]
+        if full:
+            ed[["s" + c for c in coords]] = geom["scoords"]
+            ed[["t" + c for c in coords]] = geom["tcoords"]
+            ed[["d" + c for c in coords]] = geom["dcoords"]
+            ed[["u" + c for c in coords]] = geom["ucoords"]
+            ed[["f" + c for c in coords]] = geom["fcoords"]
+            ed[["r" + c for c in coords]] = geom["rcoords"]
+            ed[eptm.ncoords] = geom["normals"]
+        if full or has_height:  # sub_area feeds the 3D sub_vol below
+            ed["sub_area"] = geom["sub_area"]
     if "face" in which:
         fd[coords] = geom["centroid"]
         fd["area"] = geom["area"]
         fd["perimeter"] = geom["perimeter"]
-    if "height" in eptm.vert_df.columns and "edge" in which:
+    if has_height and "edge" in which:
         ed["sub_vol"] = eptm.upcast_srce(eptm.vert_df["height"]) * ed["sub_area"]
         if "face" in which:
             fd["vol"] = eptm.sum_face(ed["sub_vol"])
@@ -239,7 +255,7 @@ def materialize_geometry_bulk(eptm, geom, which=("edge", "face", "cell")):
         cd["vol"] = geom["cell_vol"]
 
 
-def rust_update_geometry(eptm, srce, trgt, face, pos=None):
+def rust_update_geometry(eptm, srce, trgt, face, pos=None, full=True):
     """In-place replacement for ``SheetGeometry.update_all`` via the Rust kernel:
     ``compute_geometry`` then ``materialize_geometry`` (both edge and face frames).
 
@@ -247,13 +263,17 @@ def rust_update_geometry(eptm, srce, trgt, face, pos=None):
     recompute the boundary index / opposite edges — topology-invariant, refreshed
     by the caller only on a topology change. Returns the ``geom`` dict so the
     caller can feed it straight to ``rust_sheet_gradient`` (skips re-reading the
-    Ne×3 coordinate blocks from pandas)."""
+    Ne×3 coordinate blocks from pandas).
+
+    ``full=False`` writes only the observable geometry (edge length + face frame);
+    the intermediate coordinate blocks stay in the returned ``geom`` stash. See
+    ``materialize_geometry``."""
     coords = eptm.coords
     if pos is None:
         pos = eptm.vert_df[coords].values
     old_len = eptm.edge_df["length"].values.copy()  # stale length feeds ucoords
     geom = compute_geometry(eptm, srce, trgt, face, pos, old_len)
-    materialize_geometry(eptm, geom, which=("edge", "face"))
+    materialize_geometry(eptm, geom, which=("edge", "face"), full=full)
     return geom
 
 

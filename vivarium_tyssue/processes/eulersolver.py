@@ -141,6 +141,9 @@ class EulerSolver(Process):
         self._active_full = False  # every vertex active & in order -> fast pos I/O
         self._geom_stash = None  # geometry arrays from the last rust set_pos, fed
         # straight to the next gradient (skips re-reading them from pandas)
+        self._geom_lean = False  # True when the hot loop wrote only observable
+        # geometry (edge length + face frame) and the intermediate edge coordinate
+        # blocks in edge_df are stale — materialised full on demand (Phase B).
         self._substeps = max(1, int(config.get("substeps") or 1))
         # Explicit-Euler safety clamp on per-step vertex displacement (0 = off).
         self._max_disp = float(config.get("max_displacement") or 0.0)
@@ -282,10 +285,15 @@ class EulerSolver(Process):
             self._geom_stash = rust_bulk_geometry_update(
                 eptm, srce, trgt, face, cell, pos=kernel_pos
             )
+            self._geom_lean = False  # bulk gradient reads DFs → must stay full
         else:
+            # Sheet path: the Rust gradient reads geometry from the stash, so the
+            # hot loop only needs the observable columns in pandas each step; the
+            # intermediate coordinate blocks are materialised on demand (Phase B).
             self._geom_stash = rust_geometry_update(
-                eptm, self.geom, srce, trgt, face, pos=kernel_pos
+                eptm, self.geom, srce, trgt, face, pos=kernel_pos, full=False
             )
+            self._geom_lean = True
 
     def _integrate_native(self, interval, substeps):
         """Integrate ``substeps`` explicit-Euler steps of ``dt = interval/substeps``
@@ -317,17 +325,22 @@ class EulerSolver(Process):
             eptm.vert_df[coords] = vpos
         else:
             eptm.vert_df.loc[eptm.active_verts, coords] = vpos[active_pos]
-        materialize_geometry(eptm, geom, which=("edge", "face"))
+        materialize_geometry(eptm, geom, which=("edge", "face"), full=False)
         self._geom_stash = geom
+        self._geom_lean = True
 
-    def to_dataframes(self, which=("edge", "face")):
+    def to_dataframes(self, which=("edge", "face"), full=True):
         """Materialize the current native geometry into the epithelium DataFrames
         and return the epithelium. Public "convert only where you need it" hook:
-        after a native run the frames hold positions + the last geometry already,
-        but call this any time to force a fresh conversion (e.g. for inspection).
-        No-op geometry write on the python backend (frames are always current)."""
-        if self._geom_stash is not None:
-            materialize_geometry(self.eptm, self._geom_stash, which=which)
+        after a native run the frames already hold positions + the observable
+        geometry (length/area/perimeter); call this to also refresh the full
+        intermediate edge coordinate blocks (``full=True``, the default) — e.g.
+        before inspecting raw geometry. No-op on the python backend (frames are
+        always current)."""
+        if self._geom_stash is not None and (full or self._geom_lean):
+            materialize_geometry(self.eptm, self._geom_stash, which=which, full=full)
+            if full:
+                self._geom_lean = False
         return self.eptm
 
     def ode_func(self):
@@ -425,6 +438,13 @@ class EulerSolver(Process):
             self.set_pos(pos)
 
         if self.manager is not None:
+            # Behaviours may read the full edge geometry (normals, ucoords, …) that
+            # the lean hot-loop left native; refresh the frames only when behaviours
+            # actually run this step (the manager is repopulated from inputs each
+            # update, so no behaviours in → nothing to execute). Pure integration
+            # steps skip it and keep the lean fast path.
+            if inputs["behaviors"] and self._geom_lean:
+                self.to_dataframes(full=True)
             self.manager.execute(self.eptm)
             # Only rebuild geometry if a behavior actually changed the mesh.
             # Every topology-changing path (division, T1/T2, reconnect) sets
@@ -439,6 +459,7 @@ class EulerSolver(Process):
                 self.geom.update_all(self.eptm)
                 self._topo = None
                 self._geom_stash = None  # stale after a topology change / update_all
+                self._geom_lean = False  # update_all rewrote all geometry columns
             self.manager.update()
 
         if self.eptm.network_changed:
