@@ -172,6 +172,10 @@ class EulerSolver(Process):
             )
         # Normalize any StringDtype columns from parameter assignment (pandas 3.0).
         self._coerce_string_columns()
+        # Build the history only after the configured parameters (e.g.
+        # line_tension) have been written onto the dataframes, so those columns
+        # are actually recorded each step and available for per-frame colouring.
+        self.history = History(self.eptm)
 
     def _coerce_string_columns(self):
         """pandas 3.0 gives scalar-string column assignments (e.g. ``cell_type``)

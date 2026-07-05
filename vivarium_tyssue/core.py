@@ -1,8 +1,8 @@
 """build_core() — the workspace's process-bigraph core.
 
-The vivarium-dashboard builds a workspace's core by inserting the workspace root
+The vivarium-workbench builds a workspace's core by inserting the workspace root
 on sys.path and calling ``<package>.core.build_core()`` (see
-``_build_workspace_core`` in vivarium_dashboard/server.py). Workspace-local
+``_build_workspace_core`` in vivarium_workbench/server.py). Workspace-local
 packages are deliberately *not* pip-discovered via importlib.metadata, so this is
 where the workspace registers its own processes, schema types and visualizations
 into the core's link/registry — that's what makes ``local:EulerSolver``,

@@ -18,7 +18,7 @@ from pathlib import Path
 
 import yaml
 
-from vivarium_dashboard.lib.notebook_export import export_investigation_notebook
+from vivarium_workbench.lib.notebook_export import export_investigation_notebook
 
 ROOT = Path(__file__).resolve().parents[1]
 INV_DIR = ROOT / "workspace" / "investigations"

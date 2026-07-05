@@ -18,15 +18,15 @@ bash scripts/serve.sh   # opens browser at http://localhost:<port>
 - [ ] Lint: `python3 scripts/lint-workspace.py` should print `workspace lint: OK`
 - [ ] Commit + (eventually) push: `git init && git add -A && git commit -m "feat: workspace bootstrap"`
 
-> **If `uv pip install` fails with "vivarium-dashboard was not found in
-> the package registry":** vivarium-dashboard isn't on PyPI yet. The
+> **If `uv pip install` fails with "vivarium-workbench was not found in
+> the package registry":** vivarium-workbench isn't on PyPI yet. The
 > template's init script auto-pins it when a sibling `../vivarium-dashboard/`
 > checkout exists, but if you scaffolded elsewhere you'll need to add it
 > manually to `pyproject.toml`:
 >
 > ```toml
 > [tool.uv.sources]
-> vivarium-dashboard = { path = "/path/to/vivarium-dashboard", editable = true }
+> vivarium-workbench = { path = "/path/to/vivarium-dashboard", editable = true }
 > ```
 >
 > Re-run `uv pip install -e ".[dev]"` after the edit.
