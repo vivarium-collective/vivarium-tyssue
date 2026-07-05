@@ -89,6 +89,24 @@
       "is3d": false,
       "n_cells": 322,
       "n_frames": 70
+    },
+    {
+      "file": "scale_organoid.json",
+      "slug": "scale_organoid",
+      "name": "Budding organoid \u00b7 20k cells (3D)",
+      "version": "f628402b",
+      "is3d": true,
+      "n_cells": 20000,
+      "n_frames": 11
+    },
+    {
+      "file": "scale_folding.json",
+      "slug": "scale_folding",
+      "name": "Folding epithelium \u00b7 40k cells",
+      "version": "af8afbfa",
+      "is3d": true,
+      "n_cells": 39402,
+      "n_frames": 10
     }
   ]
 }

@@ -83,6 +83,23 @@ function topo(model, fr) {
     : { tris: fr.tris, edges: fr.edges, face_of_tri: fr.face_of_tri };
 }
 
+// Derive per-face fan centroids from vertex positions (mean of the face's
+// vertices). Lets big static-topology models omit the per-frame `centroids`
+// array entirely — the single largest chunk of the file — and reconstruct it
+// here. `tris` are [srce, trgt, Nv+face] triples, so T[t*3] is a face vertex.
+function deriveCentroids(P, tp, nFaces) {
+  const T = tp.tris, fot = tp.face_of_tri, ntri = T.length / 3;
+  const sum = new Float32Array(nFaces * 3), cnt = new Uint32Array(nFaces);
+  for (let t = 0; t < ntri; t++) {
+    const f = fot[t], s = T[t * 3];
+    sum[f*3] += P[s*3]; sum[f*3+1] += P[s*3+1]; sum[f*3+2] += P[s*3+2]; cnt[f]++;
+  }
+  for (let f = 0; f < nFaces; f++) {
+    const c = cnt[f] || 1; sum[f*3] /= c; sum[f*3+1] /= c; sum[f*3+2] /= c;
+  }
+  return sum;
+}
+
 // global min/max per field across all frames, for a stable color scale
 function fieldRange(model, field) {
   let mn = Infinity, mx = -Infinity;
@@ -102,7 +119,8 @@ function setupModel(model) {
     const tp = topo(model, fr);
     maxTri = Math.max(maxTri, tp.tris.length / 3);
     maxEdge = Math.max(maxEdge, tp.edges.length / 2);
-    maxPos = Math.max(maxPos, (fr.verts.length + fr.centroids.length) / 3);
+    const cLen = fr.centroids ? fr.centroids.length : model.n_cells * 3;
+    maxPos = Math.max(maxPos, (fr.verts.length + cLen) / 3);
   }
   // face mesh (triangle soup so each cell gets a flat color)
   const mg = new THREE.BufferGeometry();
@@ -137,7 +155,8 @@ function setupModel(model) {
     spark: null,
     render(fi) {
       const fr = model.frames[fi], tp = topo(model, fr);
-      const P = fr.verts, Cn = fr.centroids, nV = P.length / 3;
+      const P = fr.verts, nV = P.length / 3;
+      const Cn = fr.centroids || deriveCentroids(P, tp, model.n_cells);
       const pos = (idx) => idx < nV
         ? [P[idx*3], P[idx*3+1], P[idx*3+2]]
         : [Cn[(idx-nV)*3], Cn[(idx-nV)*3+1], Cn[(idx-nV)*3+2]];
@@ -152,6 +171,7 @@ function setupModel(model) {
         if (colorMode === "type") rgb = ctype ? typeRGB(ctype[f]) : cellJit(f);
         else if (colorMode === "cell") rgb = cellJit(f);
         else if (colorMode === "uniform") rgb = FLAT;
+        else if (!fld) rgb = cellJit(f);  // field absent in this model → per-cell tint
         else rgb = heat((fld[f] - rng.mn) / (rng.mx - rng.mn));
         if (f === hoveredFace) rgb = [1, 1, 1];
         for (let k = 0; k < 3; k++) {
