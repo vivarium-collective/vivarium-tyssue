@@ -24,11 +24,17 @@ emitters: []
 parameters:
   interval:
     type: float
-    default: 0.1
+    default: 0.02
     description: >-
-      Solver step (dt). The vertex positions relax by gradient descent each step;
-      0.1 is the mechanically stable dt used in the source notebook. Lower it if
-      the apical surface overshoots / self-intersects during fast buckling.
+      Solver step (dt). The vertex positions relax by gradient descent each step.
+      0.02 (was 0.1): the apical purse-string is a stiff term and the sheet
+      buckles as a fast dynamic instability — at dt=0.1 explicit Euler blows up to
+      NaN by t~1.5 (a few vertices spike out), AND the max_displacement clamp
+      (below) then binds so hard it freezes a spurious shallow dome. At dt=0.02
+      the clamp only catches the rare runaway vertex while the coherent buckling
+      relaxes smoothly, so the apical surface curls all the way to closure. The
+      trajectory is dt-converged here (dt=0.01 gives the same path). Lower further
+      only if the apical surface self-intersects during fast buckling.
 state:
   Tyssue:
     _type: process
@@ -53,8 +59,16 @@ state:
           # Per-segment line tension: a strong purse-string on the apical edges
           # only, ~0 elsewhere. This differential apical tension is the knob that
           # drives lift-off. (EulerSolver expands the dict over edge_df.segment.)
+          # 2.0 (was 1.0): at 1.0 the apical opening reaches only a deep, still
+          # wide-open bowl (rim ~40% of its initial radius) and equilibrates
+          # short of closing — the purse-string can't overcome the stiff cell
+          # volume / face-area terms. Doubling the apical tension drives the
+          # opening essentially shut (rim -> ~1% of initial radius, apical area
+          # -> ~1%) by t~100-120: the apical surface cinches into a closed
+          # lumenoid. See max_displacement/interval notes for the stability that
+          # lets this run that long.
           line_tension:
-            apical: 1.0
+            apical: 2.0
             default: 0.0
           is_active: 1.0
         vert_df:
@@ -71,6 +85,17 @@ state:
       factory: model_factory
       settings:
         threshold_length: 0.03
+      # Explicit-Euler safety net: clamp any single vertex's per-step displacement
+      # to 0.2 (median motion is ~0.02-0.06). The apical buckling is a coherent
+      # many-vertex motion, but a few vertices race ahead into sharp spikes that
+      # otherwise blow the whole mesh to NaN (baseline max per-step displacement
+      # diverges to ~1e83 by t~1.5). Clamping catches only those runaway vertices
+      # — with the small dt above it never binds on the coherent buckling — so the
+      # spikes vanish (max per-step displacement stays bounded at 0.2*sqrt(3)~0.35
+      # for the entire run) and the sheet curls to closure stably past t=150.
+      # NB: this clamp only stays a *spike filter* (not a motion brake that
+      # freezes a spurious dome) because interval is small; keep them in sync.
+      max_displacement: 0.2
       # Keep topology fixed so we observe pure shape change (no T1/rearrangements).
       auto_reconnect: false
       bounds: {}

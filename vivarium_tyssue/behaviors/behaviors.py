@@ -3,6 +3,13 @@ import numpy as np
 from tyssue.topology.sheet_topology import cell_division, remove_face
 from vivarium_tyssue.core_maps import GEOMETRY_MAP
 
+# Install the tyssue topology robustness shims (drop_two_sided_faces /
+# split_vert guards) as soon as any behavior is imported — cell_division and
+# remove_face below reach those buggy helpers, so they must be patched before
+# the first division / extrusion. Idempotent; build_core() also calls this.
+from vivarium_tyssue.behaviors.tyssue_patches import apply_tyssue_topology_patches
+apply_tyssue_topology_patches()
+
 def update_stem_cells(eptm):
     """updates which cells in a cylinder model are classified as stem cells"""
     eptm.face_df['stem_cell'] = 0
@@ -104,6 +111,21 @@ def division(
             dt=dt
         )
 
+def _drop_isolated_verts(sheet):
+    """Drop vertices that no edge references (isolated after a face removal).
+
+    ``remove_face`` collapses a face's vertices into a single new centroid vert
+    and drops the originals, but a boundary/degenerate removal can leave a vert
+    with no incident edge. Such a vert keeps whatever stale (or NaN) position it
+    had and pollutes ``np.isfinite`` checks / geometry, so prune them, then
+    reindex so the mesh is contiguous again. No-op when nothing is isolated."""
+    used = set(sheet.edge_df["srce"].to_numpy()) | set(sheet.edge_df["trgt"].to_numpy())
+    isolated = sheet.vert_df.index.difference(list(used))
+    if len(isolated):
+        sheet.vert_df.drop(isolated, axis=0, inplace=True)
+        sheet.reset_index(order=True)
+
+
 #Apoptosis behaviors
 def apoptosis_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
     """removes a cell from a cylindrical tyssue sheet"""
@@ -131,14 +153,45 @@ def apoptosis_extrusion(
         print("Cell not found, skipping event")
         return
     sheet.face_df.loc[cell_id, "cell_type"] = "extruding"
-    if sheet.face_df.loc[cell_id, "area"] < crit_area:
+    area = sheet.face_df.loc[cell_id, "area"]
+    prefered_area = sheet.face_df.loc[cell_id, "prefered_area"]
+    # Removal criterion. Original code only removed when the *actual* area fell
+    # below crit_area. In the crypt, extrusion is Wnt/z-biased to the top rim,
+    # exactly where the free boundary keeps cells mechanically stretched (large
+    # area) — so their actual area never reaches crit_area and the committed cell
+    # never dies (extrusions accumulate forever, no cell death is ever shown).
+    # A committing cell also shrinks its *prefered* area every cycle, so we treat
+    # a cell whose death target has collapsed (prefered_area below DEATH_FLOOR) as
+    # fully committed and extrude it regardless of its mechanically-contested
+    # actual area. This is what makes cell death actually occur within the run.
+    DEATH_FLOOR = 0.5
+    if area < crit_area or prefered_area < DEATH_FLOOR:
         # Restore prefered_area
         sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
-        # Remove the cell division
-        vertex = remove_face(sheet, cell_id)
-        # Update the topology
+        # Remove the cell (apoptosis / extrusion). remove_face can hit degenerate
+        # local topology on a stretched boundary cell; skip gracefully rather than
+        # abort the whole simulation step if tyssue raises.
+        try:
+            remove_face(sheet, cell_id)
+        except Exception as exc:  # noqa: BLE001
+            print(f"remove_face failed for cell {cell_uid} ({type(exc).__name__}); skipping")
+            return
+        # Rebuild the index/topology and drop any vertex left isolated by the
+        # removal (a stray vert with no incident edge would give NaN geometry).
         sheet.reset_index(order=True)
-        # update geometry
+        _drop_isolated_verts(sheet)
+        # Project vertices back onto the cylinder surface BEFORE updating geometry.
+        # remove_face replaces the face with a single centroid vertex; for an
+        # extruding cell at the everted top rim that centroid lands well off the
+        # r=prefered_radius surface, so the VesselSurfaceElasticity term applies a
+        # huge restoring force to it and the next Euler step blows up to NaN. This
+        # is the real cause of the "extrusion -> non-finite geometry" failure.
+        # apoptosis_cell already does this snap; apoptosis_extrusion omitted it.
+        radius = sheet.settings.get("radius")
+        if radius is None and "prefered_radius" in sheet.vert_df.columns:
+            radius = float(sheet.vert_df["prefered_radius"].mean())
+        if radius:
+            fix_points_cylinder(sheet, radius=radius)
         geometry.update_all(sheet)
         sheet.network_changed = True
     else:

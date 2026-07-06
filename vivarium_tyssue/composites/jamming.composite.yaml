@@ -27,7 +27,12 @@ parameters:
   interval:
     type: float
     default: 0.1
-    description: Solver / step interval (dt).
+    description: Emit / update interval. Solver dt = interval / substeps.
+  substeps:
+    type: int
+    default: 1
+    description: Native Euler steps per update (rust sheet models). >1 materializes DataFrames once per
+      update instead of per step; coarsens behaviour/emit cadence.
 state:
   Tyssue:
     _type: process
@@ -272,6 +277,8 @@ state:
       bounds: {}
       output_columns: {}
       maps: {}
+      backend: rust
+      substeps: ${substeps}
     inputs:
       behaviors:
       - Behaviors

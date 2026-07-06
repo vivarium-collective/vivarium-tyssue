@@ -1,0 +1,16 @@
+[workspace]
+resolver = "2"
+members = ["crates/tyssue-core", "crates/tyssue-py"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+
+[workspace.dependencies]
+tyssue-core = { path = "crates/tyssue-core" }
+
+# Release profile tuned for the hot numeric kernels.
+[profile.release]
+lto = true
+codegen-units = 1

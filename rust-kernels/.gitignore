@@ -1,0 +1,4 @@
+/target
+**/*.rs.bk
+# Cargo.lock IS tracked — this builds a Python extension, so a pinned lock keeps
+# the pyo3/numpy ABI reproducible across machines.

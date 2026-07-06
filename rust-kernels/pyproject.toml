@@ -1,0 +1,13 @@
+[build-system]
+requires = ["maturin>=1.5,<2"]
+build-backend = "maturin"
+
+[project]
+name = "tyssue-kernels"
+version = "0.1.0"
+description = "Rust numeric kernels for the tyssue vertex-model hot loop (Phase A backend)."
+requires-python = ">=3.12"
+
+[tool.maturin]
+manifest-path = "crates/tyssue-py/Cargo.toml"
+module-name = "tyssue_kernels"

@@ -71,6 +71,10 @@ viz3d = ["ipyvolume"]
 # the default install + Docker image. The fetched model is committed, so this is
 # rarely needed.
 fetch = ["pbg-biomodels @ git+https://github.com/vivarium-collective/pbg-biomodels.git"]
+# Human Reference Atlas initializers (vivarium_tyssue.hra). trimesh loads the
+# reference-organ GLB meshes; fast-simplification decimates them. The 2D FTU
+# path and ASCT+B rosters use only numpy/scipy (already core deps).
+hra = ["trimesh", "fast-simplification"]
 
 [build-system]
 requires = ["hatchling"]

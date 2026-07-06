@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parent.parent
 COMPOSITES = sorted((ROOT / "vivarium_tyssue" / "composites").glob("*.composite.yaml"))
 ALL_NAMES = {"base_solver", "regulation", "stochastic", "jamming", "gradient",
              "anisotropic", "gillespie", "epithelium_2d", "tumor",
-             "monolayer_liftoff"}
+             "monolayer_liftoff", "hra_crypt_field", "hra_colon_surface"}
 
 
 def test_all_composites_present():
@@ -63,3 +63,44 @@ def test_anisotropic_runs_end_to_end():
     spec = load_spec(ROOT / "vivarium_tyssue" / "composites" / "anisotropic.composite.yaml")
     comp = build_composite_from_spec(spec, overrides={"interval": 0.1}, core=core)
     comp.run(2)  # smoke: a couple of solver steps
+
+
+# ---------------------------------------------------------------------------
+# Run-one-step guardrail for EVERY composite (not just anisotropic).
+#
+# The 6 fork-only composites (base_solver, regulation, stochastic, jamming,
+# gradient, monolayer_liftoff) previously had *no* run coverage — only
+# spec-load. They exercise the EulerSolver step path we are about to swap to a
+# Rust backend, so a failure here is the tripwire that says "a demo broke".
+#
+# gillespie is xfail: it fails NOW (pre-existing) with a pyarrow error — its
+# spec still declares a parquet emitter that can't merge the object-dtype
+# 'cell_type' column across frames on the crypt mesh. Documented, not silent.
+# ---------------------------------------------------------------------------
+_GILLESPIE_KNOWN_BROKEN = (
+    "pre-existing: gillespie composite declares a parquet emitter that fails to "
+    "merge the object-dtype 'cell_type' column across frames (ArrowTypeError)"
+)
+
+
+@pytest.mark.parametrize(
+    "name",
+    sorted(ALL_NAMES),
+    ids=lambda n: n,
+)
+def test_composite_runs_one_step(name):
+    """Each declared composite builds and advances at least one solver step."""
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    from pbg_superpowers.composite_spec import load_spec, build_composite_from_spec
+    from vivarium_tyssue.core import build_core
+
+    if name == "gillespie":
+        pytest.xfail(_GILLESPIE_KNOWN_BROKEN)
+
+    core = build_core()
+    spec = load_spec(ROOT / "vivarium_tyssue" / "composites" / f"{name}.composite.yaml")
+    comp = build_composite_from_spec(spec, overrides={"interval": 0.01}, core=core)
+    comp.run(1)  # smoke: one solver step is enough to catch a broken step path

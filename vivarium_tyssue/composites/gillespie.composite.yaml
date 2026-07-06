@@ -29,7 +29,11 @@ parameters:
   interval:
     type: float
     default: 0.005
-    description: Solver / Gillespie step interval (dt).
+    description: Emit / update interval. Solver dt = interval / substeps.
+  substeps:
+    type: int
+    default: 1
+    description: "Native Euler steps per update (unused here \u2014 vessel gradient falls back to python)."
 state:
   Tyssue:
     _type: process
@@ -39,20 +43,38 @@ state:
       eptm: workspace/datasets/crypt_cylinder.hf5
       tissue_type: Sheet
       parameters:
+        # Mechanics aligned to Tasnif's original crypt cylinder model
+        # (Notebooks/cylindermodel.ipynb, cell 16), which ran stably to tf=300:
+        #   area_elasticity=1, prefered_area=1, perimeter_elasticity=1,
+        #   prefered_perimeter=3.5, viscosity=5, surface/vessel_elasticity=5,
+        #   threshold_length=0.1. The earlier soft values (viscosity 0.2,
+        #   vessel_elasticity 1.0, surface_elasticity 0.1, perimeter_elasticity
+        #   0.5) let the free top rim of the tube evert into a splayed "mushroom
+        #   cap" (max radius blew past 30 while the rest stayed a clean r=2.5
+        #   cylinder). Two things fix it: the high VESSEL_ELASTICITY modulus
+        #   (5.0) pins vertices radially to prefered_radius via
+        #   VesselSurfaceElasticity, and the high VISCOSITY (5.0) shortens the
+        #   effective explicit-Euler step (dot_r = -grad/viscosity, ~25x smaller)
+        #   so the stiff perimeter term can't buckle the rim. Result: rmax stays
+        #   ~2.5-3.8 all the way to t=72 (was ~35). See the gillespie report.
         face_df:
           area_elasticity: 1.0
           prefered_area: 1.0
-          perimeter_elasticity: 0.5
+          perimeter_elasticity: 1.0
           prefered_perimeter: 3.5
         edge_df:
           line_tension: 0.0
           is_active: 1.0
         vert_df:
-          viscosity: 0.05
-          vessel_elasticity: 1.0
+          viscosity: 5.0
+          # Modulus read by the VesselSurfaceElasticity effector (its energy uses
+          # `vessel_elasticity`, not the `surface_elasticity` column) — this is
+          # what pins each vertex to the r=prefered_radius cylinder. 5.0 matches
+          # Tasnif's surface_elasticity=5 and holds the tube; 1.0 let it evert.
+          vessel_elasticity: 5.0
           prefered_radius: 2.5
           is_alive: 1.0
-          surface_elasticity: 0.1
+          surface_elasticity: 5.0
       geom: VesselGeometry
       effectors:
       - FaceAreaElasticity
@@ -62,13 +84,21 @@ state:
       ref_effector: FaceAreaElasticity
       factory: model_factory_vessel
       settings:
-        threshold_length: 0.03
+        threshold_length: 0.1
         radius: 2.5
         axis: z
       auto_reconnect: true
       bounds: {}
       output_columns: {}
       maps: {}
+      backend: rust
+      substeps: ${substeps}
+      # Explicit-Euler safety net: clamp any single vertex's per-step displacement
+      # to 0.2 (normal motion is ~0.02; edge length ~1.2). A division / extrusion
+      # remove_face transient can briefly produce a large local gradient; without
+      # the clamp one such step at ~t=49 blows the whole mesh to NaN. Clamping lets
+      # that transient relax over a few steps and the crypt runs stably past t=72.
+      max_displacement: 0.2
     inputs:
       behaviors:
       - Behaviors
@@ -142,8 +172,21 @@ state:
         dcs: {}
       geom: VesselGeometry
       global_interval: 0.005
-      growth_rate: 0.02
-      shrink_rate: 0.02
+      # growth_rate / shrink_rate raised 0.02 -> 0.1 so the area-growth of a
+      # committed "dividing" cell (and the prefered-area collapse of an
+      # "extruding" cell) actually crosses the division_crit / death threshold
+      # WITHIN the ~t=72 demo window. On the now-rigid tube the cylinder surface
+      # is fixed-size, so at the old rate 0.02 a dividing cell's ACTUAL area only
+      # reached ~1.13 by t=72 (< division_crit 1.2) and NO cell ever divided or
+      # was extruded (0 births / 0 removals — verified true of the pre-fix
+      # everting baseline too; it is rate-limited, not a mechanics artifact). At
+      # 0.1 the full biology is visible: ~96 divisions + extrusions over the run,
+      # nfaces 704 -> ~672 (death-dominated early) -> ~742 (division-dominated
+      # late), while the tube still holds (rmax <= ~3.8). The fate-cascade rates
+      # (rates_max / michaelis_constants / transition_lengths / regulations) are
+      # unchanged — only the mechanical area growth/shrink timescale is faster.
+      growth_rate: 0.1
+      shrink_rate: 0.1
       division_crit: 1.2
       apoptosis_crit: 0.1
       regulations:
