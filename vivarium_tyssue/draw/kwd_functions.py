@@ -11,7 +11,7 @@ CELL_TYPE_COLORS = {
         "ent": "#C45454",
         "gc": "#45B53E",
         "extruding": "#000000",
-        "dividing": "#feeda3"
+        "dividing": "#feed"
     }
 
 def cell_type_kwds(sheet, alpha=1.0):

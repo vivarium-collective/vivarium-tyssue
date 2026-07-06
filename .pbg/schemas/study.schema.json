@@ -327,7 +327,7 @@
       }
     },
     "expected_behavior": {
-      "description": "List of testable behavioral expectations. Accepts two shapes: (1) legacy free-form strings for exploratory studies, or (2) structured DSL dicts with (name, en, given, measure, expect) for automated assertion via vivarium_dashboard.lib.expected_behavior.evaluate().",
+      "description": "List of testable behavioral expectations. Accepts two shapes: (1) legacy free-form strings for exploratory studies, or (2) structured DSL dicts with (name, en, given, measure, expect) for automated assertion via vivarium_workbench.lib.expected_behavior.evaluate().",
       "oneOf": [
         {
           "type": "array",
@@ -367,7 +367,7 @@
                     "properties": {
                       "kind": {
                         "type": "string",
-                        "description": "Measure primitive. See vivarium_dashboard.lib.expected_behavior for full list."
+                        "description": "Measure primitive. See vivarium_workbench.lib.expected_behavior for full list."
                       },
                       "reduce": {
                         "type": "string",

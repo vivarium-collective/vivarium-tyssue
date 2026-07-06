@@ -5,7 +5,7 @@ vertex-model simulator. Converted from
 [`vivarium-tyssue`](https://github.com/vivarium-collective/vivarium-tyssue): the
 scenarios that used to be assembled procedurally inside `tests/tests.py` are now
 **declared composites**, and the `create_gif` / `create_gif_3d` rendering recipes
-are now **Visualization Steps**. Launches in the vivarium-dashboard.
+are now **Visualization Steps**. Launches in the vivarium-workbench.
 
 ## Layout
 
@@ -69,7 +69,7 @@ dependency-light matplotlib edge-mesh animation when the viewer stack is absent.
 ```bash
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"        # add ".[dev,viz3d]" for the faithful 3D path
-bash scripts/serve.sh             # launch the vivarium-dashboard
+bash scripts/serve.sh             # launch the vivarium-workbench
 pytest tests/test_composites.py   # validate composites + the stock-tyssue run
 ```
 

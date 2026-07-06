@@ -42,11 +42,11 @@ dependencies = [
     # load-bearing runtime dep, not just a notebook nicety.
     "ipywidgets",
     # Web-based workspace dashboard (server + templates + assets + lib helpers);
-    # provides the `vivarium-dashboard serve` CLI invoked by scripts/serve.sh and
+    # provides the `vivarium-workbench serve` CLI invoked by scripts/serve.sh and
     # the Dockerfile CMD. Not published to PyPI — resolved via [tool.uv.sources]
     # below so the root-workspace git URL overrides pbg-biomodels' local-path source
     # (see the [tool.uv.sources] comment for details).
-    "vivarium-dashboard",
+    "vivarium-workbench",
     # ParquetEmitter — the workspace's default emitter (see workspace.yaml
     # runtime.default_emitter and vivarium_tyssue.core). The [parquet] extra pulls
     # polars/pyarrow/duckdb/fsspec. Not on PyPI; reference the repo directly.
@@ -77,16 +77,16 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 # uv 0.9.x bug workaround: pbg-biomodels has [tool.uv.sources] with local-path
-# entries for its sibling repos (vivarium-dashboard, pbg-tellurium, pbg-copasi,
+# entries for its sibling repos (vivarium-workbench, pbg-tellurium, pbg-copasi,
 # pbg-simbio). When uv fetches pbg-biomodels from git it incorrectly applies those
 # path sources, converting them to invalid
-#   git+https://…pbg-biomodels.git#subdirectory=../vivarium-dashboard
+#   git+https://…pbg-biomodels.git#subdirectory=../vivarium-workbench
 # URLs that fail to resolve.  override-dependencies is applied unconditionally
 # BEFORE the resolver fetches any URL, so it replaces those bad URLs with the
 # correct git refs for all four packages.
 [tool.uv]
 override-dependencies = [
-    "vivarium-dashboard @ git+https://github.com/vivarium-collective/vivarium-dashboard.git",
+    "vivarium-workbench @ git+https://github.com/vivarium-collective/vivarium-dashboard.git",
     "pbg-tellurium @ git+https://github.com/vivarium-collective/pbg-tellurium.git",
     "pbg-simbio @ git+https://github.com/vivarium-collective/pbg-simbio.git",
     "pbg-copasi @ git+https://github.com/vivarium-collective/pbg-copasi.git",
@@ -101,7 +101,7 @@ override-dependencies = [
     "pbg-emitters[parquet] @ git+https://github.com/vivarium-collective/pbg-emitters.git",
 ]
 
-# [tool.uv.sources] supplies the git URL for vivarium-dashboard (not on PyPI).
+# [tool.uv.sources] supplies the git URL for vivarium-workbench (not on PyPI).
 # The root-workspace source should in principle override pbg-biomodels' path source,
 # but override-dependencies above is the primary fix; this is belt-and-suspenders.
 [tool.uv.sources]
@@ -109,13 +109,13 @@ override-dependencies = [
 # patches get_opposite so cell_division/remove_face work under read-only pandas-3
 # arrays). Required for the tumor composite's topology_ops=true path.
 tyssue = { git = "https://github.com/vivarium-collective/vivatyssue.git" }
-vivarium-dashboard = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git" }
+vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git" }
 pbg-tellurium = { git = "https://github.com/vivarium-collective/pbg-tellurium.git" }
 pbg-simbio = { git = "https://github.com/vivarium-collective/pbg-simbio.git" }
 pbg-copasi = { git = "https://github.com/vivarium-collective/pbg-copasi.git" }
 pbg-superpowers = { git = "https://github.com/vivarium-collective/pbg-superpowers.git" }
 
-# Allow the PEP 508 direct git URL for vivarium-dashboard (not on PyPI).
+# Allow the PEP 508 direct git URL for vivarium-workbench (not on PyPI).
 [tool.hatch.metadata]
 allow-direct-references = true
 

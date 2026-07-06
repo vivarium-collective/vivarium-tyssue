@@ -25,8 +25,8 @@ read -rp "claims served (comma-separated, e.g. phase-1.dnaA-accumulation): " DS_
 python3 -c "
 import sys
 from pathlib import Path
-from vivarium_dashboard.lib.workspace_yaml import load_workspace, save_workspace, WorkspaceValidationError
-from vivarium_dashboard.lib._root import set_workspace_root
+from vivarium_workbench.lib.workspace_yaml import load_workspace, save_workspace, WorkspaceValidationError
+from vivarium_workbench.lib._root import set_workspace_root
 set_workspace_root('$WS_ROOT')
 
 ws_root = Path('$WS_ROOT')
