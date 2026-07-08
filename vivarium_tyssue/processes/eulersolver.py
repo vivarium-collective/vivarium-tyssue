@@ -28,6 +28,7 @@ import numpy as np
 
 from tyssue.behaviors.event_manager import EventManager
 from tyssue.behaviors.sheet.basic_events import reconnect
+from tyssue.core.history import History
 from tyssue.io.hdf5 import load_datasets
 from tyssue import config
 
@@ -83,6 +84,10 @@ class EulerSolver(Process):
                                # huge local gradient that would otherwise explode to
                                # NaN in one step; clamping lets it relax over a few
                                # steps instead.
+        "record_history": "boolean", # default True: build a tyssue History and
+                               # record every step so `.history` drives create_gif
+                               # / to_archive. Set False for large rust runs to
+                               # avoid the per-step full-copy RAM growth.
     }
 
     def initialize(self, config):
@@ -175,6 +180,12 @@ class EulerSolver(Process):
             )
         # Normalize any StringDtype columns from parameter assignment (pandas 3.0).
         self._coerce_string_columns()
+
+        # Record history only when asked (default on). Build after parameters are
+        # applied so configured columns (line_tension, prefered_area, ...) are
+        # actually recorded each step and available for per-frame colouring.
+        self._record_history = bool(config.get("record_history", False))
+        self.history = History(self.eptm) if self._record_history else None
 
     def _coerce_string_columns(self):
         """pandas 3.0 gives scalar-string column assignments (e.g. ``cell_type``)
@@ -343,6 +354,17 @@ class EulerSolver(Process):
                 self._geom_lean = False
         return self.eptm
 
+    def record(self, t):
+        """Snapshot the current epithelium into the tyssue History (no-op when
+        history recording is disabled). On the rust/lean hot path the intermediate
+        edge-coordinate blocks are left native, so materialize the full geometry
+        first, otherwise History would archive stale sub-coordinates."""
+        if self.history is None:
+            return
+        if self._geom_lean:
+            self.to_dataframes(full=True)
+        self.history.record(time_stamp=t)
+
     def ode_func(self):
         """Computes the models' gradient.
         Returns
@@ -475,6 +497,8 @@ class EulerSolver(Process):
         # skip the all-column scan on plain integration steps — the common case.
         if inputs["behaviors"] or network_changed:
             self._coerce_string_columns()
+
+        self.record(inputs["global_time"])
 
         dfs = self.output_dfs()
 

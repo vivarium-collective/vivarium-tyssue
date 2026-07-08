@@ -59,6 +59,10 @@ def get_test_config():
         "bounds": None, # bounds the displacement of the vertices at each time step
         "output_columns": {}, # dict containing lists of column names to emit for each dataframe
         "maps": {},
+        "backend": "rust", # standard 3 effectors + VesselSurfaceElasticity, model_factory, 3D mesh -> rust-eligible
+        "substeps": 1, # native Euler substeps per update (rust sheet models only)
+        "max_displacement": 0.0, # >0 clamps per-step vertex motion; 0 = off
+        "record_history": True, # build a tyssue History and record every step (drives create_gif / to_archive)
     }
 
 def get_test_config_flat():
@@ -101,7 +105,11 @@ def get_test_config_flat():
         },
         "auto_reconnect": True, # if True, will automatically perform reconnections
         "bounds": None, # bounds the displacement of the vertices at each time step
-        "output_columns": {} # dict containing lists of column names to emit for each dataframe
+        "output_columns": {}, # dict containing lists of column names to emit for each dataframe
+        "backend": "rust", # standard 3 effectors, model_factory_bound, 3D mesh -> rust-eligible
+        "substeps": 1, # native Euler substeps per update (rust sheet models only)
+        "max_displacement": 0.0, # >0 clamps per-step vertex motion; 0 = off
+        "record_history": True, # build a tyssue History and record every step (drives create_gif / to_archive)
     }
 
 def get_test_spec(interval=0.1, config=None):
@@ -396,6 +404,8 @@ def get_test_gillespie_spec(interval=0.01, config=None, tau=1.0, sigma=1.0):
     )
     spec["Tyssue"]["config"]["geom"] = "VesselGeometry"
     spec["Tyssue"]["config"]["factory"] = "model_factory_vessel"
+    # model_factory_vessel is not a rust-supported factory -> keep this on python.
+    spec["Tyssue"]["config"]["backend"] = "python"
     spec["Tyssue"]["config"]["effectors"] = ["FaceAreaElasticity", "PerimeterElasticity", "LineTension", "VesselSurfaceElasticity"]
     spec["Tyssue"]["config"]["parameters"]["vert_df"]["viscosity"] = 0.05
     spec["Tyssue"]["config"]["parameters"]["vert_df"]["surface_elasticity"] = 0.1
