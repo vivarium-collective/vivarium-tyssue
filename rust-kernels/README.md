@@ -24,16 +24,19 @@ pyproject.toml        maturin build backend
 
 ## Build
 
-Requires the Rust toolchain (`cargo`) and `maturin` (installed in the workspace
-`.venv`). From this directory:
+Requires the Rust toolchain (`cargo`, via `rustup`) and `maturin`. Build into the
+**`vivarium-tyssue` conda env** — that's the env the tests and notebooks run in
+(the repo `.venv` is broken). From this directory:
 
 ```bash
-VIRTUAL_ENV=../.venv ../.venv/bin/maturin develop --release
+conda run -n vivarium-tyssue pip install "maturin>=1.5,<2"   # once
+cd rust-kernels && conda run -n vivarium-tyssue maturin develop --release
 ```
 
-Then `import tyssue_kernels` works in the venv. The module is **optional**: the
+Then `import tyssue_kernels` works in that env. The module is **optional**: the
 equivalence tests (`tests/test_rust_kernels_equiv.py`) `importorskip` it, so CI
-without Rust stays green.
+without Rust stays green. The extension is tied to the interpreter it was built
+against (no abi3) — rebuild if the env's Python changes.
 
 ## Correctness contract
 
@@ -49,7 +52,19 @@ wired into `EulerSolver`. Add a new equivalence test alongside each new kernel.
 | `edge_lengths(pos, srce, trgt)` | tyssue `update_length` | ✅ proven (1e-12) |
 | `scatter_add(values, index, n_vert)` | the two `groupby(...).sum()` in `compute_gradient` (edge→vertex assembly) | ✅ proven (1e-12) |
 | `update_geometry(pos, srce, trgt, face, n_face)` | `SheetGeometry.update_all` stateless core: dcoords/length/centroid/normals/area/perimeter | ✅ proven (~1e-15, **~20×**; Sheet + Vessel — see note) |
-| `sheet_gradient(...)` | all of `compute_gradient` for the standard 3-effector sheet model (LineTension + PerimeterElasticity + FaceAreaElasticity) incl. edge→vertex assembly | ✅ proven (~1e-15; both factories — see note) |
+| `sheet_gradient(...)` | all of `compute_gradient` for the standard 3-effector sheet model (LineTension + PerimeterElasticity + FaceAreaElasticity) incl. edge→vertex assembly — the fast fused special case | ✅ proven (~1e-15; both factories — see note) |
+| `update_geometry_planar(...)` | 2D `PlanarGeometry.update_all` core (signed `nz`, `sub_area = nz/2`) | ✅ proven (~1e-10) |
+| `unit_edge_gradient` / `area_gradient` / `area_gradient_2d` | shared gradient **primitives** for the compositional path (see below) — length/tension family and area family | ✅ proven (~1e-9 vs `compute_gradient`) |
+
+## Compositional gradient (all effectors + geometries)
+
+Beyond the fused `sheet_gradient`, the backend has an **extensible compositional
+path**: `vivarium_tyssue/processes/kernels.py:rust_model_gradient` assembles a
+model's gradient one effector at a time — covered effectors run through the shared
+primitives above, everything else falls back to its own tyssue `.gradient`. So any
+effector/geometry combination runs on the rust backend (covered terms accelerated,
+nothing regressing), and adding coverage for a new effector or geometry is a small,
+tested, local change. See **`ADDING_A_KERNEL.md`**.
 
 **Gradient-kernel scope:** `sheet_gradient` fuses the three standard sheet
 effectors and the two `groupby.sum()` reductions into one pass, consuming

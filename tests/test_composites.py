@@ -65,6 +65,58 @@ def test_anisotropic_runs_end_to_end():
     comp.run(2)  # smoke: a couple of solver steps
 
 
+def test_history_file_streams_to_hdf5(tmp_path):
+    """history_file makes EulerSolver record via disk-backed HistoryHdf5 (flat
+    memory), and the archive still drives retrieve/browse (create_gif)."""
+    import copy
+    import sys
+    sys.path.insert(0, str(ROOT))
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    from pbg_superpowers.composite_spec import load_spec, build_composite_from_spec
+    from tyssue.core.history import HistoryHdf5
+    from vivarium_tyssue.core import build_core
+
+    hf5 = tmp_path / "hist.hf5"
+    spec = copy.deepcopy(load_spec(ROOT / "vivarium_tyssue" / "composites" / "anisotropic.composite.yaml"))
+    spec["emitters"] = []
+    cfg = spec["state"]["Tyssue"]["config"]
+    cfg["record_history"] = True
+    cfg["history_file"] = str(hf5)
+    def run_once():
+        comp = build_composite_from_spec(spec, overrides={"interval": 0.1}, core=build_core())
+        proc = comp.state["Tyssue"]["instance"]
+        assert isinstance(proc.history, HistoryHdf5)
+        comp.run(3)
+        return proc
+
+    proc = run_once()
+    assert hf5.exists() and hf5.stat().st_size > 0
+    assert proc.history.retrieve(0).Nv == proc.eptm.Nv  # reads a frame back from disk
+    n_first = len(proc.history.time_stamps)
+
+    # rerun into the same filename: the stale file is cleared, so it holds one
+    # simulation's worth of stamps — not the two runs concatenated.
+    n_second = len(run_once().history.time_stamps)
+    assert n_second == n_first, f"rerun accumulated stamps: {n_first} -> {n_second}"
+
+
+def test_default_history_stays_in_memory():
+    """With recording on but no history_file, the in-RAM History is unchanged."""
+    import copy
+    import sys
+    sys.path.insert(0, str(ROOT))
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    from pbg_superpowers.composite_spec import load_spec, build_composite_from_spec
+    from tyssue.core.history import History, HistoryHdf5
+    from vivarium_tyssue.core import build_core
+
+    spec = copy.deepcopy(load_spec(ROOT / "vivarium_tyssue" / "composites" / "anisotropic.composite.yaml"))
+    spec["state"]["Tyssue"]["config"]["record_history"] = True
+    comp = build_composite_from_spec(spec, overrides={"interval": 0.1}, core=build_core())
+    hist = comp.state["Tyssue"]["instance"].history
+    assert isinstance(hist, History) and not isinstance(hist, HistoryHdf5)
+
+
 # ---------------------------------------------------------------------------
 # Run-one-step guardrail for EVERY composite (not just anisotropic).
 #
