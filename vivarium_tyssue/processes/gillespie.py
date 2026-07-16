@@ -56,25 +56,31 @@ class Gillespie(Process):
         self.apoptosis_crit = config["apoptosis_crit"]
         self.regulations = config["regulations"]
         self.regulation_loc = config["regulation_loc"]
-
-    def f_rates_max(self, face_df, valid_types=None):
-        # Precompute total max rate per cell type
-        rate_per_type = {
+        # Total max rate per cell type — fixed for the run, so compute once here
+        # instead of rebuilding the dict on every f_rates_max call (per step).
+        self._rate_per_type = {
             ct: sum(transitions.values())
             for ct, transitions in self.rates_max.items()
         }
 
+    def f_rates_max(self, face_df, valid_types=None):
+        # Per-face max total rate: each face's cell_type -> its precomputed total
+        # (0 for transient states like "dividing"/"extruding", absent from the
+        # map), zeroed for any type outside valid_types. np.fromiter builds the
+        # array in one pass without the intermediate Python list.
+        rate_per_type = self._rate_per_type
         cell_types = face_df["cell_type"].to_numpy()
-
-        if valid_types is not None:
-            valid_types = set(valid_types)
-
-        rates = np.array([
-            rate_per_type.get(ct, 0.0) if (valid_types is None or ct in valid_types) else 0.0
-            for ct in cell_types
-        ], dtype=float)
-
-        return rates
+        n = len(cell_types)
+        if valid_types is None:
+            return np.fromiter(
+                (rate_per_type.get(ct, 0.0) for ct in cell_types),
+                dtype=float, count=n,
+            )
+        vt = valid_types if isinstance(valid_types, (set, frozenset)) else set(valid_types)
+        return np.fromiter(
+            (rate_per_type.get(ct, 0.0) if ct in vt else 0.0 for ct in cell_types),
+            dtype=float, count=n,
+        )
 
     def calculate_timestep(self, interval, state):
         # calculate next time-step
@@ -86,32 +92,34 @@ class Gillespie(Process):
         time_interval = -np.log(u0) / max_total
         return time_interval
 
-    def f_rate(self, face_df, cell_uid, cell_type, jump):
+    def f_rate(self, face_df, cell_uid, cell_type, jump, uid_pos=None):
         """
         Parameters:
         cell: cell index
         jump:
+        uid_pos: optional {unique_id: iloc} map so the regulation functions look
+            the cell up in O(1) instead of scanning face_df.
         """
         rate_max = self.rates_max[cell_type][jump]
         rate = rate_max
-        if self.regulations[cell_type]:
-            regulators = regulations[cell_type][jump]
+        regulators = self.regulations[cell_type].get(jump) if self.regulations[cell_type] else None
+        if regulators:
+            michaelis = self.michaelis_constants[cell_type]
+            transition = self.transition_lengths[cell_type]
             for regulator, regulation in regulators.items():
-                loc = dict(face_df.loc[face_df["unique_id"] == cell_uid][["x", "y", "z"]])
-                kwargs = {}
+                kwargs = {"uid_pos": uid_pos}
                 if regulator in self.regulation_loc.keys():
                     kwargs["axis"] = self.regulation_loc[regulator]
-                if (jump + "_" + regulator in K[cell_type]) & (jump + "_" + regulator in k[cell_type]):
-                    K_j = K[cell_type][jump + "_" + regulator]
-                    k_j = k[cell_type][jump + "_" + regulator]
+                key = jump + "_" + regulator
+                if key in michaelis and key in transition:
+                    K_j = michaelis[key]
+                    k_j = transition[key]
+                    regulation_function = regulations_map[regulator]
+                    regulation_value = reg_pol(regulation_function(face_df, cell_uid, **kwargs), K_j, k_j)
                     if regulation == "positive":
-                        regulation_function = regulations_map[regulator]
-                        regulation_term = reg_pol(regulation_function(face_df, cell_uid, **kwargs), K_j, k_j)
-                        rate *= regulation_term
+                        rate *= regulation_value
                     if regulation == "negative":
-                        regulation_function = regulations_map[regulator]
-                        regulation_term = 1 - reg_pol(regulation_function(face_df, cell_uid, **kwargs), K_j, k_j)
-                        rate *= regulation_term
+                        rate *= 1 - regulation_value
         return rate
 
     def inputs(self):
@@ -137,7 +145,13 @@ class Gillespie(Process):
 
         #pick cell and event accept/reject
         probability = np.divide(max_rates, max_total)
-        n_cells = len(face_df)
+
+        # Cache the per-face columns as arrays once; the accept/reject loop and
+        # the regulation lookups then index by position instead of paying a
+        # label-based .loc / boolean scan every iteration.
+        uid_arr = face_df["unique_id"].to_numpy()
+        celltype_arr = face_df["cell_type"].to_numpy()
+        uid_pos = {int(u): p for p, u in enumerate(uid_arr)}
 
         #gather cells already picked for events
         existing_uids = []
@@ -145,11 +159,14 @@ class Gillespie(Process):
             existing_uids = {d["cell_uid"] for d in inputs["behaviors"] if "cell_uid" in d.keys()}
 
         while True:
-            cell_id = np.random.choice(list(face_df.index), 1, p=probability)[0]
-            cell_uid = int(face_df.loc[cell_id, "unique_id"])
-            if (cell_uid not in existing_uids) and (face_df.loc[cell_id]["cell_type"] in self.cell_types):
+            # Draw a face position from the rate distribution. choice(n, p=...)
+            # consumes the RNG identically to choice(index_array, p=...) but hands
+            # back the position directly, so no label->row lookup is needed.
+            pos = np.random.choice(len(uid_arr), 1, p=probability)[0]
+            cell_uid = int(uid_arr[pos])
+            if (cell_uid not in existing_uids) and (celltype_arr[pos] in self.cell_types):
                 break
-        cell_type = face_df.loc[cell_id]["cell_type"]
+        cell_type = celltype_arr[pos]
 
         #pick event
         jumps, proba_j = list(zip(*self.rates_max[cell_type].items()))
@@ -157,7 +174,7 @@ class Gillespie(Process):
         jump = np.random.choice(jumps, 1, p=proba_j)[0]
 
         #calculate rate of picked event for picked cell
-        rate_event = self.f_rate(face_df, cell_uid, cell_type, jump)
+        rate_event = self.f_rate(face_df, cell_uid, cell_type, jump, uid_pos)
 
         u1 = np.random.random_sample()
 

@@ -169,6 +169,14 @@ def materialize_geometry(eptm, geom, which=("edge", "face"), full=True):
     coords = eptm.coords
     ed, fd = eptm.edge_df, eptm.face_df
     has_height = "height" in eptm.vert_df.columns
+    # A stash whose edge/face counts no longer match the frames is stale (a
+    # topology change the solver didn't rebuild it after): writing it would raise
+    # a length-mismatch. Skip rather than corrupt/crash — the next set_pos rebuilds
+    # a fresh stash, and observable geometry is recomputed then.
+    if "edge" in which and len(np.asarray(geom["length"])) != len(ed):
+        return
+    if "face" in which and len(np.asarray(geom["area"])) != len(fd):
+        return
     if "edge" in which:
         ed["length"] = geom["length"]
         if full:
@@ -304,6 +312,11 @@ def rust_sheet_gradient(eptm, is_bound, with_vessel=False, topo=None, geom=None)
     coords = eptm.coords
     ed, fd = eptm.edge_df, eptm.face_df
     C = np.ascontiguousarray
+    # Drop a stale geometry stash (wrong edge count after an untracked topology
+    # change) and fall back to the DataFrame columns, which are always the current
+    # length — otherwise the mismatched arrays index out of bounds in the kernel.
+    if geom is not None and len(np.asarray(geom["sub_area"])) != eptm.Ne:
+        geom = None
     if topo is None:
         vmap = {v: i for i, v in enumerate(eptm.vert_df.index)}
         fmap = {v: i for i, v in enumerate(fd.index)}

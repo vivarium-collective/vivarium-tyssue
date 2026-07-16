@@ -178,16 +178,16 @@ write(
 # --- 2. regulation (cell division) -------------------------------------------
 write(
     "regulation",
-    description="Cylinder sheet with a TestRegulations process that periodically triggers cell "
-    "division above a critical area, driving tissue growth.",
+    description="Cylinder sheet with a CellDivisions process that randomly triggers cell "
+    "division (Poisson rate) above a critical area, driving tissue growth.",
     tags=["tissue", "mechanics", "multi-cell"],
-    processes=["EulerSolver", "TestRegulations"],
+    processes=["EulerSolver", "CellDivisions"],
     state={
         "Tyssue": tyssue_node(cylinder_config()),
         "Regulation": {
             "_type": "process",
-            "address": "local:TestRegulations",
-            "config": {"period": 5.0, "geom": "VesselGeometry", "crit_area": 2.0, "growth_rate": 0.2, "double": False},
+            "address": "local:CellDivisions",
+            "config": {"rate": 0.4, "geom": "VesselGeometry", "crit_area": 2.0, "growth_rate": 0.2},
             "inputs": {"global_time": ["global_time"], "datasets": ["Datasets"]},
             "outputs": {"behaviors": ["Behaviors"]},
             "interval": INTERVAL,

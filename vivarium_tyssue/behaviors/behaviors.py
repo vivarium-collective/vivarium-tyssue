@@ -10,6 +10,36 @@ from vivarium_tyssue.core_maps import GEOMETRY_MAP
 from vivarium_tyssue.behaviors.tyssue_patches import apply_tyssue_topology_patches
 apply_tyssue_topology_patches()
 
+
+def _uid_to_face_index(sheet):
+    """``unique_id -> face_df index label`` map, cached on the sheet.
+
+    The behaviors (and the Gillespie process) look a single cell up by its
+    ``unique_id`` many times per step; done as ``face_df[face_df["unique_id"] ==
+    uid]`` that is a full-frame boolean scan each call and dominated the crypt
+    profile. Here we build the map once and reuse it until ``face_df`` is
+    replaced. ``reset_index`` (fired by every division / extrusion / reconnect)
+    reassigns ``sheet.face_df`` to a fresh object, so an identity check
+    (``cache is sheet.face_df``) invalidates the cache exactly when the
+    row<->uid mapping can change; in-place writes (flagging ``cell_type``,
+    scaling ``prefered_area``) keep the same object and stay valid.
+    """
+    fd = sheet.face_df
+    cache = getattr(sheet, "_uid_face_cache", None)
+    if cache is not None and cache[0] is fd:
+        return cache[1]
+    mapping = {int(u): idx for u, idx in zip(fd["unique_id"].to_numpy(), fd.index.to_numpy())}
+    sheet._uid_face_cache = (fd, mapping)
+    return mapping
+
+
+def face_index_for(sheet, uid):
+    """Return the ``face_df`` index label for a cell's ``unique_id``, or ``None``
+    if no live face carries it (extruded / not yet born). O(1) via the cached map
+    in :func:`_uid_to_face_index` instead of an O(Nfaces) boolean scan."""
+    return _uid_to_face_index(sheet).get(int(uid))
+
+
 def update_stem_cells(eptm):
     """updates which cells in a cylinder model are classified as stem cells"""
     eptm.face_df['stem_cell'] = 0
@@ -41,75 +71,201 @@ def divide_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
         if cell_idx is None:
             raise ValueError("cell_uid or cell_idx must be specified")
     if cell_uid is not None:
-        cell_idx = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
+        cell_idx = int(face_index_for(sheet, cell_uid))
     if radius is None:
         radius = (sheet.vert_df["x"].max() - sheet.vert_df["x"].min())/2
     daughter = cell_division(sheet, cell_idx, geom)
     fix_points_cylinder(sheet, radius=radius)
     return daughter
 
+# ---------------------------------------------------------------------------
+# Batched grow/shrink of committed cells
+#
+# division() / apoptosis_extrusion() used to re-run one manager callback per
+# committed cell every step just to scale a single ``prefered_area`` scalar —
+# tens of thousands of pandas .loc calls dominating the crypt profile. Instead a
+# commit records the cell's *own* growth parameters (which still arrive per-cell
+# from whatever external process emitted the behavior) into transient per-face
+# ``commit_*`` columns, and a single batched grower (queued once) does the whole
+# grow/shrink in one vectorized pass, firing the real topology op only for the
+# cells that crossed their own threshold. The rates stay a property of the
+# emitted behavior — nothing moves onto the sheet settings or the solver config.
+# ---------------------------------------------------------------------------
+
+# commit_state: 0 = not committed, 1 = dividing, 2 = extruding.
+_COMMIT_DEFAULTS = {"commit_state": 0.0, "commit_rate": 0.0, "commit_crit": 0.0, "commit_dt": 0.0}
+_GROWER_NAME = "_grow_committed_cells"
+
+
+def _ensure_commit_cols(sheet):
+    fd = sheet.face_df
+    for col, default in _COMMIT_DEFAULTS.items():
+        if col not in fd.columns:
+            fd[col] = default
+    if "commit_type" not in fd.columns:
+        # target cell_type to restore on a division's mother/daughter ("" = none)
+        fd["commit_type"] = ""
+
+
+def _ensure_grower(sheet, manager, geom):
+    """Queue the single batched grower on the manager's ``next`` deque, unless one
+    is already queued (the manager doesn't de-dup a behavior that carries no
+    face_id, so we do it here)."""
+    if any(tup[0].__name__ == _GROWER_NAME for tup in manager.next):
+        return
+    manager.append(_grow_committed_cells, geom=geom)
+
+
+def _clear_commit(sheet, idx, restore_type=None):
+    fd = sheet.face_df
+    if restore_type:
+        fd.loc[idx, "cell_type"] = restore_type
+    fd.loc[idx, "commit_state"] = 0.0
+    fd.loc[idx, "commit_rate"] = 0.0
+    fd.loc[idx, "commit_crit"] = 0.0
+    fd.loc[idx, "commit_dt"] = 0.0
+    fd.loc[idx, "commit_type"] = ""
+
+
+def _do_division(sheet, geometry, cell_uid):
+    """Actual split of a division-ready cell (identical topology handling to the
+    former in-callback path), then restore its target cell_type and clear the
+    commit flags on both mother and daughter."""
+    cell_id = face_index_for(sheet, cell_uid)
+    if cell_id is None:
+        return
+    cell_id = int(cell_id)
+    target_type = sheet.face_df.loc[cell_id, "commit_type"]
+    sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
+    daughter = cell_division(sheet, cell_id, geometry)
+    sheet.reset_index(order=True)
+    geometry.update_all(sheet)
+    sheet.network_changed = True
+    restore = target_type if target_type else None
+    _clear_commit(sheet, cell_id, restore_type=restore)
+    _clear_commit(sheet, daughter, restore_type=restore)
+    print(f"cell n°{daughter} is born")
+
+
+def _do_extrusion(sheet, geometry, cell_uid):
+    """Actual removal of an extrusion-ready cell (identical topology handling to
+    the former in-callback path)."""
+    cell_id = face_index_for(sheet, cell_uid)
+    if cell_id is None:
+        return
+    cell_id = int(cell_id)
+    sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
+    try:
+        remove_face(sheet, cell_id)
+    except Exception as exc:  # noqa: BLE001
+        print(f"remove_face failed for cell {cell_uid} ({type(exc).__name__}); skipping")
+        # Drop the commit so the grower doesn't retry this cell forever.
+        cid = face_index_for(sheet, cell_uid)
+        if cid is not None:
+            _clear_commit(sheet, int(cid))
+        return
+    sheet.reset_index(order=True)
+    _drop_isolated_verts(sheet)
+    # Project vertices back onto the cylinder surface BEFORE updating geometry
+    # (a removed face's centroid vertex can land off the r=prefered_radius
+    # surface and make the next Euler step blow up to NaN).
+    radius = sheet.settings.get("radius")
+    if radius is None and "prefered_radius" in sheet.vert_df.columns:
+        radius = float(sheet.vert_df["prefered_radius"].mean())
+    if radius:
+        fix_points_cylinder(sheet, radius=radius)
+    geometry.update_all(sheet)
+    sheet.network_changed = True
+
+
+def _grow_committed_cells(sheet, manager, geom="SheetGeometry"):
+    """One vectorized grow/shrink pass over every committed cell, then fire the
+    real division / extrusion for any that crossed their own threshold. Re-queues
+    itself while commitments remain."""
+    geometry = GEOMETRY_MAP[geom] if isinstance(geom, str) else geom
+    fd = sheet.face_df
+    if "commit_state" not in fd.columns:
+        return
+    state = fd["commit_state"].to_numpy()
+    div_mask = state == 1.0
+    ext_mask = state == 2.0
+    if not div_mask.any() and not ext_mask.any():
+        return  # nothing pending -> let the grower drop out of the queue
+
+    # Vectorized growth / shrink of every committed cell's prefered_area at its
+    # own recorded rate. A_0(t+dt) = A_0(t) * (1 +/- dt*rate).
+    prefered = fd["prefered_area"].to_numpy(dtype=float).copy()
+    rate = fd["commit_rate"].to_numpy(dtype=float)
+    dt = fd["commit_dt"].to_numpy(dtype=float)
+    prefered[div_mask] *= (1.0 + dt[div_mask] * rate[div_mask])
+    prefered[ext_mask] *= (1.0 - dt[ext_mask] * rate[ext_mask])
+    fd["prefered_area"] = prefered
+
+    # Threshold crossers -> real topology ops (resolved by unique_id, since each
+    # op reindexes face_df). Division on area>crit; extrusion once the actual
+    # area falls below crit OR the death target (prefered_area) has collapsed.
+    area = fd["area"].to_numpy(dtype=float)
+    crit = fd["commit_crit"].to_numpy(dtype=float)
+    DEATH_FLOOR = 0.5
+    uid = fd["unique_id"].to_numpy()
+    div_ready = uid[div_mask & (area > crit)]
+    ext_ready = uid[ext_mask & ((area < crit) | (prefered < DEATH_FLOOR))]
+
+    for cell_uid in div_ready:
+        _do_division(sheet, geometry, int(cell_uid))
+    for cell_uid in ext_ready:
+        _do_extrusion(sheet, geometry, int(cell_uid))
+
+    # Re-queue while any commitment is still pending (recompute: the topology ops
+    # above cleared / removed some rows).
+    fd = sheet.face_df
+    if "commit_state" in fd.columns and (fd["commit_state"].to_numpy() != 0.0).any():
+        _ensure_grower(sheet, manager, geom)
+
+
 def division(
         sheet, manager, geom= "SheetGeometry", cell_uid=0, cell_type=None, crit_area=2.0, growth_rate=0.1, dt=1.
 ):
-    """Defines a division behavior.
+    """Commit a cell to division.
+
+    Records this cell's own growth parameters (from the emitting process) into
+    its ``commit_*`` face columns, flags it ``"dividing"`` for colour-coding, and
+    hands off to the batched grower (:func:`_grow_committed_cells`), which grows
+    every committed cell's ``prefered_area`` and splits it once ``area`` exceeds
+    ``crit_area``.
 
     Parameters
     ----------
-
     sheet: a :class:`Sheet` object
     cell_uid: int
         the unique_id of the dividing cell
     cell_type: str, optional
         If provided, the cell is flagged "dividing" while it grows and both the
         mother and daughter faces are stamped with this cell_type once division
-        occurs. If None (default), no cell_type bookkeeping is done and the
-        behavior matches the plain division.
+        occurs. If None (default), no cell_type bookkeeping is done.
     crit_area: float
         the area at which the cell divides
     growth_rate: float
-        increase in the prefered are per unit time
+        increase in the prefered area per unit time
         A_0(t + dt) = A0(t) * (1 + growth_rate * dt)
     """
-    if type(geom) == str:
-        geometry = GEOMETRY_MAP[geom]
-    else:
-        geometry = geom
-    # The cell may have been extruded (apoptosis_extrusion) between when the
-    # coupling queued this division and when the manager runs it — its unique_id
-    # is then gone. Skip gracefully, matching apoptosis_extrusion's guard.
-    match = sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index
-    if len(match) == 0:
+    # The cell may have been extruded between when the coupling queued this
+    # division and when the manager runs it — its unique_id is then gone.
+    cell_id = face_index_for(sheet, cell_uid)
+    if cell_id is None:
         print("Cell not found, skipping division")
         return
-    cell_id = int(match[0])
+    cell_id = int(cell_id)
+    _ensure_commit_cols(sheet)
+    fd = sheet.face_df
     if cell_type is not None:
-        sheet.face_df.loc[cell_id, "cell_type"] = "dividing"
-    if sheet.face_df.loc[cell_id, "area"] > crit_area:
-        # restore prefered_area
-        sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
-        # Do division
-        daughter = cell_division(sheet, cell_id, geometry)
-        # Update the topology
-        sheet.reset_index(order=True)
-        # update geometry
-        geometry.update_all(sheet)
-        sheet.network_changed = True
-        if cell_type is not None:
-            sheet.face_df.loc[cell_id, "cell_type"] = cell_type
-            sheet.face_df.loc[daughter, "cell_type"] = cell_type
-        print(f"cell n°{daughter} is born")
-    else:
-        #
-        sheet.face_df.loc[cell_id, "prefered_area"] *= (1 + dt * growth_rate)
-        manager.append(
-            division,
-            geom=geom,
-            cell_uid=cell_uid,
-            cell_type=cell_type,
-            crit_area=crit_area,
-            growth_rate=growth_rate,
-            dt=dt
-        )
+        fd.loc[cell_id, "cell_type"] = "dividing"
+        fd.loc[cell_id, "commit_type"] = cell_type
+    fd.loc[cell_id, "commit_state"] = 1.0
+    fd.loc[cell_id, "commit_rate"] = growth_rate
+    fd.loc[cell_id, "commit_crit"] = crit_area
+    fd.loc[cell_id, "commit_dt"] = dt
+    _ensure_grower(sheet, manager, geom)
 
 def _drop_isolated_verts(sheet):
     """Drop vertices that no edge references (isolated after a face removal).
@@ -133,7 +289,7 @@ def apoptosis_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
         if cell_idx is None:
             raise ValueError("cell_uid or cell_idx must be specified")
     if cell_uid is not None:
-        cell_idx = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
+        cell_idx = int(face_index_for(sheet, cell_uid))
     if radius is None:
         radius = (sheet.vert_df["x"].max() - sheet.vert_df["x"].min())/2
     vertex = remove_face(sheet, cell_idx)
@@ -143,68 +299,30 @@ def apoptosis_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
 def apoptosis_extrusion(
         sheet, manager, geom= "SheetGeometry", cell_uid=0, crit_area=0.5, shrink_rate=0.1, dt=1.
 ):
-    if type(geom) == str:
-        geometry = GEOMETRY_MAP[geom]
-    else:
-        geometry = geom
-    try:
-        cell_id = int(sheet.face_df[sheet.face_df["unique_id"] == cell_uid].index[0])
-    except:
+    """Commit a cell to apoptotic extrusion.
+
+    Records this cell's own shrink parameters into its ``commit_*`` columns, flags
+    it ``"extruding"``, and hands off to the batched grower, which shrinks every
+    committed cell's ``prefered_area`` and removes it once its actual ``area``
+    falls below ``crit_area`` OR its death target ``prefered_area`` collapses
+    below ``DEATH_FLOOR`` (0.5). The DEATH_FLOOR criterion matters in the crypt:
+    extrusion is Wnt/z-biased to the free top rim, where cells stay mechanically
+    stretched (large actual area), so without it a committed cell's actual area
+    never reaches crit_area and it would never die.
+    """
+    cell_id = face_index_for(sheet, cell_uid)
+    if cell_id is None:
         print("Cell not found, skipping event")
         return
-    sheet.face_df.loc[cell_id, "cell_type"] = "extruding"
-    area = sheet.face_df.loc[cell_id, "area"]
-    prefered_area = sheet.face_df.loc[cell_id, "prefered_area"]
-    # Removal criterion. Original code only removed when the *actual* area fell
-    # below crit_area. In the crypt, extrusion is Wnt/z-biased to the top rim,
-    # exactly where the free boundary keeps cells mechanically stretched (large
-    # area) — so their actual area never reaches crit_area and the committed cell
-    # never dies (extrusions accumulate forever, no cell death is ever shown).
-    # A committing cell also shrinks its *prefered* area every cycle, so we treat
-    # a cell whose death target has collapsed (prefered_area below DEATH_FLOOR) as
-    # fully committed and extrude it regardless of its mechanically-contested
-    # actual area. This is what makes cell death actually occur within the run.
-    DEATH_FLOOR = 0.5
-    if area < crit_area or prefered_area < DEATH_FLOOR:
-        # Restore prefered_area
-        sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
-        # Remove the cell (apoptosis / extrusion). remove_face can hit degenerate
-        # local topology on a stretched boundary cell; skip gracefully rather than
-        # abort the whole simulation step if tyssue raises.
-        try:
-            remove_face(sheet, cell_id)
-        except Exception as exc:  # noqa: BLE001
-            print(f"remove_face failed for cell {cell_uid} ({type(exc).__name__}); skipping")
-            return
-        # Rebuild the index/topology and drop any vertex left isolated by the
-        # removal (a stray vert with no incident edge would give NaN geometry).
-        sheet.reset_index(order=True)
-        _drop_isolated_verts(sheet)
-        # Project vertices back onto the cylinder surface BEFORE updating geometry.
-        # remove_face replaces the face with a single centroid vertex; for an
-        # extruding cell at the everted top rim that centroid lands well off the
-        # r=prefered_radius surface, so the VesselSurfaceElasticity term applies a
-        # huge restoring force to it and the next Euler step blows up to NaN. This
-        # is the real cause of the "extrusion -> non-finite geometry" failure.
-        # apoptosis_cell already does this snap; apoptosis_extrusion omitted it.
-        radius = sheet.settings.get("radius")
-        if radius is None and "prefered_radius" in sheet.vert_df.columns:
-            radius = float(sheet.vert_df["prefered_radius"].mean())
-        if radius:
-            fix_points_cylinder(sheet, radius=radius)
-        geometry.update_all(sheet)
-        sheet.network_changed = True
-    else:
-        #
-        sheet.face_df.loc[cell_id, "prefered_area"] *= (1 - dt * shrink_rate)
-        manager.append(
-            apoptosis_extrusion,
-            geom=geom,
-            cell_uid=cell_uid,
-            crit_area=crit_area,
-            shrink_rate=shrink_rate,
-            dt=dt
-        )
+    cell_id = int(cell_id)
+    _ensure_commit_cols(sheet)
+    fd = sheet.face_df
+    fd.loc[cell_id, "cell_type"] = "extruding"
+    fd.loc[cell_id, "commit_state"] = 2.0
+    fd.loc[cell_id, "commit_rate"] = shrink_rate
+    fd.loc[cell_id, "commit_crit"] = crit_area
+    fd.loc[cell_id, "commit_dt"] = dt
+    _ensure_grower(sheet, manager, geom)
 
 def update_tension(sheet, manager, tension_update=None):
     if sheet.edge_df["line_tension"].dtype == "int64":
@@ -239,4 +357,6 @@ def apply_gradient(sheet, manager, parameter_updates=None):
             )
 
 def differentiation(sheet, manager, cell_uid, new_type):
-    sheet.face_df.loc[sheet.face_df["unique_id"] == cell_uid, "cell_type"] = new_type
+    cell_id = face_index_for(sheet, cell_uid)
+    if cell_id is not None:
+        sheet.face_df.loc[cell_id, "cell_type"] = new_type

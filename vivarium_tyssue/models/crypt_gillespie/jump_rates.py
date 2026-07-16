@@ -100,13 +100,23 @@ regulations["gc"]["ex"] = {
 regulation_loc["wnt"] = "z"
 
 #regulation value functions - calculates the x value that goes into the reg_pol function
-def cell_to_wnt(face_df, cell_uid, axis="z"):
+def _face_pos(face_df, cell_uid, uid_pos):
+    """Positional row of ``cell_uid`` in ``face_df``. ``uid_pos`` is an optional
+    precomputed ``{unique_id: iloc}`` map (built once per Gillespie step) that
+    turns the former O(Nfaces) boolean scan into an O(1) lookup; falls back to a
+    scan when it isn't supplied (keeps the functions usable standalone)."""
+    if uid_pos is not None:
+        return uid_pos[int(cell_uid)]
+    return int(np.flatnonzero(face_df["unique_id"].to_numpy() == cell_uid)[0])
 
-    loc = dict(face_df.loc[face_df["unique_id"] == cell_uid][["x", "y", "z"]])
-    return loc[axis].values[0]
 
-def cell_to_density(face_df, cell_uid):
-    return 1 / face_df.loc[face_df["unique_id"]==cell_uid, 'area'].values[0]
+def cell_to_wnt(face_df, cell_uid, uid_pos=None, axis="z"):
+    pos = _face_pos(face_df, cell_uid, uid_pos)
+    return float(np.asarray(face_df[axis])[pos])
+
+def cell_to_density(face_df, cell_uid, uid_pos=None):
+    pos = _face_pos(face_df, cell_uid, uid_pos)
+    return 1 / float(np.asarray(face_df["area"])[pos])
 
 #dict mapping regulation label to regulation value function
 regulations_map = {

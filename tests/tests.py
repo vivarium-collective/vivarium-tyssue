@@ -155,13 +155,14 @@ def get_test_regulation_spec(interval=0.1, config=None, double=False):
     spec = get_test_spec(interval=interval, config=config)
     spec["Regulation"] = {
         "_type": "process",
-        "address": "local:TestRegulations",
+        "address": "local:CellDivisions",
         "config": {
-            "period": 5,
+            # Poisson division rate (events / unit time). double doubles it,
+            # preserving the old "double" knob that used to fire two per period.
+            "rate": 0.4 * (2 if double else 1),
             "geom": "SheetGeometry",
             "crit_area": 2,
             "growth_rate": 0.2,
-            "double": double,
         },
         "inputs": {
             "global_time": ["global_time"],

@@ -210,6 +210,12 @@ def rust_model_gradient(eptm, effectors, factory_name, topo=None, geom=None):
 
     dim = len(eptm.coords)
     Ne, Nv = eptm.Ne, eptm.Nv
+    # Guard against a stale geometry stash: if a topology change slipped through
+    # without the solver rebuilding it (array length != current edge count), drop
+    # it and read geometry from the DataFrames (right length) instead of feeding a
+    # mismatched array to the rust primitives, which would index out of bounds.
+    if geom is not None and len(np.asarray(geom["sub_area"])) != Ne:
+        geom = None
     if topo is None:
         vmap = {v: i for i, v in enumerate(eptm.vert_df.index)}
         fd_index = eptm.face_df.index

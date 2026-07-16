@@ -38,3 +38,13 @@ workspace/datasets/hra_cache/
 
 # Disk-backed EulerSolver histories (large HDF5, regenerated per run)
 Notebooks/histories/
+
+# IDE / editor project files (machine-local)
+.idea/
+
+# Claude Code agent worktrees (machine-local, large)
+.claude/worktrees/
+
+# Large generated Notebook artifacts — regenerate per run, never track
+Notebooks/*.hf5
+Notebooks/*.gif

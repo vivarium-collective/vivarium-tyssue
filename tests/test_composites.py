@@ -42,7 +42,7 @@ def test_core_registers_everything():
 
     core = build_core()
     reg = core.link_registry
-    for proc in ["EulerSolver", "TestRegulations", "StochasticLineTension", "CellJamming",
+    for proc in ["EulerSolver", "CellDivisions", "CellDeaths", "StochasticLineTension", "CellJamming",
                  "ParameterGradient", "AnisotropicTension", "Gillespie"]:
         assert proc in reg, f"{proc} not registered"
     for viz in ["TissueSheetGif", "TissueCryptGif3D"]:
