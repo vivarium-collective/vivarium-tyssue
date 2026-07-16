@@ -91,6 +91,33 @@ class DataFrameParquetEmitter(Emitter):
         """Clean dataset name from the wired port key (strips a `Datasets_` prefix)."""
         return port[len("Datasets_"):] if port.startswith("Datasets_") else port
 
+    @staticmethod
+    def _canonical_string_types(table):
+        """Cast ``large_string``/``large_binary`` fields down to ``string``/``binary``.
+
+        pandas 3 infers object-string columns as the pyarrow ``large_string``
+        variant, but only for some frames (e.g. a column like ``commit_type`` that
+        appears mid-run, or is empty in early frames) — so buffered tables can mix
+        ``string`` and ``large_string`` for the same field and ``concat_tables``
+        raises ``ArrowTypeError: incompatible types: large_string vs string``.
+        Normalizing every frame to the small variant makes the buffer concatenable
+        regardless of per-frame inference. Values are tiny, so the downcast is
+        always safe."""
+        import pyarrow as pa
+
+        fields = []
+        changed = False
+        for f in table.schema:
+            if pa.types.is_large_string(f.type):
+                fields.append(f.with_type(pa.string()))
+                changed = True
+            elif pa.types.is_large_binary(f.type):
+                fields.append(f.with_type(pa.binary()))
+                changed = True
+            else:
+                fields.append(f)
+        return table.cast(pa.schema(fields)) if changed else table
+
     # -- emit --------------------------------------------------------------
     def update(self, state: dict[str, Any]) -> dict:
         """Append each DataFrame-valued input to its per-frame buffer; flush per batch."""
@@ -108,6 +135,9 @@ class DataFrameParquetEmitter(Emitter):
             df.insert(0, "time", t)
             df.insert(0, "experiment_id", self.experiment_id)
             table = pa.Table.from_pandas(df, preserve_index=False)
+            # Normalize string types so a column inferred as large_string in one
+            # frame and string in another (pandas 3) doesn't break concat at flush.
+            table = self._canonical_string_types(table)
 
             name = self._frame_name(port)
             self._buffers.setdefault(name, []).append(table)
