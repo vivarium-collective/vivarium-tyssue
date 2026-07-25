@@ -50,7 +50,7 @@ def run_study(study: str, sim_name: str, composite, steps: int,
     ``composite`` is a path to a composite spec or an already-parsed spec dict
     (the dict form lets the reproduction notebook edit the spec — e.g. drop the
     apical tension to 0 for a flat control — before the composite is built)."""
-    from pbg_superpowers.composite_spec import load_spec, build_composite_from_spec
+    from viva_superpowers.composite_spec import load_spec, build_composite_from_spec
     from vivarium_tyssue.core import build_core
 
     np.random.seed(seed)

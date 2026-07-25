@@ -94,7 +94,7 @@ SHOWCASE = [
 
 
 def build(composite, backend="rust", interval=None):
-    from pbg_superpowers.composite_spec import build_composite_from_spec, load_spec
+    from viva_superpowers.composite_spec import build_composite_from_spec, load_spec
     from vivarium_tyssue.core import build_core
 
     spec = load_spec(ROOT / "vivarium_tyssue" / "composites" / f"{composite}.composite.yaml")

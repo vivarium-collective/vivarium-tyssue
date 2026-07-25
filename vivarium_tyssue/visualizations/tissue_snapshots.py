@@ -16,7 +16,7 @@ from __future__ import annotations
 import io
 from pathlib import Path
 
-from pbg_superpowers.visualization import Visualization
+from viva_superpowers.visualization import Visualization
 from vivarium_tyssue.visualizations.tissue_gif import (
     _load_frames, _subsample, _empty_html, _build_sheet, _embed_figure, CELL_TYPE_COLORS,
 )

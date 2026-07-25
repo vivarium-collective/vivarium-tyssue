@@ -10,7 +10,7 @@ def _run(spec_name, steps, interval=0.1):  # 0.1 keeps the vertex mechanics stab
     import sys
     sys.path.insert(0, str(ROOT))
     pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
-    from pbg_superpowers.composite_spec import load_spec, build_composite_from_spec
+    from viva_superpowers.composite_spec import load_spec, build_composite_from_spec
     from vivarium_tyssue.core import build_core
 
     core = build_core()
