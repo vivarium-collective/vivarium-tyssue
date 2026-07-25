@@ -85,7 +85,7 @@ def build_core():
     # Framework timeseries viz (pbg-superpowers) — plots scalar observables
     # (tumor_births, healthy_deaths, *_count) the TumorCoupling process emits.
     try:
-        from pbg_superpowers.visualizations.timeseries_from_observables import TimeSeriesFromObservables
+        from viva_superpowers.visualizations.timeseries_from_observables import TimeSeriesFromObservables
         if "TimeSeriesFromObservables" not in core.link_registry:
             core.register_link("TimeSeriesFromObservables", TimeSeriesFromObservables)
     except Exception as exc:  # noqa: BLE001

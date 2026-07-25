@@ -148,7 +148,7 @@ def describe_spec(spec):
 
 # **Composite `tumor`** — `spec_tumor` (a plain, editable dict)
 
-from pbg_superpowers.composite_spec import load_spec
+from viva_superpowers.composite_spec import load_spec
 spec_tumor = load_spec(REPO / 'vivarium_tyssue/composites/tumor.composite.yaml')
 describe_spec(spec_tumor)
 
@@ -316,7 +316,7 @@ _save_viz('tumor-composite', 'Cell_area_over_time', _render_one('local:CellAreaO
 
 # **Composite `epithelium_2d`** — `spec_epithelium_2d` (a plain, editable dict)
 
-from pbg_superpowers.composite_spec import load_spec
+from viva_superpowers.composite_spec import load_spec
 spec_epithelium_2d = load_spec(REPO / 'vivarium_tyssue/composites/epithelium_2d.composite.yaml')
 describe_spec(spec_epithelium_2d)
 
@@ -351,7 +351,7 @@ spec_epithelium_2d['state']['Tyssue']['config']['auto_reconnect'] = True
 
 # **Composite `tumor`** — `spec_tumor` (a plain, editable dict)
 
-from pbg_superpowers.composite_spec import load_spec
+from viva_superpowers.composite_spec import load_spec
 spec_tumor = load_spec(REPO / 'vivarium_tyssue/composites/tumor.composite.yaml')
 describe_spec(spec_tumor)
 

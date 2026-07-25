@@ -27,7 +27,7 @@ def test_all_composites_present():
 
 @pytest.mark.parametrize("path", COMPOSITES, ids=lambda p: p.name.split(".")[0])
 def test_composite_spec_loads(path):
-    from pbg_superpowers.composite_spec import load_spec
+    from viva_superpowers.composite_spec import load_spec
 
     spec = load_spec(path)
     assert spec["name"]
@@ -56,7 +56,7 @@ def test_anisotropic_runs_end_to_end():
     import sys
     sys.path.insert(0, str(ROOT))
     pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
-    from pbg_superpowers.composite_spec import load_spec, build_composite_from_spec
+    from viva_superpowers.composite_spec import load_spec, build_composite_from_spec
     from vivarium_tyssue.core import build_core
 
     core = build_core()
@@ -94,7 +94,7 @@ def test_composite_runs_one_step(name):
 
     sys.path.insert(0, str(ROOT))
     pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
-    from pbg_superpowers.composite_spec import load_spec, build_composite_from_spec
+    from viva_superpowers.composite_spec import load_spec, build_composite_from_spec
     from vivarium_tyssue.core import build_core
 
     if name == "gillespie":
