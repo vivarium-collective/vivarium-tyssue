@@ -26,6 +26,20 @@ def _cell_type_counts(comp):
     return Counter(face_df["cell_type"])
 
 
+def _tumor_lineage_count(comp):
+    # A cell belongs to the tumor lineage if it carries the "tumor" cell_type OR is
+    # mid-division toward it: the division behavior relabels a committed cell
+    # "dividing" while it grows and only restores "tumor" once it splits. With
+    # division_crit=2.0 a clone may still be growing after a short run, so counting
+    # only cell_type=="tumor" would miss the in-progress tumor cell.
+    face_df = comp.state["Tyssue"]["instance"].eptm.face_df
+    is_tumor = face_df["cell_type"] == "tumor"
+    if "commit_type" in face_df.columns:
+        committing = (face_df["cell_type"] == "dividing") & (face_df["commit_type"] == "tumor")
+        is_tumor = is_tumor | committing
+    return int(is_tumor.sum())
+
+
 def test_baseline_runs_without_behaviors():
     comp = _run("epithelium_2d", 5)
     # Mechanics-only: every cell stays healthy (no births/deaths).
@@ -34,11 +48,11 @@ def test_baseline_runs_without_behaviors():
 
 
 def test_tumor_composite_drives_cell_fate():
-    # COPASI fluxes drive tumor invasion: after a short run the mesh carries tumor
-    # cells (and some dead) that the baseline never produces.
+    # COPASI fluxes drive tumor invasion: after a short run the mesh carries a tumor
+    # lineage (seeded + growing/dividing) that the baseline never produces.
     import numpy as np
     np.random.seed(0)
     comp = _run("tumor", 25)
     counts = _cell_type_counts(comp)
-    assert counts.get("tumor", 0) > 0, dict(counts)
+    assert _tumor_lineage_count(comp) > 0, dict(counts)
     assert counts.get("healthy", 0) < 206, dict(counts)  # some healthy were consumed
