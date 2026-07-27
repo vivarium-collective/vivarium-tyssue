@@ -60,6 +60,7 @@ def cylinder_config():
         "auto_reconnect": True,
         "bounds": {},
         "output_columns": {},
+        "history_columns": {},
         "maps": {},
         # Rust geometry + vessel gradient (native sub-stepping is sheet-only, so
         # substeps>1 falls back here — kept at 1).
@@ -96,6 +97,7 @@ def flat_config():
         "auto_reconnect": True,
         "bounds": {},
         "output_columns": {},
+        "history_columns": {},
         "maps": {},
         # Rust hot-kernel backend (transparent python fallback for anything the
         # kernel doesn't reproduce). substeps>1 integrates that many native Euler

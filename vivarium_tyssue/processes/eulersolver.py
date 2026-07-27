@@ -72,6 +72,11 @@ class EulerSolver(Process):
         "auto_reconnect": "boolean", # if True, will automatically perform reconnections
         "bounds": "map[float]", # bounds the displacement of the vertices at each time step
         "output_columns": "map[list[string]]", # dict containing lists of column names to emit for each dataframe
+        "history_columns": "map[list[string]]", # per-df extra columns to RECORD in
+                             # the History (keys vert_df/edge_df/face_df/cell_df).
+                             # Absent/empty for a df -> record all columns (default).
+                             # When a df is listed, record only the coords+topology
+                             # minimum needed to rebuild the eptm PLUS the listed cols.
         "settings": "map",
         "maps": "map", #map of maps, leave empty if using default
         "backend": "string", # "python" (default) or "rust": route compute_gradient
@@ -236,6 +241,46 @@ class EulerSolver(Process):
                 self.history.dtypes[el] = ds[el][keep].dtypes
         else:
             self.history = History(self.eptm)
+        self._apply_history_columns()
+
+    def _apply_history_columns(self):
+        """Trim the History's recorded columns per the ``history_columns`` config.
+
+        Only dataframes named in the config are touched, so the default (record
+        everything) is unchanged. A listed dataframe records the coords/topology
+        minimum needed to rebuild the epithelium plus the listed columns, and
+        nothing else. Config keys are ``vert_df``/``edge_df``/``face_df``/``cell_df``
+        (mirroring ``output_columns``); History elements drop the ``_df`` suffix.
+        """
+        requested = self.config.get("history_columns") or {}
+        if self.history is None or not requested:
+            return
+        ds = self.eptm.datasets
+        has_cell = getattr(self.eptm, "cell_df", None) is not None
+        minima = {
+            "vert": list(self.eptm.coords),
+            "edge": ["srce", "trgt", "face"] + (["cell"] if has_cell else []),
+            "face": [],
+            "cell": [],
+        }
+        is_hdf5 = isinstance(self.history, HistoryHdf5)
+        for el in list(self.history.columns):
+            listed = requested.get(f"{el}_df")
+            if listed is None:
+                continue  # not listed -> keep default recording for this df
+            available = ds[el].columns
+            keep = [c for c in dict.fromkeys(minima.get(el, []) + list(listed))
+                    if c in available]
+            if is_hdf5:
+                # HDF5 can't serialize object-dtype columns (topology bookkeeping).
+                keep = [c for c in keep if ds[el][c].dtype != object]
+                self.history.dtypes[el] = ds[el][keep].dtypes
+            else:
+                seed = ds[el][keep].reset_index(drop=False)
+                if "time" not in keep:
+                    seed["time"] = 0
+                self.history.datasets[el] = seed
+            self.history.columns[el] = keep
 
     def _coerce_string_columns(self):
         """pandas 3.0 gives scalar-string column assignments (e.g. ``cell_type``)

@@ -1,5 +1,8 @@
 {
   "env": {
     "PBG_WORKSPACE": "${workspaceFolder}"
+  },
+  "worktree": {
+    "bgIsolation": "none"
   }
 }

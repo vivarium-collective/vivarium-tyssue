@@ -88,7 +88,7 @@ def composite_doc(name, description, eptm_rel, tissue_type="Sheet", interval=0.0
                     "factory": "model_factory",
                     "settings": {"threshold_length": 0.03},
                     "auto_reconnect": False,  # keep topology static: stable + small viewer files
-                    "bounds": {}, "output_columns": {}, "maps": {},
+                    "bounds": {}, "output_columns": {}, "history_columns": {}, "maps": {},
                     "backend": "rust", "substeps": "${substeps}",
                     "max_displacement": max_displacement,
                 },

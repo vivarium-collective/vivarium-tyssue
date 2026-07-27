@@ -58,6 +58,7 @@ def get_test_config():
         "auto_reconnect": True, # if True, will automatically perform reconnections
         "bounds": None, # bounds the displacement of the vertices at each time step
         "output_columns": {}, # dict containing lists of column names to emit for each dataframe
+        "history_columns": {}, # per-df extra columns to record in the History (empty = record all)
         "maps": {},
         "backend": "rust", # standard 3 effectors + VesselSurfaceElasticity, model_factory, 3D mesh -> rust-eligible
         "substeps": 1, # native Euler substeps per update (rust sheet models only)
@@ -106,6 +107,7 @@ def get_test_config_flat():
         "auto_reconnect": True, # if True, will automatically perform reconnections
         "bounds": None, # bounds the displacement of the vertices at each time step
         "output_columns": {}, # dict containing lists of column names to emit for each dataframe
+        "history_columns": {}, # per-df extra columns to record in the History (empty = record all)
         "backend": "rust", # standard 3 effectors, model_factory_bound, 3D mesh -> rust-eligible
         "substeps": 1, # native Euler substeps per update (rust sheet models only)
         "max_displacement": 0.0, # >0 clamps per-step vertex motion; 0 = off
@@ -430,6 +432,194 @@ def run_test_gillespie(core, config = None, tf=10, dt=0.005, tau=1.0, sigma=1.0)
     sim.run(tf)
     results = gather_emitter_results(sim)[("emitter",)]
     return results, sim
+
+# ---------------------------------------------------------------------------
+# Tumor coupling — a non-spatial breast-cancer population ODE (BIOMD0000000903,
+# integrated in COPASI) drives discrete cell events on a flat 2D tyssue sheet.
+# Each step the TumorCoupling process reads the SBML model's per-reaction
+# birth/death fluxes and fires floor(flux * scale * dt) division / extrusion /
+# differentiation behaviors on tumor / healthy / stem cells. Mirrors the wiring
+# in vivarium_tyssue/composites/tumor.composite.yaml.
+# ---------------------------------------------------------------------------
+import os as _os
+
+# workspace/datasets holds both the flat mesh and the SBML model; resolve them
+# relative to the repo root so run_test_tumor works from any cwd.
+_DATASETS_DIR = _os.path.join(
+    _os.path.dirname(_os.path.dirname(_os.path.abspath(__file__))),
+    "workspace", "datasets",
+)
+
+# Exact COPASI reaction (flux) keys in BIOMD0000000903, per target cell type.
+TUMOR_BIRTH_FLUXES = {
+    "tumor": "Induction of tumor cell",
+    "healthy": "Increase in the healthy cell in the system",
+    "stem": "Formation of Stem cell",
+}
+TUMOR_DEATH_FLUXES = {
+    "tumor": "Removal of tumor cell y immune cell and other immune response",
+    "healthy": "Decrase of healthy cell due to cancer",
+    "stem": "Removal of stem cell from the system",
+}
+# Convert SBML fluxes (O(1e3-1e7)) into mesh events: an event fires when
+# flux * scale * interval accumulates past 1.0. ALL scales halved (2026-07-20) —
+# births AND deaths together, so the birth:death balance holds (the tumor still
+# grows) while the discrete-event RATE halves: ~half as many, better-spaced
+# divisions per unit time. Run longer to compensate.
+TUMOR_SCALES = {
+    "tumor_births": 1.0e-6, "tumor_deaths": 4.0e-7,
+    "healthy_births": 3.0e-8, "healthy_deaths": 6.0e-8,
+    "stem_births": 3.0e-7, "stem_deaths": 1.0e-5,
+}
+
+
+def get_test_tumor_config(
+    eptm=None,
+    growth_rate=0.5,
+    shrink_rate=0.5,
+    division_crit=2.0,
+    apoptosis_crit=2.0,
+    prefered_perimeter=3.6,
+):
+    """EulerSolver config for the flat 2D tumor epithelium (``test_square.hf5``).
+
+    Every cell starts ``cell_type="healthy"``; the TumorCoupling process seeds a
+    single tumor focus and drives its outward growth. The shape index
+    ``prefered_perimeter / sqrt(prefered_area) = 3.6`` keeps the sheet in the
+    solid/jammed regime so cells stay compact as the focus expands.
+    """
+    if eptm is None:
+        eptm = _os.path.join(_DATASETS_DIR, "test_square.hf5")
+    return {
+        "name": "Tumor Epithelium 2D",
+        "eptm": eptm,
+        "tissue_type": "Sheet",
+        "parameters": {
+            "face_df": {
+                "area_elasticity": 1.0,
+                "prefered_area": 1.0,
+                "perimeter_elasticity": 0.1,
+                "prefered_perimeter": prefered_perimeter,
+                "cell_type": "healthy",
+                "is_alive": 1.0,
+            },
+            "edge_df": {"line_tension": 0.0, "is_active": 1.0},
+            "vert_df": {"viscosity": 1.0, "is_alive": 1.0},
+        },
+        "geom": "SheetGeometry",
+        "effectors": ["LineTension", "FaceAreaElasticity", "PerimeterElasticity"],
+        "ref_effector": "FaceAreaElasticity",
+        "factory": "model_factory",
+        "settings": {"threshold_length": 0.03},
+        "auto_reconnect": True,
+        "bounds": None,
+        "output_columns": {},
+        "history_columns": {}, # per-df extra columns to record in the History (empty = record all)
+        "maps": {},
+        "backend": "rust",       # rust hot kernels (safe, bit-identical)
+        "substeps": 1,
+        "max_displacement": 0.0,
+        "record_history": True,  # drives create_gif / population-over-time counts
+    }
+
+
+def get_test_tumor_spec(
+    interval=0.01,
+    config=None,
+    model_source=None,
+    birth_fluxes=None,
+    death_fluxes=None,
+    scales=None,
+    seed=None,
+    growth_rate=0.5,
+    shrink_rate=0.5,
+    division_crit=2.0,
+    apoptosis_crit=2.0,
+    topology_ops=True,
+    copasi_time=1.0,
+    copasi_intervals=10,
+):
+    """Flat-sheet EulerSolver + a TumorCoupling process wired over ``Behaviors``.
+
+    Every knob is a keyword argument so a notebook / experiment can override it:
+    the flux->event ``scales``, the reaction-key maps, the initial ``seed`` focus,
+    the division / apoptosis criteria, and ``topology_ops`` (True = real
+    cell_division / remove_face vertex-model ops; False = fixed-topology relabel).
+
+    Timescale coupling (2026-07-20): growth is integrated at the real solver step,
+    so ``growth_rate`` is a true per-tyssue-time rate. growth_rate=0.5 makes a cell
+    inflate over tau_grow = ln2/0.5 ~= 1.4 units (~4x the mechanical relaxation time
+    tau_mech ~= 0.36), so the sheet fully relaxes around each division (no overlap;
+    the smallest face area holds above its t=0 value). The default ``seed`` is a
+    compact 6-cell central focus so flux-driven births always find a free tumor cell
+    to divide (a single seed stalls / dies under gradual growth). ``copasi_time``
+    (alpha) = tumor-model time per tyssue time; kept at 1.0 (alpha<1 delays tumor
+    induction and can starve the seed).
+    """
+    if callable(config):
+        config = config()
+    if config is None:
+        config = get_test_tumor_config(
+            growth_rate=growth_rate, shrink_rate=shrink_rate,
+            division_crit=division_crit, apoptosis_crit=apoptosis_crit,
+        )
+    if model_source is None:
+        model_source = _os.path.join(_DATASETS_DIR, "BIOMD0000000903.xml")
+
+    spec = get_test_spec(interval=interval, config=config)
+    spec["TumorCoupling"] = {
+        "_type": "process",
+        "address": "local:TumorCoupling",
+        "config": {
+            # COPASI is owned internally (model_source): the process steps the SBML
+            # model each update and reads its fluxes directly.
+            "model_source": model_source,
+            "copasi_time": copasi_time,
+            "copasi_intervals": copasi_intervals,
+            "birth_fluxes": dict(birth_fluxes or TUMOR_BIRTH_FLUXES),
+            "death_fluxes": dict(death_fluxes or TUMOR_DEATH_FLUXES),
+            "scales": dict(scales or TUMOR_SCALES),
+            "geom": "SheetGeometry",
+            "dt": 1.0,
+            "growth_rate": growth_rate,
+            "shrink_rate": shrink_rate,
+            "division_crit": division_crit,
+            "apoptosis_crit": apoptosis_crit,
+            # Seed a compact central focus (6 cells) so births always find a free
+            # tumor cell to divide; let it grow outward as one clone.
+            "seed": dict(seed if seed is not None else {"tumor": 6, "stem": 0}),
+            "topology_ops": topology_ops,
+        },
+        "inputs": {
+            "datasets": ["Datasets"],
+            "global_time": ["global_time"],
+        },
+        "outputs": {"behaviors": ["Behaviors"]},
+        "interval": interval,
+    }
+    return spec
+
+
+def run_test_tumor(core, config=None, tf=60, dt=0.01, **kwargs):
+    """Run the tumor-coupling composite.
+
+    Note ``tf`` is elapsed **global time**, and the coupling advances by ``dt``
+    each step, so the tumor grows over ``tf / dt`` COPASI-driven updates (e.g.
+    ``tf=60, dt=0.01`` is 6000 updates ~ 1 min). Returns ``(results, sim)`` where
+    ``results`` are the emitted per-step frames and ``sim.state["Tyssue"]
+    ["instance"].history`` holds the mesh for gif / population analysis.
+    """
+    spec = get_test_tumor_spec(interval=dt, config=config, **kwargs)
+    spec["emitter"] = emitter_from_wires({
+        "global_time": ["global_time"],
+        "face_df": ["Datasets", "face_df"],
+        "behaviors": ["Behaviors"],
+    })
+    sim = Composite({"state": spec}, core=core)
+    sim.run(tf)
+    results = gather_emitter_results(sim)[("emitter",)]
+    return results, sim
+
 
 if __name__ == "__main__":
 

@@ -54,6 +54,7 @@ state:
       auto_reconnect: false
       bounds: {}
       output_columns: {}
+      history_columns: {}
       maps: {}
       backend: rust
       substeps: ${substeps}
