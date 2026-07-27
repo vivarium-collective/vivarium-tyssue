@@ -102,6 +102,11 @@ class TumorCoupling(Process):
         "division_crit": "float",
         "apoptosis_crit": "float",
         "seed": "map[integer]",          # {'tumor': n, 'stem': m} initial focus
+        # Division-plane orientations randomized per event in 3D (monolayer / bulk):
+        # mixing "vertical" (in-plane) and "horizontal" (stacks a daughter in z)
+        # makes the tumor grow as a genuine 3D mass rather than staying planar.
+        # Ignored for a 2D sheet. Empty -> the default ["vertical", "horizontal"].
+        "orientations": "list[string]",
         # COPASI is owned internally rather than wired as a separate process:
         # process-bigraph's generic map[float] stores drop unknown keys and
         # accumulate additively, so passing per-step fluxes through a shared store
@@ -127,12 +132,24 @@ class TumorCoupling(Process):
         self.scales = config["scales"]
         self.geom = config["geom"]
         self.dt = config["dt"]
+        # copasi_time = alpha: how much COPASI (tumor-model) time advances per unit
+        # tyssue time. alpha<1 slows the tumor ODE relative to the mechanics, so
+        # divisions are spaced over more mechanical-relaxation times (the tissue
+        # can accommodate each one). alpha=1 reproduces the old 1:1 coupling.
+        self.copasi_time = float(config.get("copasi_time", 1.0) or 1.0)
+        # The actual solver step; committed cells grow at growth_rate PER unit
+        # tyssue time only if the behavior's dt equals this step (set each update()).
+        self._step_interval = float(config.get("dt", 1.0))
         self.growth_rate = config["growth_rate"]
         self.shrink_rate = config["shrink_rate"]
         self.division_crit = config["division_crit"]
         self.apoptosis_crit = config["apoptosis_crit"]
         self.seed = config.get("seed", {}) or {}
         self.topology_ops = bool(config.get("topology_ops", False))
+        # Randomized division-plane orientations for the 3D (monolayer / bulk) path.
+        self.orientations = list(config.get("orientations", []) or ["vertical", "horizontal"])
+        # Set each update() from the datasets: 3D (cells in cell_df) vs 2D sheet.
+        self._is3d = False
         self._birth_acc = {t: 0.0 for t in _TYPES}
         self._death_acc = {t: 0.0 for t in _TYPES}
         self._seeded = False
@@ -162,8 +179,11 @@ class TumorCoupling(Process):
         if injected:
             return injected
         if self._copasi is not None:
+            # Advance the tumor ODE by alpha*interval of its own time this step, so
+            # the tumor-model clock runs at `copasi_time` (alpha) x the tyssue clock.
             out = self._copasi.update(
-                {"species_concentrations": {}, "species_counts": {}}, interval
+                {"species_concentrations": {}, "species_counts": {}},
+                interval * self.copasi_time,
             )
             return out.get("fluxes", {})
         return {}
@@ -185,14 +205,28 @@ class TumorCoupling(Process):
         return out
 
     # -- behavior dict builders (shapes match gillespie.py / behaviors.py) --
+    # The grower applies prefered_area *= (1 + dt*rate) ONCE PER SOLVER STEP, so dt
+    # must be the actual step interval for growth_rate/shrink_rate to be true
+    # per-tyssue-time rates (not self.dt=1.0, which inflated a cell ~100x too fast
+    # at interval 0.01 and outran mechanical relaxation).
     def _divide(self, uid, cell_type):
+        # 3D monolayer / bulk: grow prefered_vol to a critical VOLUME and split with
+        # a randomized orientation (division_3d). 2D sheet: the area-threshold path.
+        if self._is3d:
+            orientation = str(np.random.choice(self.orientations)) if self.orientations else "vertical"
+            return {"func": "division_3d", "geom": self.geom, "cell_uid": int(uid),
+                    "dt": self._step_interval, "cell_type": cell_type, "crit_vol": self.division_crit,
+                    "growth_rate": self.growth_rate, "orientation": orientation}
         return {"func": "division", "geom": self.geom, "cell_uid": int(uid),
-                "dt": self.dt, "cell_type": cell_type, "crit_area": self.division_crit,
+                "dt": self._step_interval, "cell_type": cell_type, "crit_area": self.division_crit,
                 "growth_rate": self.growth_rate}
 
     def _kill(self, uid):
+        if self._is3d:
+            return {"func": "apoptosis_3d", "geom": self.geom, "cell_uid": int(uid),
+                    "dt": self._step_interval, "crit_vol": self.apoptosis_crit, "shrink_rate": self.shrink_rate}
         return {"func": "apoptosis_extrusion", "geom": self.geom, "cell_uid": int(uid),
-                "dt": self.dt, "crit_area": self.apoptosis_crit, "shrink_rate": self.shrink_rate}
+                "dt": self._step_interval, "crit_area": self.apoptosis_crit, "shrink_rate": self.shrink_rate}
 
     def _differentiate(self, uid, new_type):
         return {"func": "differentiation", "cell_uid": int(uid), "new_type": new_type}
@@ -206,8 +240,30 @@ class TumorCoupling(Process):
         rows = _rows(face_df)
         return {t: float(sum(1 for (_, ct) in rows if ct == t)) for t in _TYPES + ["dead"]}
 
+    @staticmethod
+    def _nonempty(df) -> bool:
+        """True if a datasets frame actually carries cells. Works for both a
+        pandas DataFrame and a dict-of-lists (avoids DataFrame truth-value)."""
+        if df is None or not hasattr(df, "get"):
+            return False
+        uids = df.get("unique_id")
+        return uids is not None and len(uids) > 0
+
+    def _cells_df(self, inputs):
+        """The cell-carrying frame: cell_df for a 3D monolayer / bulk epithelium,
+        else the 2D sheet's face_df. Sets self._is3d as a side effect."""
+        cell_df = inputs["datasets"].get("cell_df")
+        if self._nonempty(cell_df):
+            self._is3d = True
+            return cell_df
+        self._is3d = False
+        return inputs["datasets"]["face_df"]
+
     def update(self, inputs, interval):
-        face_df = inputs["datasets"]["face_df"]
+        # Record the real step so _divide/_kill grow committed cells at a true
+        # per-tyssue-time rate (see the behavior builders above).
+        self._step_interval = float(interval)
+        face_df = self._cells_df(inputs)
         behaviors = []
         used: set = set()
         fired = {k: 0 for k in _EVENT_KEYS}

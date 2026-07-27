@@ -60,6 +60,7 @@ def cylinder_config():
         "auto_reconnect": True,
         "bounds": {},
         "output_columns": {},
+        "history_columns": {},
         "maps": {},
         # Rust geometry + vessel gradient (native sub-stepping is sheet-only, so
         # substeps>1 falls back here — kept at 1).
@@ -96,6 +97,7 @@ def flat_config():
         "auto_reconnect": True,
         "bounds": {},
         "output_columns": {},
+        "history_columns": {},
         "maps": {},
         # Rust hot-kernel backend (transparent python fallback for anything the
         # kernel doesn't reproduce). substeps>1 integrates that many native Euler
@@ -178,16 +180,16 @@ write(
 # --- 2. regulation (cell division) -------------------------------------------
 write(
     "regulation",
-    description="Cylinder sheet with a TestRegulations process that periodically triggers cell "
-    "division above a critical area, driving tissue growth.",
+    description="Cylinder sheet with a CellDivisions process that randomly triggers cell "
+    "division (Poisson rate) above a critical area, driving tissue growth.",
     tags=["tissue", "mechanics", "multi-cell"],
-    processes=["EulerSolver", "TestRegulations"],
+    processes=["EulerSolver", "CellDivisions"],
     state={
         "Tyssue": tyssue_node(cylinder_config()),
         "Regulation": {
             "_type": "process",
-            "address": "local:TestRegulations",
-            "config": {"period": 5.0, "geom": "VesselGeometry", "crit_area": 2.0, "growth_rate": 0.2, "double": False},
+            "address": "local:CellDivisions",
+            "config": {"rate": 0.4, "geom": "VesselGeometry", "crit_area": 2.0, "growth_rate": 0.2},
             "inputs": {"global_time": ["global_time"], "datasets": ["Datasets"]},
             "outputs": {"behaviors": ["Behaviors"]},
             "interval": INTERVAL,

@@ -44,11 +44,15 @@ digraph bigraph {
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
 	subgraph "('Regulation',)" {
-		"('Datasets',)" -> "('Regulation',)" [label=<datasets> constraint=true fontsize="10pt" labelloc=t]
+		"('global_time',)" -> "('Regulation',)" [label=<global_time> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
 	subgraph "('Regulation',)" {
-		"('global_time',)" -> "('Regulation',)" [label=<global_time> constraint=true fontsize="10pt" labelloc=t]
+		"('Datasets',)" -> "('Regulation',)" [label=<datasets> constraint=true fontsize="10pt" labelloc=t]
+	}
+	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
+	subgraph "('Tyssue',)" {
+		"('Behaviors',)" -> "('Tyssue',)" [label=<behaviors_update> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
 	subgraph "('Tyssue',)" {
@@ -57,10 +61,6 @@ digraph bigraph {
 	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
 	subgraph "('Tyssue',)" {
 		"('Datasets',)" -> "('Tyssue',)" [label=<datasets> constraint=true fontsize="10pt" labelloc=t]
-	}
-	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
-	subgraph "('Tyssue',)" {
-		"('Behaviors',)" -> "('Tyssue',)" [label=<behaviors_update> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
 	subgraph "('Regulation',)" {

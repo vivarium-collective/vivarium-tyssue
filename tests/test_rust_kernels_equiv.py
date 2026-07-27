@@ -290,6 +290,197 @@ def test_gradient_supported_gating():
     assert gradient_supported(std, "model_factory", 2) is False
 
 
+# ---------------------------------------------------------------------------
+# Compositional per-effector rust gradient (kernels.rust_model_gradient) — the
+# extensible path. Every effector runs through a rust primitive if registered,
+# else its tyssue .gradient. This harness proves each registered effector
+# matches compute_gradient, and that mixed (covered + fallback) models match.
+# ---------------------------------------------------------------------------
+def _sheet_model_eptm(extra_effectors, factory="model_factory", extra_setup=None):
+    """Standard 3-effector sheet model on the flat square, plus extra effectors."""
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from tyssue.io.hdf5 import load_datasets
+    from vivarium_tyssue.maps import EFFECTORS_MAP, FACTORY_MAP, GEOMETRY_MAP, TISSUE_MAP
+
+    path = ROOT / "tests" / "test_square.hf5"
+    if not path.exists():
+        pytest.skip("mesh fixture missing: test_square.hf5")
+    eptm = TISSUE_MAP["Sheet"]("e", load_datasets(str(path)))
+    names = ["LineTension", "FaceAreaElasticity", "PerimeterElasticity"] + list(extra_effectors)
+    effectors = [EFFECTORS_MAP[n] for n in names]
+    model = FACTORY_MAP[factory](effectors, effectors[-1])
+    eptm.update_specs(model.specs, reset=True)
+    eptm.edge_df["line_tension"] = np.random.default_rng(1).uniform(0.5, 1.5, eptm.Ne)
+    if extra_setup is not None:
+        extra_setup(eptm)
+    GEOMETRY_MAP["SheetGeometry"].update_all(eptm)
+    return eptm, model, effectors, factory
+
+
+def _need_edge_alive(e):
+    e.edge_df["is_alive"] = 1
+
+
+# each covered sheet-effector, with any extra columns its tyssue gradient needs
+COVERED_SHEET = [
+    ("FaceContractility", None),
+    ("SurfaceTension", None),
+    ("LengthElasticity", _need_edge_alive),
+    ("BorderElasticity", None),
+]
+
+
+@pytest.mark.parametrize("factory", ["model_factory", "model_factory_bound"])
+@pytest.mark.parametrize("extra,setup", COVERED_SHEET, ids=[c[0] for c in COVERED_SHEET])
+def test_rust_model_gradient_covered_effector(extra, setup, factory):
+    """rust_model_gradient == compute_gradient for STD + one covered effector,
+    for both the plain and boundary-clamped factories."""
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from vivarium_tyssue.processes.kernels import effector_covered, rust_model_gradient
+
+    eptm, model, effectors, fac = _sheet_model_eptm([extra], factory, setup)
+    assert effector_covered(extra), f"{extra} should be registered"
+    ref = np.asarray(model.compute_gradient(eptm), dtype=float)
+    got = rust_model_gradient(eptm, effectors, fac)
+    assert np.allclose(got, ref, atol=1e-9, rtol=0.0), (
+        f"{extra}/{factory}: max|Δ|={np.max(np.abs(got - ref)):.3e}"
+    )
+
+
+def test_rust_model_gradient_mixed_covered_and_fallback():
+    """A model mixing a covered effector (FaceContractility, rust primitive) and
+    an uncovered one (ChiralTorque, python fallback) still matches
+    compute_gradient — the per-term fallback composes with the rust primitives."""
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from vivarium_tyssue.processes.kernels import effector_covered, rust_model_gradient
+
+    def setup(e):
+        e.face_df["torque_coef"] = 0.2
+
+    eptm, model, effectors, fac = _sheet_model_eptm(
+        ["FaceContractility", "ChiralTorque"], "model_factory", setup
+    )
+    assert effector_covered("FaceContractility") and not effector_covered("ChiralTorque")
+    ref = np.asarray(model.compute_gradient(eptm), dtype=float)
+    got = rust_model_gradient(eptm, effectors, fac)
+    assert np.allclose(got, ref, atol=1e-9, rtol=0.0), (
+        f"mixed: max|Δ|={np.max(np.abs(got - ref)):.3e}"
+    )
+
+
+def test_update_geometry_planar_matches_tyssue():
+    """The 2D ``update_geometry_planar`` kernel reproduces PlanarGeometry.update_all
+    (dcoords/length/centroid/rcoords/nz/sub_area/area/perimeter) bit-for-bit, on a
+    small hand-built planar mesh — the 2D half of full-geometry coverage."""
+    k = pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    from tyssue import Sheet
+    from vivarium_tyssue.maps import GEOMETRY_MAP
+
+    sheet = Sheet.planar_sheet_2d("planar", 6, 6, 1, 1)
+    sheet.sanitize()
+    planar = GEOMETRY_MAP["PlanarGeometry"]
+    planar.update_all(sheet)
+
+    coords = sheet.coords  # ["x", "y"]
+    pos = np.ascontiguousarray(sheet.vert_df[coords].values, dtype=np.float64)
+    vmap = {v: i for i, v in enumerate(sheet.vert_df.index)}
+    fmap = {v: i for i, v in enumerate(sheet.face_df.index)}
+    srce = np.ascontiguousarray(sheet.edge_df["srce"].map(vmap).values, np.uint32)
+    trgt = np.ascontiguousarray(sheet.edge_df["trgt"].map(vmap).values, np.uint32)
+    face = np.ascontiguousarray(sheet.edge_df["face"].map(fmap).values, np.uint32)
+    g = k.update_geometry_planar(pos, srce, trgt, face, sheet.Nf)
+
+    def close(name, got, ref):
+        got = np.asarray(got).ravel()
+        ref = np.asarray(ref, dtype=np.float64).ravel()
+        assert np.allclose(got, ref, atol=1e-10, rtol=0.0), (
+            f"planar {name}: max|Δ|={np.max(np.abs(got - ref)):.3e}"
+        )
+
+    close("length", g["length"], sheet.edge_df["length"].values)
+    close("nz", g["nz"], sheet.edge_df["nz"].values)
+    close("sub_area", g["sub_area"], sheet.edge_df["sub_area"].values)
+    close("area", g["area"], sheet.face_df["area"].values)
+    close("perimeter", g["perimeter"], sheet.face_df["perimeter"].values)
+    close("dcoords", g["dcoords"], sheet.edge_df[["d" + c for c in coords]].values)
+    close("rcoords", g["rcoords"], sheet.edge_df[["r" + c for c in coords]].values)
+    close("centroid", g["centroid"], sheet.face_df[coords].values)
+
+
+def test_sheet_compositional_backend_end_to_end():
+    """End-to-end: a non-standard **sheet** model (STD + FaceContractility) traces
+    the same trajectory on the python and rust backends. This routes rust through
+    the compositional path (`_rust_model`, not the fused `_rust_gradient`) with
+    lean sheet geometry — exercising the geom-stash branch of `ode_func`."""
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    import copy
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from pbg_superpowers.composite_spec import build_composite_from_spec, load_spec
+    from vivarium_tyssue.core import build_core
+
+    def run(backend):
+        spec = load_spec(ROOT / "vivarium_tyssue" / "composites" / "anisotropic.composite.yaml")
+        spec = copy.deepcopy(spec)
+        spec["emitters"] = []
+        cfg = spec["state"]["Tyssue"]["config"]
+        cfg["backend"] = backend
+        cfg["effectors"] = cfg["effectors"] + ["FaceContractility"]
+        cfg["parameters"].setdefault("face_df", {})["contractility"] = 0.1
+        comp = build_composite_from_spec(spec, overrides={"interval": 0.001}, core=build_core())
+        comp.run(3)
+        proc = comp.state["Tyssue"]["instance"]
+        return proc.eptm.vert_df[proc.eptm.coords].values.copy(), proc
+
+    py_pos, pp = run("python")
+    ru_pos, pr = run("rust")
+    assert pr._rust_model is True and pr._rust_gradient is False, "should use compositional path"
+    assert pr._rust_geometry is True, "sheet geometry should be rust (lean stash)"
+    assert np.allclose(py_pos, ru_pos, atol=1e-8, rtol=0.0), (
+        f"sheet compositional backends diverged: max|Δ|={np.max(np.abs(py_pos - ru_pos)):.3e}"
+    )
+
+
+def test_rust_model_gradient_planar_2d():
+    """The 2D compositional gradient (area_gradient_2d primitive + unit-edge, 2D
+    assembly) == compute_gradient for a planar 3-effector model — proves 2D
+    effector coverage."""
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    from tyssue import Sheet
+    from vivarium_tyssue.maps import EFFECTORS_MAP, FACTORY_MAP, GEOMETRY_MAP
+    from vivarium_tyssue.processes.kernels import rust_model_gradient
+
+    sheet = Sheet.planar_sheet_2d("planar", 6, 6, 1, 1)
+    sheet.sanitize()
+    names = ["LineTension", "FaceAreaElasticity", "PerimeterElasticity"]
+    effectors = [EFFECTORS_MAP[n] for n in names]
+    model = FACTORY_MAP["model_factory"](effectors, effectors[-1])
+    sheet.update_specs(model.specs, reset=True)
+    sheet.edge_df["line_tension"] = np.random.default_rng(3).uniform(0.5, 1.5, sheet.Ne)
+    GEOMETRY_MAP["PlanarGeometry"].update_all(sheet)
+
+    ref = np.asarray(model.compute_gradient(sheet), dtype=float)
+    got = rust_model_gradient(sheet, effectors, "model_factory")
+    assert got.shape == ref.shape and got.shape[1] == 2
+    assert np.allclose(got, ref, atol=1e-9, rtol=0.0), (
+        f"planar 2D gradient: max|Δ|={np.max(np.abs(got - ref)):.3e}"
+    )
+
+
 def _run_composite_backend(composite, backend, steps, interval=0.1):
     """Build + run a composite on a given backend; return (final positions, process)."""
     pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")

@@ -177,6 +177,115 @@ fn sheet_gradient<'py>(
     Ok(out.into_pyarray_bound(py))
 }
 
+/// 2D `PlanarGeometry.update_all` core. Like `update_geometry` but `pos` is
+/// (n_vert, 2); the normal is the signed scalar `nz`, and `sub_area = nz/2` is
+/// signed. Returns a dict of flat float64 arrays: `length`/`nz`/`sub_area`
+/// (n_edge,), `area`/`perimeter` (n_face,), `dcoords`/`rcoords` (n_edge*2,),
+/// `centroid` (n_face*2,) — reshape the coord ones to (-1, 2) on the Python side.
+#[pyfunction]
+fn update_geometry_planar<'py>(
+    py: Python<'py>,
+    pos: PyReadonlyArray2<'py, f64>,
+    srce: PyReadonlyArray1<'py, u32>,
+    trgt: PyReadonlyArray1<'py, u32>,
+    face: PyReadonlyArray1<'py, u32>,
+    n_face: usize,
+) -> PyResult<Bound<'py, PyDict>> {
+    let c = |a: &str| PyValueError::new_err(format!("{a} must be C-contiguous"));
+    let g = core::update_geometry_planar(
+        pos.as_slice().map_err(|_| c("pos"))?,
+        srce.as_slice().map_err(|_| c("srce"))?,
+        trgt.as_slice().map_err(|_| c("trgt"))?,
+        face.as_slice().map_err(|_| c("face"))?,
+        n_face,
+    );
+    let out = PyDict::new_bound(py);
+    out.set_item("length", g.length.into_pyarray_bound(py))?;
+    out.set_item("nz", g.nz.into_pyarray_bound(py))?;
+    out.set_item("sub_area", g.sub_area.into_pyarray_bound(py))?;
+    out.set_item("area", g.area.into_pyarray_bound(py))?;
+    out.set_item("perimeter", g.perimeter.into_pyarray_bound(py))?;
+    out.set_item("dcoords", g.dcoords.into_pyarray_bound(py))?;
+    out.set_item("rcoords", g.rcoords.into_pyarray_bound(py))?;
+    out.set_item("centroid", g.centroid.into_pyarray_bound(py))?;
+    Ok(out)
+}
+
+/// Unit-edge gradient primitive (length/tension effector family). `ucoords` is
+/// (n_edge, dim); `coeff` is (n_edge,). Returns a dict `{"srce", "trgt"}` of flat
+/// (n_edge*dim,) float64 arrays — reshape to (-1, dim) on the Python side.
+#[pyfunction]
+fn unit_edge_gradient<'py>(
+    py: Python<'py>,
+    ucoords: PyReadonlyArray2<'py, f64>,
+    coeff: PyReadonlyArray1<'py, f64>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let dim = ucoords.shape()[1];
+    let c = |a: &str| PyValueError::new_err(format!("{a} must be C-contiguous"));
+    let (gs, gt) = core::unit_edge_gradient(
+        ucoords.as_slice().map_err(|_| c("ucoords"))?,
+        coeff.as_slice().map_err(|_| c("coeff"))?,
+        dim,
+    );
+    let out = PyDict::new_bound(py);
+    out.set_item("srce", gs.into_pyarray_bound(py))?;
+    out.set_item("trgt", gt.into_pyarray_bound(py))?;
+    Ok(out)
+}
+
+/// Area gradient primitive (3D area effector family). `normals`/`r_ak`/`r_aj` are
+/// (n_edge, 3); `sub_area`/`coeff` are (n_edge,). Returns a dict `{"srce","trgt"}`
+/// of flat (n_edge*3,) float64 arrays.
+#[allow(clippy::too_many_arguments)]
+#[pyfunction]
+fn area_gradient<'py>(
+    py: Python<'py>,
+    normals: PyReadonlyArray2<'py, f64>,
+    r_ak: PyReadonlyArray2<'py, f64>,
+    r_aj: PyReadonlyArray2<'py, f64>,
+    sub_area: PyReadonlyArray1<'py, f64>,
+    coeff: PyReadonlyArray1<'py, f64>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let c = |a: &str| PyValueError::new_err(format!("{a} must be C-contiguous"));
+    let (gs, gt) = core::area_gradient(
+        normals.as_slice().map_err(|_| c("normals"))?,
+        r_ak.as_slice().map_err(|_| c("r_ak"))?,
+        r_aj.as_slice().map_err(|_| c("r_aj"))?,
+        sub_area.as_slice().map_err(|_| c("sub_area"))?,
+        coeff.as_slice().map_err(|_| c("coeff"))?,
+    );
+    let out = PyDict::new_bound(py);
+    out.set_item("srce", gs.into_pyarray_bound(py))?;
+    out.set_item("trgt", gt.into_pyarray_bound(py))?;
+    Ok(out)
+}
+
+/// Area gradient primitive (2D planar area effector family). `nz`/`sub_area`/
+/// `coeff` are (n_edge,); `r_ak`/`r_aj` are (n_edge, 2). Returns a dict
+/// `{"srce","trgt"}` of flat (n_edge*2,) float64 arrays.
+#[pyfunction]
+fn area_gradient_2d<'py>(
+    py: Python<'py>,
+    nz: PyReadonlyArray1<'py, f64>,
+    r_ak: PyReadonlyArray2<'py, f64>,
+    r_aj: PyReadonlyArray2<'py, f64>,
+    sub_area: PyReadonlyArray1<'py, f64>,
+    coeff: PyReadonlyArray1<'py, f64>,
+) -> PyResult<Bound<'py, PyDict>> {
+    let c = |a: &str| PyValueError::new_err(format!("{a} must be C-contiguous"));
+    let (gs, gt) = core::area_gradient_2d(
+        nz.as_slice().map_err(|_| c("nz"))?,
+        r_ak.as_slice().map_err(|_| c("r_ak"))?,
+        r_aj.as_slice().map_err(|_| c("r_aj"))?,
+        sub_area.as_slice().map_err(|_| c("sub_area"))?,
+        coeff.as_slice().map_err(|_| c("coeff"))?,
+    );
+    let out = PyDict::new_bound(py);
+    out.set_item("srce", gs.into_pyarray_bound(py))?;
+    out.set_item("trgt", gt.into_pyarray_bound(py))?;
+    Ok(out)
+}
+
 #[pymodule]
 fn tyssue_kernels(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add("__doc__", "Rust numeric kernels for the tyssue vertex-model hot loop.")?;
@@ -184,6 +293,10 @@ fn tyssue_kernels(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(scatter_add, m)?)?;
     m.add_function(wrap_pyfunction!(update_geometry, m)?)?;
     m.add_function(wrap_pyfunction!(update_geometry_bulk, m)?)?;
+    m.add_function(wrap_pyfunction!(update_geometry_planar, m)?)?;
     m.add_function(wrap_pyfunction!(sheet_gradient, m)?)?;
+    m.add_function(wrap_pyfunction!(unit_edge_gradient, m)?)?;
+    m.add_function(wrap_pyfunction!(area_gradient, m)?)?;
+    m.add_function(wrap_pyfunction!(area_gradient_2d, m)?)?;
     Ok(())
 }

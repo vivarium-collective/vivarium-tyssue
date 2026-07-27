@@ -54,8 +54,9 @@ def build_core():
     except Exception as exc:  # noqa: BLE001
         print(f"vivarium_tyssue.core: DataFrameParquetEmitter not registered ({type(exc).__name__}: {exc})")
 
-    # Simulator processes (EulerSolver, TestRegulations, StochasticLineTension,
-    # CellJamming, ParameterGradient, AnisotropicTension, Gillespie). These import
+    # Simulator processes (EulerSolver, CellDivisions, CellDeaths,
+    # StochasticLineTension, CellJamming, ParameterGradient, AnisotropicTension,
+    # Gillespie). These import
     # tyssue; degrade gracefully if that stack isn't installed.
     try:
         from vivarium_tyssue.processes import register_processes

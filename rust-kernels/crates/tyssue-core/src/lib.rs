@@ -391,9 +391,215 @@ pub fn sheet_gradient(
     grad
 }
 
+/// Result of `update_geometry_planar` — the 2D `PlanarGeometry.update_all` core.
+pub struct PlanarGeometryOut {
+    pub dcoords: Vec<f64>,  // (n_edge, 2)  trgt - srce
+    pub length: Vec<f64>,   // (n_edge,)
+    pub centroid: Vec<f64>, // (n_face, 2)  mean of srce over the face
+    pub rcoords: Vec<f64>,  // (n_edge, 2)  srce - centroid
+    pub nz: Vec<f64>,       // (n_edge,)    2D cross(r, d) = rx*dy - ry*dx (signed)
+    pub sub_area: Vec<f64>, // (n_edge,)    nz / 2 (signed, matches tyssue)
+    pub area: Vec<f64>,     // (n_face,)    Σ sub_area
+    pub perimeter: Vec<f64>,// (n_face,)    Σ length
+}
+
+/// Stateless core of `PlanarGeometry.update_all` (2D) — the planar analogue of
+/// `update_geometry`. The out-of-plane normal collapses to the signed scalar
+/// `nz = rx*dy - ry*dx`, and `sub_area = nz/2` is **signed** (tyssue does not
+/// take the absolute value in 2D). `dim` is 2; `face` is the positional face
+/// index of each edge. Excludes the stale-length `ucoords` step (done in Python).
+pub fn update_geometry_planar(
+    pos: &[f64],
+    srce: &[u32],
+    trgt: &[u32],
+    face: &[u32],
+    n_face: usize,
+) -> PlanarGeometryOut {
+    let dim = 2usize;
+    let ne = srce.len();
+    let mut dcoords = vec![0.0f64; ne * dim];
+    let mut length = vec![0.0f64; ne];
+    let mut centroid = vec![0.0f64; n_face * dim];
+    let mut rcoords = vec![0.0f64; ne * dim];
+    let mut nz = vec![0.0f64; ne];
+    let mut sub_area = vec![0.0f64; ne];
+    let mut area = vec![0.0f64; n_face];
+    let mut perimeter = vec![0.0f64; n_face];
+    let mut face_count = vec![0u32; n_face];
+
+    for e in 0..ne {
+        let s = srce[e] as usize * dim;
+        let t = trgt[e] as usize * dim;
+        let f = face[e] as usize;
+        let eo = e * dim;
+        let mut acc = 0.0f64;
+        for d in 0..dim {
+            let delta = pos[t + d] - pos[s + d];
+            dcoords[eo + d] = delta;
+            acc += delta * delta;
+            centroid[f * dim + d] += pos[s + d];
+        }
+        length[e] = acc.sqrt();
+        face_count[f] += 1;
+    }
+    for f in 0..n_face {
+        let c = face_count[f];
+        if c > 0 {
+            let inv = 1.0 / c as f64;
+            for d in 0..dim {
+                centroid[f * dim + d] *= inv;
+            }
+        }
+    }
+    for e in 0..ne {
+        let s = srce[e] as usize * dim;
+        let f = face[e] as usize;
+        let eo = e * dim;
+        let rx = pos[s] - centroid[f * dim];
+        let ry = pos[s + 1] - centroid[f * dim + 1];
+        rcoords[eo] = rx;
+        rcoords[eo + 1] = ry;
+        let dx = dcoords[eo];
+        let dy = dcoords[eo + 1];
+        let n = rx * dy - ry * dx; // 2D cross
+        nz[e] = n;
+        let sa = n / 2.0;
+        sub_area[e] = sa;
+        area[f] += sa;
+        perimeter[f] += length[e];
+    }
+
+    PlanarGeometryOut {
+        dcoords,
+        length,
+        centroid,
+        rcoords,
+        nz,
+        sub_area,
+        area,
+        perimeter,
+    }
+}
+
+/// Unit-edge gradient — the shared primitive for every length/tension-family
+/// effector (LineTension, PerimeterElasticity, FaceContractility,
+/// LengthElasticity, BorderElasticity). Each of those reduces to
+/// `grad_srce = -ucoords * c`, `grad_trgt = +ucoords * c` for a per-edge scalar
+/// `c` the caller assembles from that effector's columns (the sign folds in the
+/// few that flip, e.g. Border). Returns `(grad_srce, grad_trgt)`, each
+/// `(n_edge, dim)` row-major (flattened).
+pub fn unit_edge_gradient(ucoords: &[f64], coeff: &[f64], dim: usize) -> (Vec<f64>, Vec<f64>) {
+    let ne = coeff.len();
+    let mut gs = vec![0.0f64; ne * dim];
+    let mut gt = vec![0.0f64; ne * dim];
+    for e in 0..ne {
+        let c = coeff[e];
+        let eo = e * dim;
+        for d in 0..dim {
+            let v = ucoords[eo + d] * c;
+            gs[eo + d] = -v;
+            gt[eo + d] = v;
+        }
+    }
+    (gs, gt)
+}
+
+/// Area gradient (3D) — the shared primitive for the area-family effectors
+/// (FaceAreaElasticity, SurfaceTension, CellAreaElasticity). Reproduces tyssue's
+/// `sheet_gradients.area_grad` scaled by the caller's per-edge coefficient
+/// `coeff` (the effector's `ka_a0` upcast to edges):
+///   `inv_area = 1/(4*sub_area)` (0 where `sub_area == 0`)
+///   `grad_srce = coeff * inv_area * cross(r_aj, normal)`
+///   `grad_trgt = coeff * inv_area * cross(normal, r_ak)`
+/// `r_ak = srce - face`, `r_aj = trgt - face`. Returns `(grad_srce, grad_trgt)`,
+/// each `(n_edge, 3)` row-major.
+pub fn area_gradient(
+    normals: &[f64],
+    r_ak: &[f64],
+    r_aj: &[f64],
+    sub_area: &[f64],
+    coeff: &[f64],
+) -> (Vec<f64>, Vec<f64>) {
+    let ne = sub_area.len();
+    let mut gs = vec![0.0f64; ne * 3];
+    let mut gt = vec![0.0f64; ne * 3];
+    for e in 0..ne {
+        let sa = sub_area[e];
+        let inv = if sa != 0.0 { 1.0 / (4.0 * sa) } else { 0.0 };
+        let k = coeff[e] * inv;
+        let eo = e * 3;
+        let (nx, ny, nz) = (normals[eo], normals[eo + 1], normals[eo + 2]);
+        let (akx, aky, akz) = (r_ak[eo], r_ak[eo + 1], r_ak[eo + 2]);
+        let (ajx, ajy, ajz) = (r_aj[eo], r_aj[eo + 1], r_aj[eo + 2]);
+        // grad_srce = cross(r_aj, normal)
+        gs[eo] = k * (ajy * nz - ajz * ny);
+        gs[eo + 1] = k * (ajz * nx - ajx * nz);
+        gs[eo + 2] = k * (ajx * ny - ajy * nx);
+        // grad_trgt = cross(normal, r_ak)
+        gt[eo] = k * (ny * akz - nz * aky);
+        gt[eo + 1] = k * (nz * akx - nx * akz);
+        gt[eo + 2] = k * (nx * aky - ny * akx);
+    }
+    (gs, gt)
+}
+
+/// Area gradient (2D planar) — the area-family primitive for `PlanarGeometry`
+/// meshes, reproducing `planar_gradients.area_grad`. Here the face normal is the
+/// scalar `nz` (out-of-plane) and the cross products collapse to:
+///   `grad_srce = coeff * inv_area * ( r_aj_y * nz, -r_aj_x * nz)`
+///   `grad_trgt = coeff * inv_area * (-r_ak_y * nz,  r_ak_x * nz)`
+/// `nz` is one value per edge; positions are `(n_edge, 2)`. Returns
+/// `(grad_srce, grad_trgt)`, each `(n_edge, 2)` row-major.
+pub fn area_gradient_2d(
+    nz: &[f64],
+    r_ak: &[f64],
+    r_aj: &[f64],
+    sub_area: &[f64],
+    coeff: &[f64],
+) -> (Vec<f64>, Vec<f64>) {
+    let ne = sub_area.len();
+    let mut gs = vec![0.0f64; ne * 2];
+    let mut gt = vec![0.0f64; ne * 2];
+    for e in 0..ne {
+        let sa = sub_area[e];
+        let inv = if sa != 0.0 { 1.0 / (4.0 * sa) } else { 0.0 };
+        let k = coeff[e] * inv * nz[e];
+        let eo = e * 2;
+        gs[eo] = k * r_aj[eo + 1];
+        gs[eo + 1] = -k * r_aj[eo];
+        gt[eo] = -k * r_ak[eo + 1];
+        gt[eo + 1] = k * r_ak[eo];
+    }
+    (gs, gt)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unit_edge_gradient_opposes() {
+        // one 3D edge, unit vector along x, coeff 2 -> srce=-2x, trgt=+2x
+        let (gs, gt) = unit_edge_gradient(&[1.0, 0.0, 0.0], &[2.0], 3);
+        assert_eq!(gs, vec![-2.0, 0.0, 0.0]);
+        assert_eq!(gt, vec![2.0, 0.0, 0.0]);
+    }
+
+    #[test]
+    fn area_gradient_matches_manual_cross() {
+        // normal +z, r_aj along +x, r_ak along +y, sub_area 0.25 -> inv_area=1
+        let (gs, gt) = area_gradient(
+            &[0.0, 0.0, 1.0],
+            &[0.0, 1.0, 0.0],
+            &[1.0, 0.0, 0.0],
+            &[0.25],
+            &[1.0],
+        );
+        // cross(r_aj=+x, n=+z) = (0*1-0*0, 0*0-1*1, 1*0-0*0) = (0,-1,0)
+        assert!((gs[0] - 0.0).abs() < 1e-12 && (gs[1] + 1.0).abs() < 1e-12);
+        // cross(n=+z, r_ak=+y) = (0*0-1*1, 1*0-0*0, 0*1-0*0) = (-1,0,0)
+        assert!((gt[0] + 1.0).abs() < 1e-12 && (gt[1]).abs() < 1e-12);
+    }
 
     #[test]
     fn edge_lengths_2d() {

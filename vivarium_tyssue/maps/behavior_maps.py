@@ -11,5 +11,7 @@ BEHAVIOR_MAP = {
     "cell_jamming": cell_jamming,
     "apply_gradient": apply_gradient,
     "apoptosis_extrusion": apoptosis_extrusion,
+    "division_3d": division_3d,
+    "apoptosis_3d": apoptosis_3d,
     "differentiation": differentiation,
 }

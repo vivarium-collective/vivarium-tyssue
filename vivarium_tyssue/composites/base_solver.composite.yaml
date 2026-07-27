@@ -67,6 +67,7 @@ state:
       auto_reconnect: true
       bounds: {}
       output_columns: {}
+      history_columns: {}
       maps: {}
       backend: rust
       substeps: ${substeps}

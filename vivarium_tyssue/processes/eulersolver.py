@@ -1,4 +1,5 @@
 import logging
+import os
 import warnings
 import inspect
 import time
@@ -13,7 +14,6 @@ from process_bigraph.emitter import emitter_from_wires, gather_emitter_results
 from vivarium_tyssue.maps import *
 from vivarium_tyssue.core_maps import GEOMETRY_MAP
 from vivarium_tyssue.processes.utils import (
-    SUPPORTED_EFFECTORS,
     compute_geometry,
     geometry_supported,
     gradient_supported,
@@ -22,12 +22,18 @@ from vivarium_tyssue.processes.utils import (
     materialize_geometry,
     rust_bulk_geometry_update,
     rust_geometry_update,
+    rust_kernels_available,
     rust_sheet_gradient,
+)
+from vivarium_tyssue.processes.kernels import (
+    effector_covered,
+    rust_model_gradient,
 )
 import numpy as np
 
 from tyssue.behaviors.event_manager import EventManager
 from tyssue.behaviors.sheet.basic_events import reconnect
+from tyssue.core.history import History, HistoryHdf5
 from tyssue.io.hdf5 import load_datasets
 from tyssue import config
 
@@ -66,6 +72,11 @@ class EulerSolver(Process):
         "auto_reconnect": "boolean", # if True, will automatically perform reconnections
         "bounds": "map[float]", # bounds the displacement of the vertices at each time step
         "output_columns": "map[list[string]]", # dict containing lists of column names to emit for each dataframe
+        "history_columns": "map[list[string]]", # per-df extra columns to RECORD in
+                             # the History (keys vert_df/edge_df/face_df/cell_df).
+                             # Absent/empty for a df -> record all columns (default).
+                             # When a df is listed, record only the coords+topology
+                             # minimum needed to rebuild the eptm PLUS the listed cols.
         "settings": "map",
         "maps": "map", #map of maps, leave empty if using default
         "backend": "string", # "python" (default) or "rust": route compute_gradient
@@ -83,6 +94,13 @@ class EulerSolver(Process):
                                # huge local gradient that would otherwise explode to
                                # NaN in one step; clamping lets it relax over a few
                                # steps instead.
+        "record_history": "boolean", # default True: build a tyssue History and
+                               # record every step so `.history` drives create_gif
+                               # / to_archive. Set False for large rust runs to
+                               # avoid the per-step full-copy RAM growth.
+        "history_file": "string", # stream history to this HDF5 file (HistoryHdf5)
+                               # instead of RAM; flat memory, reusable archive.
+        "history_save_every": "integer", # with history_file, record every N-th step.
     }
 
     def initialize(self, config):
@@ -152,18 +170,36 @@ class EulerSolver(Process):
         # model — the vessel term reads position-derived vertex columns we don't
         # refresh mid-loop, so vessel/python fall back to per-step materializing.
         self._bulk_geometry = is_bulk_geometry(self.geom.__name__)
+        # Effector classes + factory name, kept for the compositional rust path.
+        self._effectors = effectors
+        self._factory_name = config["factory"]
+        # Compositional per-effector rust gradient: engages whenever the rust
+        # kernels are available. Each effector runs through a rust primitive if
+        # one is registered (kernels.EFFECTOR_KERNELS), else its tyssue
+        # ``.gradient`` — so any model runs on the rust backend, covered terms
+        # accelerated, nothing regressing. The fused ``_rust_gradient`` path below
+        # is a faster special case for the standard 3-effector sheet model.
+        self._rust_model = False
         if self._backend == "rust":
             self._rust_geometry = geometry_supported(self.geom.__name__, self.eptm.dim)
             if gradient_supported(config["effectors"], config["factory"], self.eptm.dim):
                 self._rust_gradient = True
-                log.info("EulerSolver: using Rust backend (gradient%s)",
+                log.info("EulerSolver: using Rust backend (fused gradient%s)",
                          " + geometry" if self._rust_geometry else "")
+            elif rust_kernels_available():
+                self._rust_model = True
+                covered = [e for e in config["effectors"] if effector_covered(e)]
+                fell_back = [e for e in config["effectors"] if not effector_covered(e)]
+                log.info(
+                    "EulerSolver: using Rust backend (compositional gradient%s); "
+                    "rust effectors=%s, python-fallback effectors=%s",
+                    " + geometry" if self._rust_geometry else "", covered, fell_back,
+                )
             else:
                 warnings.warn(
-                    "backend='rust' requested but this model is unsupported by the "
-                    "gradient kernel (needs the 3 standard sheet effectors "
-                    f"{sorted(SUPPORTED_EFFECTORS)}, a supported factory, a 3D mesh, "
-                    "and the compiled tyssue_kernels module) — falling back to Python."
+                    "backend='rust' requested but the compiled tyssue_kernels module "
+                    "is not importable — falling back to Python. Build it with "
+                    "`maturin develop --release` in rust-kernels/ (see its README)."
                 )
         self._native_substeps = (
             self._rust_gradient and self._rust_geometry and not self._with_vessel
@@ -175,6 +211,76 @@ class EulerSolver(Process):
             )
         # Normalize any StringDtype columns from parameter assignment (pandas 3.0).
         self._coerce_string_columns()
+
+        # Build after parameters so configured columns are recorded. With
+        # history_file, stream each snapshot to HDF5 (HistoryHdf5) so memory stays
+        # flat over long/repeated runs instead of accumulating a copy per step.
+        self._record_history = bool(config.get("record_history", False))
+        history_file = config.get("history_file")
+        save_every = config.get("history_save_every") or None  # 0/"" -> every step
+        if not self._record_history:
+            self.history = None
+        elif history_file:
+            # HistoryHdf5 appends (record opens the store in "a" mode); delete a
+            # stale file first so a rerun holds one simulation, not several.
+            parent = os.path.dirname(history_file)
+            if parent:
+                os.makedirs(parent, exist_ok=True)
+            if os.path.exists(history_file):
+                os.remove(history_file)
+            self.history = HistoryHdf5(
+                self.eptm, hf5file=history_file, overwrite=True,
+                save_every=save_every, dt=1.0 if save_every else None,
+            )
+            # HDF5 tables can't serialize object-dtype columns (tyssue's topology
+            # bookkeeping: cell, *_o, unique_id_max); drop them — gifs don't need them.
+            ds = self.eptm.datasets
+            for el in list(self.history.columns):
+                keep = [c for c in self.history.columns[el] if ds[el][c].dtype != object]
+                self.history.columns[el] = keep
+                self.history.dtypes[el] = ds[el][keep].dtypes
+        else:
+            self.history = History(self.eptm)
+        self._apply_history_columns()
+
+    def _apply_history_columns(self):
+        """Trim the History's recorded columns per the ``history_columns`` config.
+
+        Only dataframes named in the config are touched, so the default (record
+        everything) is unchanged. A listed dataframe records the coords/topology
+        minimum needed to rebuild the epithelium plus the listed columns, and
+        nothing else. Config keys are ``vert_df``/``edge_df``/``face_df``/``cell_df``
+        (mirroring ``output_columns``); History elements drop the ``_df`` suffix.
+        """
+        requested = self.config.get("history_columns") or {}
+        if self.history is None or not requested:
+            return
+        ds = self.eptm.datasets
+        has_cell = getattr(self.eptm, "cell_df", None) is not None
+        minima = {
+            "vert": list(self.eptm.coords),
+            "edge": ["srce", "trgt", "face"] + (["cell"] if has_cell else []),
+            "face": [],
+            "cell": [],
+        }
+        is_hdf5 = isinstance(self.history, HistoryHdf5)
+        for el in list(self.history.columns):
+            listed = requested.get(f"{el}_df")
+            if listed is None:
+                continue  # not listed -> keep default recording for this df
+            available = ds[el].columns
+            keep = [c for c in dict.fromkeys(minima.get(el, []) + list(listed))
+                    if c in available]
+            if is_hdf5:
+                # HDF5 can't serialize object-dtype columns (topology bookkeeping).
+                keep = [c for c in keep if ds[el][c].dtype != object]
+                self.history.dtypes[el] = ds[el][keep].dtypes
+            else:
+                seed = ds[el][keep].reset_index(drop=False)
+                if "time" not in keep:
+                    seed["time"] = 0
+                self.history.datasets[el] = seed
+            self.history.columns[el] = keep
 
     def _coerce_string_columns(self):
         """pandas 3.0 gives scalar-string column assignments (e.g. ``cell_type``)
@@ -343,6 +449,17 @@ class EulerSolver(Process):
                 self._geom_lean = False
         return self.eptm
 
+    def record(self, t):
+        """Snapshot the current epithelium into the tyssue History (no-op when
+        history recording is disabled). On the rust/lean hot path the intermediate
+        edge-coordinate blocks are left native, so materialize the full geometry
+        first, otherwise History would archive stale sub-coordinates."""
+        if self.history is None:
+            return
+        if self._geom_lean:
+            self.to_dataframes(full=True)
+        self.history.record(time_stamp=t)
+
     def ode_func(self):
         """Computes the models' gradient.
         Returns
@@ -355,6 +472,19 @@ class EulerSolver(Process):
             grad = rust_sheet_gradient(
                 self.eptm, self._is_bound, self._with_vessel,
                 topo=(srce, trgt, face), geom=self._geom_stash,
+            )  # (Nv, dim)
+            grad_U = grad[active_pos]
+        elif self._rust_model:
+            # Compositional rust path: assemble the gradient effector-by-effector
+            # (covered terms via rust primitives, the rest via their tyssue
+            # ``.gradient``). Pass the native stash only when geometry is lean
+            # (its intermediate edge blocks aren't in pandas); otherwise the
+            # freshly-materialized frames are current.
+            srce, trgt, face, active_pos = self._topo_arrays()
+            geom = self._geom_stash if self._geom_lean else None
+            grad = rust_model_gradient(
+                self.eptm, self._effectors, self._factory_name,
+                topo=(srce, trgt, face), geom=geom,
             )  # (Nv, dim)
             grad_U = grad[active_pos]
         else:
@@ -475,6 +605,8 @@ class EulerSolver(Process):
         # skip the all-column scan on plain integration steps — the common case.
         if inputs["behaviors"] or network_changed:
             self._coerce_string_columns()
+
+        self.record(inputs["global_time"])
 
         dfs = self.output_dfs()
 
