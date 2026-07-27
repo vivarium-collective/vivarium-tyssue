@@ -122,6 +122,7 @@ def _flat_config(dataset_path: Path) -> dict:
         "auto_reconnect": True,
         "bounds": None,
         "output_columns": {},
+        "history_columns": {},
         "maps": {},
         "backend": "python",
         "substeps": 1,

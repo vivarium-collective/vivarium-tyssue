@@ -1,6 +1,7 @@
 import numpy as np
 
 from tyssue.topology.sheet_topology import cell_division, remove_face
+from tyssue.topology.monolayer_topology import cell_division as monolayer_cell_division
 from vivarium_tyssue.core_maps import GEOMETRY_MAP
 
 # Install the tyssue topology robustness shims (drop_two_sided_faces /
@@ -357,6 +358,329 @@ def apply_gradient(sheet, manager, parameter_updates=None):
             )
 
 def differentiation(sheet, manager, cell_uid, new_type):
+    """Relabel a cell's ``cell_type``. Dimension-aware: a 3D monolayer / bulk
+    epithelium carries its cells in ``cell_df``, a 2D sheet in ``face_df``."""
+    if _is_3d(sheet):
+        cell_id = cell_index_for(sheet, cell_uid)
+        if cell_id is not None:
+            sheet.cell_df.loc[cell_id, "cell_type"] = new_type
+        return
     cell_id = face_index_for(sheet, cell_uid)
     if cell_id is not None:
         sheet.face_df.loc[cell_id, "cell_type"] = new_type
+
+
+# ---------------------------------------------------------------------------
+# 3D (monolayer / bulk) cell division & necrosis
+#
+# The 2D behaviors above track cells as faces (face_df) and grow prefered_area
+# toward a critical AREA. A 3D monolayer / bulk epithelium tracks cells as
+# volumetric cells (cell_df): the analogous behavior grows prefered_vol (the
+# reference volume of the CellVolumeElasticity effector) toward a critical
+# VOLUME and, when reached, splits the cell with tyssue's monolayer
+# cell_division — with a per-division orientation so growth is genuinely 3D.
+#
+# These mirror the 2D commit-column / batched-grower design (one vectorized
+# grow pass over all committed cells per step, then fire the topology op only
+# for threshold crossers), but on cell_df / vol, and are kept separate so the
+# battle-tested 2D crypt/tumor path is untouched.
+# ---------------------------------------------------------------------------
+
+def _is_3d(eptm):
+    """True for a 3D monolayer / bulk epithelium (cells live in a non-empty
+    ``cell_df``); False for a flat 2D Sheet (cells are faces)."""
+    cell_df = getattr(eptm, "cell_df", None)
+    return cell_df is not None and len(cell_df) > 0
+
+
+def _uid_to_cell_index(eptm):
+    """``unique_id -> cell_df index`` map, cached on the epithelium and
+    invalidated whenever ``cell_df`` is replaced (every division reassigns it via
+    ``pd.concat``). Mirrors :func:`_uid_to_face_index` for the 3D path."""
+    cd = eptm.cell_df
+    cache = getattr(eptm, "_uid_cell_cache", None)
+    if cache is not None and cache[0] is cd:
+        return cache[1]
+    mapping = {int(u): idx for u, idx in zip(cd["unique_id"].to_numpy(), cd.index.to_numpy())}
+    eptm._uid_cell_cache = (cd, mapping)
+    return mapping
+
+
+def cell_index_for(eptm, uid):
+    """``cell_df`` index label for a cell's ``unique_id``, or ``None`` if no live
+    cell carries it (divided away / not yet born)."""
+    return _uid_to_cell_index(eptm).get(int(uid))
+
+
+_CELL_COMMIT_DEFAULTS = {"commit_state": 0.0, "commit_rate": 0.0, "commit_crit": 0.0, "commit_dt": 0.0}
+_GROWER_3D_NAME = "_grow_committed_cells_3d"
+# A dividing cell abandons its division once its prefered_vol exceeds this multiple
+# of its critical volume without the actual volume crossing (contact inhibition).
+_COMMIT_VOL_CAP = 3.0
+
+
+def _ensure_cell_commit_cols(eptm):
+    cd = eptm.cell_df
+    for col, default in _CELL_COMMIT_DEFAULTS.items():
+        if col not in cd.columns:
+            cd[col] = default
+    if "commit_type" not in cd.columns:
+        cd["commit_type"] = ""
+    if "commit_orientation" not in cd.columns:
+        cd["commit_orientation"] = "vertical"
+
+
+def _ensure_grower_3d(eptm, manager, geom):
+    if any(tup[0].__name__ == _GROWER_3D_NAME for tup in manager.next):
+        return
+    manager.append(_grow_committed_cells_3d, geom=geom)
+
+
+def _clear_cell_commit(eptm, idx, restore_type=None):
+    cd = eptm.cell_df
+    if restore_type:
+        cd.loc[idx, "cell_type"] = restore_type
+    for col, default in _CELL_COMMIT_DEFAULTS.items():
+        cd.loc[idx, col] = default
+    if "commit_type" in cd.columns:
+        cd.loc[idx, "commit_type"] = ""
+    if "commit_orientation" in cd.columns:
+        cd.loc[idx, "commit_orientation"] = "vertical"
+
+
+def division_3d(
+        eptm, manager, geom="MonolayerGeometry", cell_uid=0, cell_type=None,
+        crit_vol=2.0, growth_rate=0.1, orientation="vertical", dt=1.0,
+):
+    """Commit a 3D cell to division (monolayer / bulk analogue of
+    :func:`division`).
+
+    Records the cell's own growth parameters into its ``commit_*`` columns on
+    ``cell_df``, flags it ``"dividing"``, and hands off to the batched grower
+    (:func:`_grow_committed_cells_3d`), which grows every committed cell's
+    ``prefered_vol`` (the CellVolumeElasticity reference) and splits it once its
+    measured ``vol`` exceeds ``crit_vol``.
+
+    Parameters
+    ----------
+    cell_uid : int
+        unique_id of the dividing cell
+    cell_type : str, optional
+        target type stamped on mother and daughter once division occurs; the
+        cell is flagged ``"dividing"`` while it grows
+    crit_vol : float
+        volume at which the cell divides (analogue of ``crit_area``)
+    growth_rate : float
+        per-unit-time increase of the prefered volume:
+        V_0(t + dt) = V_0(t) * (1 + growth_rate * dt)
+    orientation : {"vertical", "horizontal", "apical"}
+        division-plane orientation passed to tyssue's monolayer cell_division;
+        the emitting process randomizes it so growth is not all in one plane
+    """
+    cell_id = cell_index_for(eptm, cell_uid)
+    if cell_id is None:
+        print("Cell not found, skipping division")
+        return
+    cell_id = int(cell_id)
+    _ensure_cell_commit_cols(eptm)
+    cd = eptm.cell_df
+    # Ignore a duplicate emission for a cell already mid-event (the coupling may
+    # re-select a cell before its "dividing" relabel propagates back).
+    if cd.loc[cell_id, "commit_state"] != 0.0:
+        return
+    if cell_type is not None and "cell_type" in cd.columns:
+        cd.loc[cell_id, "cell_type"] = "dividing"
+        cd.loc[cell_id, "commit_type"] = cell_type
+    cd.loc[cell_id, "commit_state"] = 1.0
+    cd.loc[cell_id, "commit_rate"] = growth_rate
+    cd.loc[cell_id, "commit_crit"] = crit_vol
+    cd.loc[cell_id, "commit_dt"] = dt
+    cd.loc[cell_id, "commit_orientation"] = orientation
+    _ensure_grower_3d(eptm, manager, geom)
+
+
+def apoptosis_3d(
+        eptm, manager, geom="MonolayerGeometry", cell_uid=0, crit_vol=0.5, shrink_rate=0.1, dt=1.0,
+):
+    """Commit a 3D cell to apoptotic death.
+
+    Shrinks the cell's ``prefered_vol`` and, once its measured ``vol`` falls below
+    ``crit_vol`` (or the death target collapses), marks it ``"dead"`` / not alive.
+    The cell is left in the mesh (no volumetric topology surgery, which is
+    numerically fragile in 3D) — a stable "necrotic" state that still lets the
+    coupled death fluxes act on the tissue and shows up in the visualization."""
+    cell_id = cell_index_for(eptm, cell_uid)
+    if cell_id is None:
+        print("Cell not found, skipping event")
+        return
+    cell_id = int(cell_id)
+    _ensure_cell_commit_cols(eptm)
+    cd = eptm.cell_df
+    if cd.loc[cell_id, "commit_state"] != 0.0:
+        return
+    if "cell_type" in cd.columns:
+        cd.loc[cell_id, "cell_type"] = "extruding"
+    cd.loc[cell_id, "commit_state"] = 2.0
+    cd.loc[cell_id, "commit_rate"] = shrink_rate
+    cd.loc[cell_id, "commit_crit"] = crit_vol
+    cd.loc[cell_id, "commit_dt"] = dt
+    _ensure_grower_3d(eptm, manager, geom)
+
+
+def _do_division_3d(eptm, geometry, cell_uid):
+    """Split a division-ready 3D cell along its committed orientation, give the new
+    cell a fresh unique_id, restore the target cell_type on both, and clear their
+    commit flags.
+
+    tyssue's ``cell_division`` copies the mother's cell_df row for the daughter
+    (so both momentarily share the mother's unique_id) and calls ``reset_index``,
+    which reindexes cell_df into an unordered-``set`` order — so the integer label
+    it *returns* for the daughter can point at a different row afterwards. We
+    therefore ignore that label and locate the daughter as the row that now
+    duplicates the mother's unique_id, which is reset-order independent."""
+    cell_id = cell_index_for(eptm, cell_uid)
+    if cell_id is None:
+        return
+    cell_id = int(cell_id)
+    cd = eptm.cell_df
+    target_type = cd.loc[cell_id, "commit_type"] if "commit_type" in cd.columns else ""
+    orientation = cd.loc[cell_id, "commit_orientation"] if "commit_orientation" in cd.columns else "vertical"
+    # Reset the prefered size so both daughters start near the baseline instead of
+    # inheriting the grown (~crit) target and immediately re-dividing. (The daughter
+    # copies the mother's row, so it inherits this reset value.)
+    cd.loc[cell_id, "prefered_vol"] = 1.0
+    if "prefered_area" in cd.columns:
+        cd.loc[cell_id, "prefered_area"] = 1.0
+    # A monolayer cell_division can raise "invalid topology" for some cells PART
+    # WAY through, after already mutating the mesh (leaving an orphan face that the
+    # next geometry update chokes on). Snapshot first and roll back on failure so a
+    # skipped division never corrupts the tissue.
+    eptm.backup()
+    try:
+        monolayer_cell_division(eptm, cell_id, orientation=orientation)
+    except Exception as exc:  # noqa: BLE001
+        print(f"cell_division failed for cell {cell_uid} ({type(exc).__name__}: {exc}); rolling back")
+        eptm.restore()
+        # restore() can shrink the vertex set back below its grown size; refresh
+        # active_verts (reset_index/restore don't) so the solver's next gradient
+        # doesn't index vertices that no longer exist.
+        eptm.reset_topo()
+        cid = cell_index_for(eptm, cell_uid)
+        if cid is not None:
+            cid = int(cid)
+            tt = eptm.cell_df.loc[cid, "commit_type"] if "commit_type" in eptm.cell_df.columns else ""
+            eptm.cell_df.loc[cid, "prefered_vol"] = 1.0
+            if "prefered_area" in eptm.cell_df.columns:
+                eptm.cell_df.loc[cid, "prefered_area"] = 1.0
+            _clear_cell_commit(eptm, cid, restore_type=(str(tt) if tt else None))
+        eptm.network_changed = True
+        return
+    # Mother and daughter now both carry cell_uid; give the daughter a fresh id.
+    cd = eptm.cell_df
+    twins = list(cd.index[cd["unique_id"] == cell_uid])
+    restore = target_type if target_type else None
+    if len(twins) < 2:
+        # Division didn't duplicate as expected — just tidy the mother's commit.
+        for idx in twins:
+            _clear_cell_commit(eptm, idx, restore_type=restore)
+        eptm.network_changed = True
+        return
+    daughter = twins[-1]
+    new_uid = int(cd["unique_id"].max()) + 1
+    cd.loc[daughter, "unique_id"] = new_uid
+    if "id" in cd.columns:
+        cd.loc[daughter, "id"] = int(cd["id"].max()) + 1
+    for idx in twins:
+        _clear_cell_commit(eptm, idx, restore_type=restore)
+    # Reconcile indices and refresh geometry BEFORE any further division in the
+    # same grower burst (like the 2D _do_division): a subsequent split must see a
+    # consistent, up-to-date mesh, otherwise it builds a degenerate face and the
+    # next MonolayerGeometry.update_all mismatches face vs edge-group counts. Index
+    # relabelling here is uid-safe — reset_index keeps column values (unique_id).
+    eptm.reset_index()
+    # reset_topo refreshes active_verts to the relabelled vertex set (reset_index
+    # doesn't) so the solver's next gradient indexes live vertices only.
+    eptm.reset_topo()
+    geometry.update_all(eptm)
+    eptm.network_changed = True
+    print(f"cell n°{daughter} is born")
+
+
+def _do_necrosis_3d(eptm, cell_uid):
+    """Mark a death-ready 3D cell dead (cell_type='dead', is_alive=0) and clear its
+    commit flags. Kept in the mesh — see :func:`apoptosis_3d`."""
+    cell_id = cell_index_for(eptm, cell_uid)
+    if cell_id is None:
+        return
+    cell_id = int(cell_id)
+    if "cell_type" in eptm.cell_df.columns:
+        eptm.cell_df.loc[cell_id, "cell_type"] = "dead"
+    if "is_alive" in eptm.cell_df.columns:
+        eptm.cell_df.loc[cell_id, "is_alive"] = 0
+    _clear_cell_commit(eptm, cell_id)
+
+
+def _grow_committed_cells_3d(eptm, manager, geom="MonolayerGeometry"):
+    """One vectorized grow/shrink pass over every committed 3D cell, then fire the
+    real division / necrosis for any that crossed their own threshold. Re-queues
+    itself while commitments remain. Mirrors :func:`_grow_committed_cells`."""
+    geometry = GEOMETRY_MAP[geom] if isinstance(geom, str) else geom
+    cd = eptm.cell_df
+    if "commit_state" not in cd.columns:
+        return
+    state = cd["commit_state"].to_numpy()
+    div_mask = state == 1.0
+    ext_mask = state == 2.0
+    if not div_mask.any() and not ext_mask.any():
+        return
+
+    # V_0(t+dt) = V_0(t) * (1 +/- dt*rate); prefered_area tracks V_0^(2/3) so the
+    # face-area term doesn't fight the volume growth (same coupling tyssue's
+    # monolayer grow() action uses).
+    rate = cd["commit_rate"].to_numpy(dtype=float)
+    dt = cd["commit_dt"].to_numpy(dtype=float)
+    grow = 1.0 + dt * rate
+    shrink = 1.0 - dt * rate
+    prefered_v = cd["prefered_vol"].to_numpy(dtype=float).copy()
+    prefered_v[div_mask] *= grow[div_mask]
+    prefered_v[ext_mask] *= shrink[ext_mask]
+    cd["prefered_vol"] = prefered_v
+    if "prefered_area" in cd.columns:
+        pa = cd["prefered_area"].to_numpy(dtype=float).copy()
+        pa[div_mask] *= grow[div_mask] ** (2.0 / 3.0)
+        pa[ext_mask] *= np.clip(shrink[ext_mask], 0.0, None) ** (2.0 / 3.0)
+        cd["prefered_area"] = pa
+
+    vol = cd["vol"].to_numpy(dtype=float)
+    crit = cd["commit_crit"].to_numpy(dtype=float)
+    uid = cd["unique_id"].to_numpy()
+    DEATH_FLOOR = 0.1
+    div_ready = uid[div_mask & (vol > crit)]
+    ext_ready = uid[ext_mask & ((vol < crit) | (prefered_v < DEATH_FLOOR))]
+
+    # Contact inhibition: a dividing cell wedged in the crowded tumor core can
+    # never reach crit_vol however much its prefered_vol is inflated. Left
+    # unchecked such cells accumulate as permanently-committed "dividing" cells
+    # that grow every step forever — a runaway that also balloons runtime. Once a
+    # cell's prefered_vol has been driven past _COMMIT_VOL_CAP x crit without its
+    # actual vol crossing, give up on that division (the coupling may retry later
+    # when the tissue has room).
+    jammed = uid[div_mask & (vol <= crit) & (prefered_v > _COMMIT_VOL_CAP * crit)]
+
+    for cell_uid in div_ready:
+        _do_division_3d(eptm, geometry, int(cell_uid))
+    for cell_uid in ext_ready:
+        _do_necrosis_3d(eptm, int(cell_uid))
+    for cell_uid in jammed:
+        idx = cell_index_for(eptm, int(cell_uid))
+        if idx is not None:
+            idx = int(idx)
+            tt = eptm.cell_df.loc[idx, "commit_type"] if "commit_type" in eptm.cell_df.columns else ""
+            eptm.cell_df.loc[idx, "prefered_vol"] = 1.0
+            if "prefered_area" in eptm.cell_df.columns:
+                eptm.cell_df.loc[idx, "prefered_area"] = 1.0
+            _clear_cell_commit(eptm, idx, restore_type=(str(tt) if tt else None))
+
+    cd = eptm.cell_df
+    if "commit_state" in cd.columns and (cd["commit_state"].to_numpy() != 0.0).any():
+        _ensure_grower_3d(eptm, manager, geom)

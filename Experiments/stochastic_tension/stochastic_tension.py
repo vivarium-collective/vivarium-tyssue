@@ -129,6 +129,7 @@ def build_spec(tau: float, sigma: float, dt: float, dataset_path: Path) -> dict:
         "auto_reconnect": True,
         "bounds": None,
         "output_columns": {},
+        "history_columns": {},
         "maps": {},
         "backend": "rust",
         "substeps": 1,

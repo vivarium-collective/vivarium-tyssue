@@ -129,6 +129,7 @@ def flat_config(dataset_path: Path) -> dict:
         "auto_reconnect": True,
         "bounds": None,
         "output_columns": {},
+        "history_columns": {},
         "maps": {},
         # topology-mutating behaviours (division / extrusion) run safest on python.
         "backend": "python",
@@ -169,6 +170,7 @@ def crypt_config(dataset_path: Path) -> dict:
         "auto_reconnect": True,
         "bounds": None,
         "output_columns": {},
+        "history_columns": {},
         "maps": {},
         # VesselGeometry + model_factory_vessel run on the rust compositional
         # gradient path (kernels.rust_model_gradient) with rust geometry — ~2x
@@ -421,7 +423,9 @@ def _draw_3d_frame(sheet, lims, title, figsize=None):
     """Draw one crypt frame (faces by cell_type) into a fresh matplotlib Axes3D,
     the same path create_gif_3d uses per frame. Returns the Figure, or None."""
     from tyssue import config
-    from tyssue.draw.plt_draw import sheet_view_3d, patch_2d_collections_to_3d
+    from tyssue.draw.plt_draw import (
+        sheet_view_3d, patch_2d_collections_to_3d, _auto_tick_fontsize_3d,
+    )
     from vivarium_tyssue.draw import crypt_cell_type_kwds, CELL_TYPE_COLORS
 
     ds = config.draw.sheet_spec()
@@ -441,6 +445,18 @@ def _draw_3d_frame(sheet, lims, title, figsize=None):
         )
         patch_2d_collections_to_3d(ax)
         ax.set(xlim=lims["x"], ylim=lims["y"], zlim=lims["z"])
+        # sheet_view_3d set the 3-D box aspect from THIS frame's auto-scaled data
+        # extent; we just overrode the limits with the fixed ones, so recompute the
+        # box aspect from those fixed ranges. Otherwise the crypt's z-axis proportion
+        # (it is much longer than x/y) drifts frame to frame — squashed on some,
+        # correct on others — as divisions/extrusions shift the per-frame z-extent.
+        ax.set_box_aspect((lims["x"][1] - lims["x"][0],
+                           lims["y"][1] - lims["y"][0],
+                           lims["z"][1] - lims["z"][0]))
+        # sheet_view_3d also sized the tick labels from this frame's own auto-scaled
+        # ranges, so the font jumps frame to frame. Recompute it from the FIXED limits
+        # so every frame gets the same tick-label size.
+        _auto_tick_fontsize_3d(ax, base_size=8, min_size=4)
         ax.set_title(title, fontsize=9)
         # Force the (occasionally singular) 3-D projection now, so a bad frame
         # raises here inside the guard rather than later at savefig.
@@ -487,10 +503,14 @@ def save_stills_3d(history, out_dir: Path):
     lims = _frame_limits(history, times, COORDS_3D)
     for frac in np.linspace(0.0, 1.0, N_STILLS):
         t = times[int(round(frac * (len(times) - 1)))]
-        fig = _draw_3d_frame(history.retrieve(t), lims, f"t = {float(t):.2f}")
+        # Same fixed figsize as the gif (save_gif_3d) and NO bbox_inches="tight":
+        # tight-cropping would resize each still to its own content, so the crypt's
+        # z-axis would look a different length in each snapshot. A constant figsize
+        # keeps every still identical in size, box_aspect keeps it proportional.
+        fig = _draw_3d_frame(history.retrieve(t), lims, f"t = {float(t):.2f}", figsize=(5.0, 8.0))
         if fig is None:
             continue
-        fig.savefig(out_dir / f"still_t{float(t):06.2f}.png", dpi=FIG_DPI, bbox_inches="tight")
+        fig.savefig(out_dir / f"still_t{float(t):06.2f}.png", dpi=FIG_DPI)
         plt.close(fig)
 
 
