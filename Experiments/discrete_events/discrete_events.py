@@ -1,30 +1,31 @@
-"""Discrete-event experiments — random divisions, random deaths, Gillespie.
+"""Discrete-event experiments — random divisions, random deaths, Gillespie (SIMULATION).
 
 Three scenarios exercising the discrete-event processes:
 
   * **divisions** — a ``CellDivisions`` process fires cell divisions as a Poisson
     process (rate-based random times) on a plain **flat square sheet**
-    (``test_square.hf5``, ``SheetGeometry``), exactly the tissue used by the other
-    Experiments. There are no biological cell types here — every cell starts
-    ``"normal"``; a cell being actively grown toward division is highlighted
-    ``"dividing"`` (magenta). This just demonstrates that random divisions work.
-    Renders a colour-coded 2-D GIF + stills.
+    (``test_square.hf5``, ``SheetGeometry``). Every cell starts ``"normal"``; a cell
+    being actively grown toward division is flagged ``"dividing"``.
   * **deaths** — a ``CellDeaths`` process fires apoptotic extrusions as a Poisson
-    process on the same flat square, using the same ``apoptosis_extrusion``
-    behaviour the Gillespie process drives; a dying cell is highlighted
-    ``"extruding"`` (black). Colour-coded 2-D GIF + stills.
+    process on the same flat square; a dying cell is flagged ``"extruding"``.
   * **gillespie** — the full Gillespie biochemistry (``Gillespie`` process) on the
     3-D crypt cylinder (``crypt_cylinder.hf5``) exactly as in ``tests/tests.py`` /
-    ``Notebooks/simulation_walkthrough.ipynb`` (``tf=72``, ``dt=0.005``). Renders
-    the cell-type colour-coded 3-D GIF and three analyses:
-      1. distribution of cell types over time,
-      2. spatial distribution of cell types along z (crypt length),
-      3. spatial distribution of event types (division / differentiation /
-         extrusion) along z.
+    ``Notebooks/simulation_walkthrough.ipynb`` (``tf=72``, ``dt=0.005``).
 
-Everything generated lands under ``outputs/`` (input meshes under ``data/``), both
-git-ignored. Run from the repo's ``vivarium-tyssue`` conda env (needs ImageMagick
-``magick`` on PATH for GIF rendering):
+This script **only runs the simulations and archives their data**: each scenario's
+full-resolution (gillespie: capped, see ``GILL_ARCHIVE_FRAMES``) ``History`` to a
+compressed HDF5 file (``outputs/<scenario>/history.hf5``), plus — for gillespie —
+the emitted discrete events to ``outputs/gillespie/events.csv`` (events come from
+the process emitter, not the History, so they are saved separately).
+
+All visualisation (2-D / 3-D colour-coded GIFs and stills) and analysis (cell-type
+distributions over time and along z, event-type distribution along z) now live in
+the companion notebook ``discrete_events_analysis.ipynb``, which reopens the
+archives with ``tyssue``'s ``HistoryHdf5.from_archive``. Re-analyse without
+re-simulating, and re-simulate without disturbing previous analysis.
+
+Everything lands under ``outputs/`` (input meshes under ``data/``), both git-ignored.
+Run from the repo's ``vivarium-tyssue`` conda env:
 
     conda activate vivarium-tyssue
     cd Experiments/discrete_events
@@ -35,18 +36,11 @@ from __future__ import annotations
 
 import copy
 import shutil
-import subprocess
 import sys
-import tempfile
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.colors as mcolors
-from matplotlib.patches import Patch
 
 # ---------------------------------------------------------------------------
 # Paths / configuration
@@ -60,10 +54,6 @@ CRYPT_DATASET = "crypt_cylinder.hf5"    # gillespie (3-D crypt)
 
 COORDS_3D = ["x", "y", "z"]
 COORDS_2D = ["x", "y"]
-FIG_DPI = 300          # publication-quality raster resolution for stills / plots
-GIF_DPI = 120          # animations (kept lower — many frames)
-NUM_GIF_FRAMES = 120
-N_STILLS = 5
 SEED = 20260715
 
 # Discrete-event scenarios on the flat square (Poisson processes).
@@ -72,15 +62,18 @@ DIV_RATE, DIV_CRIT, DIV_GROWTH = 0.4, 2.0, 0.3           # CellDivisions
 DEATH_TF, DEATH_DT = 25.0, 0.05
 DEATH_RATE, DEATH_CRIT, DEATH_SHRINK = 0.4, 0.3, 0.3     # CellDeaths
 
-# Flat-sheet cell "states": a neutral background plus the two event highlights,
-# using the Gillespie dividing/extruding colours so the palette reads the same.
-FLAT_TYPE_COLORS = {"normal": "#CFCFCF", "dividing": "#C71FE0", "extruding": "#000000"}
-
 # Gillespie scenario (identical to tests.py / walkthrough).
 GILL_TF, GILL_DT = 72.0, 0.005
 
-Z_NBINS = 12       # event-type histogram along z
-Z_NBINS_CT = 48    # finer bins for the cell-type-along-z line plot
+# Archiving. The flat-sheet scenarios (~500 frames) are archived in full. The
+# gillespie crypt runs ~14400 solver steps, so its History is capped to a still-dense
+# subsample (the GIF only needs ~120 frames and the cell-type distributions stay
+# smooth). The discrete *events* are always saved in full (from the emitter). Set a
+# scenario's cap to ``None`` to keep every frame.
+FLAT_ARCHIVE_FRAMES: int | None = None
+GILL_ARCHIVE_FRAMES: int | None = 1500
+ARCHIVE_COMPLIB = "blosc:zstd"
+ARCHIVE_COMPLEVEL = 5
 
 
 # ---------------------------------------------------------------------------
@@ -102,9 +95,9 @@ def ensure_dataset(name: str) -> Path:
 # Specs
 # ---------------------------------------------------------------------------
 def flat_config(dataset_path: Path) -> dict:
-    """Plain flat square sheet (SheetGeometry / model_factory_bound), as used by
-    the other Experiments. Every cell starts ``cell_type="normal"`` so the division
-    / extrusion behaviours can flag the active cell for colour-coding."""
+    """Plain flat square sheet (SheetGeometry / model_factory_bound). Every cell
+    starts ``cell_type="normal"`` so the division / extrusion behaviours can flag the
+    active cell for colour-coding."""
     return {
         "name": "Flat Square",
         "eptm": str(dataset_path),
@@ -129,6 +122,7 @@ def flat_config(dataset_path: Path) -> dict:
         "auto_reconnect": True,
         "bounds": None,
         "output_columns": {},
+        "history_columns": {},
         "maps": {},
         # topology-mutating behaviours (division / extrusion) run safest on python.
         "backend": "python",
@@ -140,7 +134,7 @@ def flat_config(dataset_path: Path) -> dict:
 
 def crypt_config(dataset_path: Path) -> dict:
     """The crypt-cylinder EulerSolver config used by the Gillespie model
-    (VesselGeometry / model_factory_vessel, python backend)."""
+    (VesselGeometry / model_factory_vessel)."""
     return {
         "name": "Crypt Cylinder",
         "eptm": str(dataset_path),
@@ -169,6 +163,7 @@ def crypt_config(dataset_path: Path) -> dict:
         "auto_reconnect": True,
         "bounds": None,
         "output_columns": {},
+        "history_columns": {},
         "maps": {},
         # VesselGeometry + model_factory_vessel run on the rust compositional
         # gradient path (kernels.rust_model_gradient) with rust geometry — ~2x
@@ -319,320 +314,53 @@ def _collect_events(results) -> list:
 
 
 # ---------------------------------------------------------------------------
-# Drawing — 2-D flat sheet (divisions / deaths), faces by cell "state"
+# History archiving (compressed; optionally thinned)
 # ---------------------------------------------------------------------------
-def _flat_face_color(sheet):
-    """(Nf, 4) RGBA: normal cells grey, dividing magenta, dying/extruding black."""
-    return np.array([
-        mcolors.to_rgba(FLAT_TYPE_COLORS.get(ct, FLAT_TYPE_COLORS["normal"]))
-        for ct in sheet.face_df["cell_type"]
-    ])
+def _sanitize_for_hdf(df: pd.DataFrame) -> pd.DataFrame:
+    """Make an element dataframe serialisable by PyTables' table format.
 
-
-def _flat_legend_handles():
-    return [Patch(facecolor=FLAT_TYPE_COLORS[k], edgecolor="#808080", label=k)
-            for k in ("normal", "dividing", "extruding")]
-
-
-def _frame_limits(history, times, coords):
-    """Fixed (min, max) per-axis limits from the first frame, with a 5% margin."""
-    sheet0 = history.retrieve(times[0])
-    bounds = sheet0.vert_df[coords].describe().loc[["min", "max"]]
-    margin = (bounds.loc["max"] - bounds.loc["min"]).max() * 0.05
-    return {c: (bounds.loc["min", c] - margin, bounds.loc["max", c] + margin) for c in coords}
-
-
-def _draw_2d_frame(sheet, title, lims):
-    """Draw one flat-sheet frame (faces by cell state) into a matplotlib Axes.
-    Returns the Figure, or None if the frame can't be drawn."""
-    from tyssue.draw import sheet_view
-    try:
-        fig, ax = plt.subplots(figsize=(6.4, 5.0))
-        sheet_view(
-            sheet, coords=COORDS_2D, ax=ax,
-            face={"visible": True, "color": _flat_face_color(sheet), "alpha": 1.0},
-            edge={"visible": True, "color": "#808080", "width": 1.0},
-        )
-        ax.set_aspect("equal")
-        ax.set_xlim(*lims["x"])
-        ax.set_ylim(*lims["y"])
-        ax.set_title(title, fontsize=10)
-        ax.legend(handles=_flat_legend_handles(), loc="upper left",
-                  bbox_to_anchor=(1.01, 1.0), frameon=False, fontsize=8)
-    except Exception as exc:  # noqa: BLE001
-        print(f"frame {title} failed ({type(exc).__name__}: {exc}); skipping")
-        plt.close("all")
-        return None
-    return fig
-
-
-def save_gif_2d(history, out_path: Path):
-    times = list(history.time_stamps)
-    if not times:
-        return
-    lims = _frame_limits(history, times, COORDS_2D)
-    idx = np.unique(np.round(np.linspace(0, len(times) - 1,
-                                         min(NUM_GIF_FRAMES, len(times)))).astype(int))
-    tmp = Path(tempfile.mkdtemp())
-    n = 0
-    try:
-        for i in idx:
-            t = times[int(i)]
-            fig = _draw_2d_frame(history.retrieve(t), f"t = {float(t):.1f}", lims)
-            if fig is None:
-                continue
-            fig.savefig(tmp / f"frame_{n:04d}.png", dpi=GIF_DPI, bbox_inches="tight")
-            plt.close(fig)
-            n += 1
-        if n == 0:
-            print(f"no renderable frames for {out_path.name}; skipping GIF")
-            return
-        subprocess.run(["magick", "-delay", "12", "-loop", "0",
-                        (tmp / "frame_*.png").as_posix(), str(out_path)], check=True)
-        print(f"  wrote {out_path.name} ({n} frames)")
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-def save_stills_2d(history, out_dir: Path):
-    times = list(history.time_stamps)
-    if not times:
-        return
-    lims = _frame_limits(history, times, COORDS_2D)
-    for frac in np.linspace(0.0, 1.0, N_STILLS):
-        t = times[int(round(frac * (len(times) - 1)))]
-        fig = _draw_2d_frame(history.retrieve(t), f"t = {float(t):.1f}", lims)
-        if fig is None:
+    The crypt's ``cell`` element carries object-dtype columns whose contents are
+    plain integers (e.g. the ``cell`` index column); PyTables refuses to serialise
+    an object column that is neither all-string nor a real numeric dtype. Coerce each
+    object column to numeric where every non-null value converts, otherwise to str.
+    Non-object columns are left untouched, so already-clean archives are unchanged.
+    """
+    df = df.copy()
+    for c in df.columns:
+        if df[c].dtype != object:
             continue
-        fig.savefig(out_dir / f"still_t{float(t):06.1f}.png", dpi=FIG_DPI, bbox_inches="tight")
-        plt.close(fig)
+        conv = pd.to_numeric(df[c], errors="coerce")
+        notnull = df[c].notna()
+        if notnull.any() and (conv.notna() | ~notnull).all():
+            df[c] = conv            # genuinely numeric (ints/floats stored as object)
+        else:
+            df[c] = df[c].astype(str)   # strings (e.g. cell_type)
+    return df
 
 
-# ---------------------------------------------------------------------------
-# Drawing — 3-D crypt (gillespie), faces by cell_type
-#
-# We render every frame ourselves (rather than via tyssue.create_gif_3d) because
-# that helper calls savefig OUTSIDE its per-frame try/except, so a single frame
-# whose matplotlib-3D projection goes singular — which happens on the crypt after
-# a division/extrusion reindexes the mesh — aborts the whole GIF. Here each frame
-# is guarded, so a bad frame is skipped and the rest of the animation survives.
-# ---------------------------------------------------------------------------
-def _draw_3d_frame(sheet, lims, title, figsize=None):
-    """Draw one crypt frame (faces by cell_type) into a fresh matplotlib Axes3D,
-    the same path create_gif_3d uses per frame. Returns the Figure, or None."""
-    from tyssue import config
-    from tyssue.draw.plt_draw import sheet_view_3d, patch_2d_collections_to_3d
-    from vivarium_tyssue.draw import crypt_cell_type_kwds, CELL_TYPE_COLORS
+def save_history(history, path: Path, keep_frames: int | None):
+    """Archive ``history.datasets`` to a compressed HDF5 file (same per-element keys
+    as tyssue's ``History.to_archive`` so the notebook can reopen it with
+    ``HistoryHdf5.from_archive``). ``keep_frames`` optionally thins to that many
+    subsampled timepoints; ``None`` keeps the full history. The live history is not
+    mutated."""
+    datasets = history.datasets
+    times = np.array(list(history.time_stamps))
+    if keep_frames is not None and times.size > keep_frames:
+        idx = np.unique(np.round(np.linspace(0, times.size - 1, keep_frames)).astype(int))
+        keep = set(times[idx].tolist())
+        datasets = {k: df[df["time"].isin(keep)] for k, df in datasets.items()}
 
-    ds = config.draw.sheet_spec()
-    ds["face"]["visible"] = True
-    ds["face"]["alpha"] = 1.0
-    # Grey (not black) edges so the black "extruding" faces are distinguishable
-    # from the cell outlines — a black-on-black mesh hides dying cells entirely.
-    ds["edge"]["color"] = "#808080"
-    ds["face"]["color"] = crypt_cell_type_kwds(sheet)["face"]["color"]
-    try:
-        fig = plt.figure(figsize=figsize)
-        ax = fig.add_subplot(111, projection="3d")
-        ax.view_init(elev=30, azim=45)
-        fig, ax = sheet_view_3d(
-            sheet, coords=COORDS_3D, ax=ax,
-            legend=CELL_TYPE_COLORS, cull_back_edges=True, **ds,
-        )
-        patch_2d_collections_to_3d(ax)
-        ax.set(xlim=lims["x"], ylim=lims["y"], zlim=lims["z"])
-        ax.set_title(title, fontsize=9)
-        # Force the (occasionally singular) 3-D projection now, so a bad frame
-        # raises here inside the guard rather than later at savefig.
-        fig.canvas.draw()
-    except Exception as exc:  # noqa: BLE001
-        print(f"frame {title} failed ({type(exc).__name__}: {exc}); skipping")
-        plt.close("all")
-        return None
-    return fig
-
-
-def save_gif_3d(history, out_path: Path):
-    times = list(history.time_stamps)
-    if not times:
-        return
-    lims = _frame_limits(history, times, COORDS_3D)
-    idx = np.unique(np.round(np.linspace(0, len(times) - 1,
-                                         min(NUM_GIF_FRAMES, len(times)))).astype(int))
-    tmp = Path(tempfile.mkdtemp())
-    n = 0
-    try:
-        for i in idx:
-            t = times[int(i)]
-            fig = _draw_3d_frame(history.retrieve(t), lims, f"t = {float(t):.2f}", figsize=(5.0, 8.0))
-            if fig is None:
-                continue
-            fig.savefig(tmp / f"frame_{n:04d}.png", dpi=GIF_DPI)
-            plt.close(fig)
-            n += 1
-        if n == 0:
-            print(f"no renderable frames for {out_path.name}; skipping GIF")
-            return
-        subprocess.run(["magick", "-delay", "12", "-loop", "0",
-                        (tmp / "frame_*.png").as_posix(), str(out_path)], check=True)
-        print(f"  wrote {out_path.name} ({n} frames)")
-    finally:
-        shutil.rmtree(tmp, ignore_errors=True)
-
-
-def save_stills_3d(history, out_dir: Path):
-    times = list(history.time_stamps)
-    if not times:
-        return
-    lims = _frame_limits(history, times, COORDS_3D)
-    for frac in np.linspace(0.0, 1.0, N_STILLS):
-        t = times[int(round(frac * (len(times) - 1)))]
-        fig = _draw_3d_frame(history.retrieve(t), lims, f"t = {float(t):.2f}")
-        if fig is None:
-            continue
-        fig.savefig(out_dir / f"still_t{float(t):06.2f}.png", dpi=FIG_DPI, bbox_inches="tight")
-        plt.close(fig)
-
-
-# ---------------------------------------------------------------------------
-# Analysis (Gillespie)
-# ---------------------------------------------------------------------------
-BIO_TYPES = ["sc", "pc", "ent", "gc"]                          # true crypt cell types
-CELL_TYPE_ORDER = BIO_TYPES + ["dividing", "extruding"]        # + transient states
-
-
-def _type_palette():
-    from vivarium_tyssue.draw import CELL_TYPE_COLORS
-    return CELL_TYPE_COLORS
-
-
-def cell_type_over_time(history) -> pd.DataFrame:
-    """Count of each cell type at every recorded timepoint (wide: time × types)."""
-    face = history.datasets["face"]
-    df = face[face["is_alive"] > 0] if "is_alive" in face.columns else face
-    counts = df.groupby(["time", "cell_type"]).size().unstack(fill_value=0)
-    counts = counts.reindex(sorted(counts.index)).reset_index()
-    return counts
-
-
-def cell_type_along_z(history, nbins: int = Z_NBINS_CT) -> pd.DataFrame:
-    """Mean count of each cell type per z-bin, averaged over all timepoints
-    (long: zcenter, cell_type, count)."""
-    face = history.datasets["face"]
-    df = (face[face["is_alive"] > 0] if "is_alive" in face.columns else face).copy()
-    z = df["z"].astype(float)
-    bins = np.linspace(z.min(), z.max(), nbins + 1)
-    centers = 0.5 * (bins[:-1] + bins[1:])
-    df["zbin"] = pd.cut(z, bins, include_lowest=True, labels=centers)
-    n_frames = df["time"].nunique()
-    g = df.groupby(["zbin", "cell_type"], observed=True).size().reset_index(name="count")
-    g["count"] = g["count"] / max(n_frames, 1)          # per-frame mean occupancy
-    g["zcenter"] = g["zbin"].astype(float)
-    return g[["zcenter", "cell_type", "count"]]
-
-
-def events_along_z(history, events: list, nbins: int = Z_NBINS) -> pd.DataFrame:
-    """Count of each event type per z-bin. Each event's z is the mean z of its
-    cell (by unique_id) across the recorded history (long: zcenter, func, count)."""
-    face = history.datasets["face"]
-    z_by_uid = face.groupby("unique_id")["z"].mean()
-    z_all = face["z"].astype(float)
-    bins = np.linspace(z_all.min(), z_all.max(), nbins + 1)
-    centers = 0.5 * (bins[:-1] + bins[1:])
-
-    rows = []
-    for e in events:
-        uid = e["cell_uid"]
-        if uid is None or uid not in z_by_uid.index:
-            continue
-        rows.append({"func": e["func"], "z": float(z_by_uid.loc[uid])})
-    if not rows:
-        return pd.DataFrame(columns=["zcenter", "func", "count"])
-    edf = pd.DataFrame(rows)
-    edf["zbin"] = pd.cut(edf["z"], bins, include_lowest=True, labels=centers)
-    g = edf.groupby(["zbin", "func"], observed=True).size().reset_index(name="count")
-    g["zcenter"] = g["zbin"].astype(float)
-    return g[["zcenter", "func", "count"]]
-
-
-# ---------------------------------------------------------------------------
-# Analysis plots  (legends placed OUTSIDE the axes to avoid overlap)
-# ---------------------------------------------------------------------------
-def _legend_outside(ax, **kw):
-    ax.legend(loc="upper left", bbox_to_anchor=(1.01, 1.0), frameon=False, fontsize=8, **kw)
-
-
-def plot_cell_type_over_time(counts: pd.DataFrame, out_path: Path):
-    palette = _type_palette()
-    types = [c for c in CELL_TYPE_ORDER if c in counts.columns]
-    fig, ax = plt.subplots(figsize=(7.6, 4.2))
-    ax.stackplot(
-        counts["time"],
-        *[counts[t].to_numpy() for t in types],
-        labels=types,
-        colors=[palette.get(t, "#999999") for t in types],
-        alpha=0.9,
-    )
-    ax.set_xlabel("time")
-    ax.set_ylabel("cell count")
-    ax.set_title("Gillespie crypt: cell-type distribution over time", fontsize=11)
-    ax.margins(x=0)
-    _legend_outside(ax)
-    fig.savefig(out_path, dpi=FIG_DPI, bbox_inches="tight")
-    plt.close(fig)
-
-
-def plot_cell_type_along_z(g: pd.DataFrame, out_path: Path):
-    """One line per (biological) cell type: mean occupancy vs z."""
-    palette = _type_palette()
-    wide = g.pivot(index="zcenter", columns="cell_type", values="count").fillna(0.0).sort_index()
-    types = [c for c in BIO_TYPES if c in wide.columns]
-    fig, ax = plt.subplots(figsize=(7.6, 4.2))
-    z = wide.index.to_numpy()
-    for t in types:
-        ax.plot(z, wide[t].to_numpy(), "-", color=palette.get(t, "#999999"),
-                linewidth=1.8, label=t)
-    ax.set_xlabel("z position (crypt length)")
-    ax.set_ylabel("mean cells per z-bin")
-    ax.set_title("Gillespie crypt: cell-type spatial distribution along z", fontsize=11)
-    ax.margins(x=0)
-    ax.grid(True, alpha=0.25, linewidth=0.6)
-    _legend_outside(ax)
-    fig.savefig(out_path, dpi=FIG_DPI, bbox_inches="tight")
-    plt.close(fig)
-
-
-EVENT_LABELS = {
-    "division": "division",
-    "differentiation": "differentiation",
-    "apoptosis_extrusion": "extrusion (death)",
-}
-EVENT_COLORS = {
-    "division": "#C71FE0",
-    "differentiation": "#0072B2",
-    "apoptosis_extrusion": "#000000",
-}
-
-
-def plot_events_along_z(g: pd.DataFrame, out_path: Path):
-    fig, ax = plt.subplots(figsize=(7.6, 4.2))
-    if g.empty:
-        ax.text(0.5, 0.5, "no events recorded", ha="center", va="center", transform=ax.transAxes)
-    else:
-        wide = g.pivot(index="zcenter", columns="func", values="count").fillna(0.0).sort_index()
-        funcs = [f for f in EVENT_COLORS if f in wide.columns] + \
-                [f for f in wide.columns if f not in EVENT_COLORS]
-        z = wide.index.to_numpy()
-        width = (z[1] - z[0]) * 0.8 / max(len(funcs), 1) if len(z) > 1 else 0.5
-        for i, f in enumerate(funcs):
-            ax.bar(z + (i - (len(funcs) - 1) / 2) * width, wide[f].to_numpy(), width=width,
-                   color=EVENT_COLORS.get(f, "#999999"), label=EVENT_LABELS.get(f, f), alpha=0.9)
-        _legend_outside(ax)
-    ax.set_xlabel("z position (crypt length)")
-    ax.set_ylabel("event count")
-    ax.set_title("Gillespie crypt: event-type spatial distribution along z", fontsize=11)
-    fig.savefig(out_path, dpi=FIG_DPI, bbox_inches="tight")
-    plt.close(fig)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.exists():
+        path.unlink()
+    with pd.HDFStore(path, "a", complevel=ARCHIVE_COMPLEVEL, complib=ARCHIVE_COMPLIB) as store:
+        for key, df in datasets.items():
+            df = _sanitize_for_hdf(df)
+            kwargs = {"data_columns": ["time"]}
+            if "segment" in df.columns:
+                kwargs["min_itemsize"] = {"segment": 7}
+            store.append(key=key, value=df, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -644,9 +372,8 @@ def run_divisions(core):
     out.mkdir(parents=True, exist_ok=True)
     print(f"[divisions] flat square, tf={DIV_TF} dt={DIV_DT} rate={DIV_RATE} ...", flush=True)
     history, _ = run(core, build_divisions_spec(dataset), DIV_TF)
-    save_gif_2d(history, out / "divisions.gif")
-    save_stills_2d(history, out)
-    print("[divisions] done", flush=True)
+    save_history(history, out / "history.hf5", FLAT_ARCHIVE_FRAMES)
+    print(f"[divisions] archived {len(list(history.time_stamps))} frames -> {out / 'history.hf5'}", flush=True)
 
 
 def run_deaths(core):
@@ -655,35 +382,21 @@ def run_deaths(core):
     out.mkdir(parents=True, exist_ok=True)
     print(f"[deaths] flat square, tf={DEATH_TF} dt={DEATH_DT} rate={DEATH_RATE} ...", flush=True)
     history, _ = run(core, build_deaths_spec(dataset), DEATH_TF)
-    save_gif_2d(history, out / "deaths.gif")
-    save_stills_2d(history, out)
-    print("[deaths] done", flush=True)
+    save_history(history, out / "history.hf5", FLAT_ARCHIVE_FRAMES)
+    print(f"[deaths] archived {len(list(history.time_stamps))} frames -> {out / 'history.hf5'}", flush=True)
 
 
 def run_gillespie(core):
     dataset = ensure_dataset(CRYPT_DATASET)
     out = OUT_DIR / "gillespie"
     out.mkdir(parents=True, exist_ok=True)
-    print(f"[gillespie] crypt, tf={GILL_TF} dt={GILL_DT} (python) ...", flush=True)
+    print(f"[gillespie] crypt, tf={GILL_TF} dt={GILL_DT} ...", flush=True)
     history, events = run(core, build_gillespie_spec(dataset), GILL_TF, capture_behaviors=True)
     print(f"[gillespie] captured {len(events)} events", flush=True)
-    save_gif_3d(history, out / "gillespie.gif")
-    save_stills_3d(history, out)
-
-    counts = cell_type_over_time(history)
-    counts.to_csv(out / "cell_type_over_time.csv", index=False)
-    plot_cell_type_over_time(counts, out / "cell_type_over_time.png")
-
-    ctz = cell_type_along_z(history)
-    ctz.to_csv(out / "cell_type_along_z.csv", index=False)
-    plot_cell_type_along_z(ctz, out / "cell_type_along_z.png")
-
-    evz = events_along_z(history, events)
-    evz.to_csv(out / "events_along_z.csv", index=False)
-    plot_events_along_z(evz, out / "events_along_z.png")
-
+    save_history(history, out / "history.hf5", GILL_ARCHIVE_FRAMES)
     pd.DataFrame(events).to_csv(out / "events.csv", index=False)
-    print("[gillespie] done", flush=True)
+    print(f"[gillespie] archived {len(list(history.time_stamps))} frames -> {out / 'history.hf5'}", flush=True)
+    print(f"[gillespie] wrote {out / 'events.csv'}", flush=True)
 
 
 SCENARIOS = {"divisions": run_divisions, "deaths": run_deaths, "gillespie": run_gillespie}
@@ -705,7 +418,8 @@ def main():
     for name in todo:
         SCENARIOS[name](core)
 
-    print(f"\ndone — outputs under {OUT_DIR}")
+    print(f"\ndone — archives under {OUT_DIR}")
+    print("Run discrete_events_analysis.ipynb to visualise and analyse the scenarios.")
 
 
 if __name__ == "__main__":

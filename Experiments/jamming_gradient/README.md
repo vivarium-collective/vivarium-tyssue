@@ -16,22 +16,34 @@ line-tension fluctuations act on every edge.
 
 Both run on the **python** backend (`ActiveMigration` is not rust-supported).
 
+## Workflow — simulate, then analyse
+
+Simulation and analysis are split so you can **re-analyse without re-simulating**:
+
+1. **`jamming_gradient.py`** runs both scenarios and archives each one's `History`
+   to `outputs/<jamming|gradient>/history.hf5` (compressed HDF5). No figures.
+2. **`jamming_gradient_analysis.ipynb`** reopens those archives
+   (`HistoryHdf5.from_archive`) and produces all GIFs, stills, traces and plots.
+
 ## Outputs (git-ignored)
+
+`history.hf5` is written by `jamming_gradient.py`; everything else by
+`jamming_gradient_analysis.ipynb`.
 
 ```
 outputs/
   jamming/
+    history.hf5                    # <- simulation (archived History)
     jamming.gif                    # faces by prefered_perimeter, migrating cell highlighted
     still_t*.png                   # snapshots across the run
-    history.hf5                    # archived (thinned) simulation data
     migrating_trace.csv
     migrating_displacement.png     # displacement vs time + dotted jamming-transition line
     circularity_over_time.png      # mean cell circularity (4πA/P²) over time + jamming line
     circularity_over_time.csv
   gradient/
+    history.hf5                    # <- simulation (archived History)
     gradient.gif
     still_t*.png
-    history.hf5
     migrating_trace.csv
     migrating_displacement.png     # displacement vs time
     migrating_velocity_vs_x.png    # instantaneous velocity vs x-position
@@ -45,10 +57,12 @@ outputs/
 ```bash
 conda activate vivarium-tyssue
 cd Experiments/jamming_gradient
-python jamming_gradient.py
+
+python jamming_gradient.py                     # 1) simulate -> outputs/*/history.hf5
+jupyter lab jamming_gradient_analysis.ipynb    # 2) analyse & visualise (Run All)
 ```
 
-Requires ImageMagick (`magick`) on PATH for GIF rendering. Nothing under `data/`
-or `outputs/` is tracked by git — re-running the script regenerates everything.
-`tf`/`dt` and the other constants are fixed at the top of `jamming_gradient.py` to
-match the notebook.
+The notebook requires ImageMagick (`magick`) on PATH for GIF rendering. Nothing
+under `data/` or `outputs/` is tracked by git — re-running regenerates everything.
+`tf`/`dt` and the archive frame cap are set at the top of `jamming_gradient.py`
+(fixed to match the notebook specs); plot styling lives in the analysis notebook.
