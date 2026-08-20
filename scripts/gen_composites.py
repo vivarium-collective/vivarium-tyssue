@@ -118,7 +118,7 @@ def tyssue_node(config, interval=INTERVAL):
         "config": config,
         "inputs": {"behaviors": ["Behaviors"], "global_time": ["global_time"]},
         "outputs": {
-            "datasets": ["Datasets"],
+            "datasets": ["Tissue State"],
             "network_changed": ["Network Changed"],
             "behaviors_update": ["Behaviors"],
         },
@@ -140,7 +140,7 @@ def write(name, *, description, tags, processes, state, parameters=None):
         # emitter_defaults / install_default_emitters): ship every tyssue composite
         # with the DataFrameParquetEmitter sink instead of relying on the dashboard's
         # RAM/SQLite injection. tyssue's per-tick observables are whole pandas
-        # DataFrames (Datasets/{vert,face,edge,cell}_df) — the JSON SQLiteEmitter
+        # DataFrames (Tissue State/{vert,face,edge,cell}_df) — the JSON SQLiteEmitter
         # chokes on their numpy.int64 keys and the generic ParquetEmitter can't write
         # the Object columns; DataFrameParquetEmitter streams each as a long Arrow
         # table. The runner layers a per-run out_dir + experiment_id partition over
@@ -150,8 +150,8 @@ def write(name, *, description, tags, processes, state, parameters=None):
             "config": {"out_dir": "out/parquet"},
             # The four tyssue dataframe stores. cell_df is absent/empty on plain
             # Sheets — the emitter simply skips empty/non-DataFrame ports.
-            "paths": ["Datasets/vert_df", "Datasets/face_df",
-                      "Datasets/edge_df", "Datasets/cell_df"],
+            "paths": ["Tissue State/vert_df", "Tissue State/face_df",
+                      "Tissue State/edge_df", "Tissue State/cell_df"],
         }],
         "parameters": parameters or {
             "interval": {"type": "float", "default": 0.1, "description": "Emit / update interval. Solver dt = interval / substeps."},
@@ -190,7 +190,7 @@ write(
             "_type": "process",
             "address": "local:CellDivisions",
             "config": {"rate": 0.4, "geom": "VesselGeometry", "crit_area": 2.0, "growth_rate": 0.2},
-            "inputs": {"global_time": ["global_time"], "datasets": ["Datasets"]},
+            "inputs": {"global_time": ["global_time"], "datasets": ["Tissue State"]},
             "outputs": {"behaviors": ["Behaviors"]},
             "interval": INTERVAL,
         },
@@ -204,7 +204,7 @@ def stochastic_node():
         "_type": "process",
         "address": "local:StochasticLineTension",
         "config": {"tau": 0.2, "sigma": 0.1},
-        "inputs": {"datasets": ["Datasets"]},
+        "inputs": {"datasets": ["Tissue State"]},
         "outputs": {"behaviors": ["Behaviors"]},
         "interval": INTERVAL,
     }
@@ -233,7 +233,7 @@ write(
             "_type": "process",
             "address": "local:CellJamming",
             "config": {"trigger_time": 100.0, "rate": -0.05, "limits": [3.0, 4.2]},
-            "inputs": {"global_time": ["global_time"], "datasets": ["Datasets"]},
+            "inputs": {"global_time": ["global_time"], "datasets": ["Tissue State"]},
             "outputs": {"behaviors": ["Behaviors"]},
             "interval": INTERVAL,
         },
@@ -264,7 +264,7 @@ write(
                 "args": {"m": -0.1, "c": 4.6},
                 "model_parameters": {"prefered_perimeter": "face"},
             },
-            "inputs": {"datasets": ["Datasets"]},
+            "inputs": {"datasets": ["Tissue State"]},
             "outputs": {"behaviors": ["Behaviors"]},
         },
         **base_stores(),
@@ -288,7 +288,7 @@ write(
             "_type": "step",
             "address": "local:AnisotropicTension",
             "config": {"axes": ["x", "y"], "tension_values": [0.0, 0.2]},
-            "inputs": {"datasets": ["Datasets"]},
+            "inputs": {"datasets": ["Tissue State"]},
             "outputs": {"behaviors": ["Behaviors"]},
         },
         **base_stores(),
@@ -354,7 +354,7 @@ write(
             "_type": "process",
             "address": "local:Gillespie",
             "config": gillespie_config_block,
-            "inputs": {"datasets": ["Datasets"], "behaviors": ["Behaviors"], "global_time": ["global_time"]},
+            "inputs": {"datasets": ["Tissue State"], "behaviors": ["Behaviors"], "global_time": ["global_time"]},
             "outputs": {"behaviors": ["Behaviors"], "gillespie_trigger": ["Gillespie Trigger"]},
             "interval": INTERVAL,
         },

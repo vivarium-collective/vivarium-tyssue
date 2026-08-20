@@ -125,7 +125,7 @@ def get_test_spec(interval=0.1, config=None):
                 "global_time": ["global_time"],
             },
             "outputs": {
-                "datasets": ["Datasets"],
+                "datasets": ["Tissue State"],
                 "network_changed": ["Network Changed"],
                 "behaviors_update": ["Behaviors"],
             },
@@ -139,9 +139,9 @@ def run_test_solver(core, config=None, tf=20, df = 0.1):
     spec = get_test_spec(interval=df, config=config)
     spec["emitter"] = emitter_from_wires({
         "global_time": ["global_time"],
-        "face_df": ["Datasets", "face_df"],
-        "edge_df": ["Datasets", "edge_df"],
-        "vert_df": ["Datasets", "vert_df"],
+        "face_df": ["Tissue State", "face_df"],
+        "edge_df": ["Tissue State", "edge_df"],
+        "vert_df": ["Tissue State", "vert_df"],
     })
     sim = Composite(
         {
@@ -168,7 +168,7 @@ def get_test_regulation_spec(interval=0.1, config=None, double=False):
         },
         "inputs": {
             "global_time": ["global_time"],
-            "datasets": ["Datasets"],
+            "datasets": ["Tissue State"],
         },
         "outputs": {
             "behaviors": ["Behaviors"],
@@ -210,7 +210,7 @@ def get_test_stochastic_spec(interval=0.1, config = None, tau=1.0, sigma=1.0):
             "sigma": sigma,
         },
         "inputs": {
-            "datasets": ["Datasets"],
+            "datasets": ["Tissue State"],
         },
         "outputs": {
             "behaviors": ["Behaviors"],
@@ -253,7 +253,7 @@ def get_test_jamming_spec(interval = 0.1, config=None, tau=1.0, sigma=1.0):
         },
         "inputs": {
             "global_time": ["global_time"],
-            "datasets": ["Datasets"],
+            "datasets": ["Tissue State"],
         },
         "outputs": {
             "behaviors": ["Behaviors"],
@@ -282,7 +282,7 @@ def get_test_gradient_spec(interval=0.1, config=None, tau=1.0, sigma=1.0):
             }
         },
         "inputs": {
-            "datasets": ["Datasets"],
+            "datasets": ["Tissue State"],
         },
         "outputs": {
             "behaviors": ["Behaviors"],
@@ -292,9 +292,9 @@ def get_test_gradient_spec(interval=0.1, config=None, tau=1.0, sigma=1.0):
 
 test_emitter = emitter_from_wires({
         "global_time": ["global_time"],
-        "face_df": ["Datasets", "face_df"],
-        "edge_df": ["Datasets", "edge_df"],
-        "vert_df": ["Datasets", "vert_df"],
+        "face_df": ["Tissue State", "face_df"],
+        "edge_df": ["Tissue State", "edge_df"],
+        "vert_df": ["Tissue State", "vert_df"],
         "behaviors": ["Behaviors"],
 })
 
@@ -327,7 +327,7 @@ def get_test_anisotropic_spec(interval=0.1, config=None):
             "tension_values": [0, 0.2]
         },
         "inputs": {
-            "datasets": ["Datasets"],
+            "datasets": ["Tissue State"],
         },
         "outputs": {
             "behaviors": ["Behaviors"],
@@ -379,7 +379,7 @@ def base_gillespie_spec(interval=0.1):
         "address": "local:Gillespie",
         "config": get_test_gillespie_config(),
         "inputs": {
-            "datasets": ["Datasets"],
+            "datasets": ["Tissue State"],
             "behaviors": ["Behaviors"],
             "global_time": ["global_time"]
         },
@@ -462,10 +462,9 @@ TUMOR_DEATH_FLUXES = {
     "stem": "Removal of stem cell from the system",
 }
 # Convert SBML fluxes (O(1e3-1e7)) into mesh events: an event fires when
-# flux * scale * interval accumulates past 1.0. ALL scales halved (2026-07-20) —
-# births AND deaths together, so the birth:death balance holds (the tumor still
-# grows) while the discrete-event RATE halves: ~half as many, better-spaced
-# divisions per unit time. Run longer to compensate.
+# flux * scale * interval accumulates past 1.0. Births and deaths are scaled
+# together so their ratio sets the net tumor growth while the overall magnitude
+# sets how often divisions fire.
 TUMOR_SCALES = {
     "tumor_births": 1.0e-6, "tumor_deaths": 4.0e-7,
     "healthy_births": 3.0e-8, "healthy_deaths": 6.0e-8,
@@ -591,7 +590,7 @@ def get_test_tumor_spec(
             "topology_ops": topology_ops,
         },
         "inputs": {
-            "datasets": ["Datasets"],
+            "datasets": ["Tissue State"],
             "global_time": ["global_time"],
         },
         "outputs": {"behaviors": ["Behaviors"]},
@@ -612,7 +611,7 @@ def run_test_tumor(core, config=None, tf=60, dt=0.01, **kwargs):
     spec = get_test_tumor_spec(interval=dt, config=config, **kwargs)
     spec["emitter"] = emitter_from_wires({
         "global_time": ["global_time"],
-        "face_df": ["Datasets", "face_df"],
+        "face_df": ["Tissue State", "face_df"],
         "behaviors": ["Behaviors"],
     })
     sim = Composite({"state": spec}, core=core)

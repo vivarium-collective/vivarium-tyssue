@@ -4,6 +4,7 @@ import numpy as np
 from process_bigraph import Process, Step
 
 from vivarium_tyssue.maps import *
+from vivarium_tyssue.behaviors.behaviors import DEATH_FLOOR
 
 from tyssue import config
 
@@ -122,6 +123,13 @@ class CellDeaths(Process):
         "geom": "string",
         "shrink_rate": "float",
         "crit_area": "float",
+        # Floor on the shrinking prefered_area that removes a cell regardless of
+        # crit_area (see behaviors.DEATH_FLOOR). On a relaxed sheet the default
+        # fires first; lower it below crit_area to let crit_area govern.
+        "death_floor": {"_type": "float", "default": DEATH_FLOOR},
+        # Constrict a dying cell's prefered_perimeter along with its prefered_area.
+        # Off by default; required for a small crit_area to be reachable at all.
+        "contract_perimeter": {"_type": "boolean", "default": False},
     }
 
     def initialize(self, config):
@@ -161,6 +169,8 @@ class CellDeaths(Process):
             "geom": self.config["geom"],
             "crit_area": self.config["crit_area"],
             "shrink_rate": self.config["shrink_rate"],
+            "death_floor": self.config["death_floor"],
+            "contract_perimeter": self.config["contract_perimeter"],
             "dt": interval,
         }
         update = [{**base, "cell_uid": int(faces.loc[idx, "unique_id"])} for idx in chosen]

@@ -19,10 +19,10 @@ emitters:
   config:
     out_dir: out/parquet
   paths:
-  - Datasets/vert_df
-  - Datasets/face_df
-  - Datasets/edge_df
-  - Datasets/cell_df
+  - Tissue State/vert_df
+  - Tissue State/face_df
+  - Tissue State/edge_df
+  - Tissue State/cell_df
 parameters:
   interval:
     type: float
@@ -287,7 +287,7 @@ state:
       - global_time
     outputs:
       datasets:
-      - Datasets
+      - Tissue State
       network_changed:
       - Network Changed
       behaviors_update:
@@ -301,7 +301,7 @@ state:
       sigma: 0.1
     inputs:
       datasets:
-      - Datasets
+      - Tissue State
     outputs:
       behaviors:
       - Behaviors
@@ -319,7 +319,7 @@ state:
         prefered_perimeter: face
     inputs:
       datasets:
-      - Datasets
+      - Tissue State
     outputs:
       behaviors:
       - Behaviors

@@ -123,11 +123,12 @@ def _load_frames(runs_db_path: str | None, source: str | None = None) -> list[di
 def _extract_datasets(state: dict) -> dict:
     """Find the tyssue datasets store within an emitted state dict.
 
-    The emitter may nest the datasets under a store name ("Datasets"/"datasets")
-    or splat the dataframes at the top level. Handle all three shapes.
+    The emitter may nest the datasets under a store name ("Tissue State", or the
+    store's former names "Datasets"/"datasets") or splat the dataframes at the top
+    level. Handle all three shapes.
     """
     df_keys = ("vert_df", "edge_df", "face_df", "cell_df")
-    for store in ("Datasets", "datasets"):
+    for store in ("Tissue State", "Datasets", "datasets"):
         node = state.get(store)
         if isinstance(node, dict) and any(k in node for k in df_keys):
             return {k: node[k] for k in df_keys if k in node and node[k]}
@@ -442,7 +443,7 @@ class TissueSheetGif(Visualization):
         if not frames:
             return _empty_html(
                 "no tissue datasets found in runs.db (the run must emit the "
-                "Datasets store: vert_df / edge_df / face_df)."
+                "Tissue State store: vert_df / edge_df / face_df)."
             )
         coords = list(cfg.get("coords") or ["x", "z"])
         num_frames = int(cfg.get("num_frames") or 60)
@@ -505,7 +506,7 @@ class TissueCryptGif3D(Visualization):
         if not frames:
             return _empty_html(
                 "no tissue datasets found in runs.db (the gillespie run must "
-                "emit the Datasets store with a cell_type column on face_df)."
+                "emit the Tissue State store with a cell_type column on face_df)."
             )
         coords = list(cfg.get("coords") or ["x", "y", "z"])
         num_frames = int(cfg.get("num_frames") or 100)

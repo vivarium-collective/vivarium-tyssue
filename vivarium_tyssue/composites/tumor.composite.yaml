@@ -82,7 +82,7 @@ state:
       - global_time
     outputs:
       datasets:
-      - Datasets
+      - Tissue State
       network_changed:
       - Network Changed
       behaviors_update:
@@ -140,7 +140,7 @@ state:
       topology_ops: true
     inputs:
       datasets:
-      - Datasets
+      - Tissue State
       global_time:
       - global_time
     outputs:

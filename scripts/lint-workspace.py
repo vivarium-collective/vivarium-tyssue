@@ -310,10 +310,9 @@ def main() -> None:
     study_names: list[str] = []
     study_statuses: list[str] = []
     study_warnings: list[str] = []
-    # F-friction #6: keep a separate count of studies that fail dashboard
-    # load so the summary line can swap ✓ for ✗ when any fail. Without this,
-    # the summary said `dashboard ✓` while WARN lines underneath said
-    # `fails dashboard load`. Headline + body must agree.
+    # Counted separately so the summary headline can swap ✓ for ✗ when any study
+    # fails dashboard load — it must agree with the WARN lines underneath
+    # (F-friction #6).
     n_studies_failed_dashboard = 0
 
     for study_yaml_path in sorted((_dir("studies")).glob("*/study.yaml")):
@@ -361,11 +360,9 @@ def main() -> None:
     status_counts = Counter(study_statuses)
     status_summary = ", ".join(f"{v} {k}" for k, v in sorted(status_counts.items()))
 
-    # Enumerate investigations (added 2026-05-18 per mem3dg-readdy friction §8 —
-    # "Lint summary doesn't mention investigations". Investigations are lighter
-    # than studies — typically just name, title, studies[] — but they're the
-    # first artifact a workspace promotion lands, so the lint summary should
-    # confirm they exist + parse.)
+    # Investigations are lighter than studies — typically just name, title,
+    # studies[] — but they're the first artifact a workspace promotion lands, so
+    # the summary confirms they exist and parse (mem3dg-readdy friction §8).
     inv_schema_path = _dir("pbg") / "schemas" / "investigation.schema.json"
     inv_schema: dict | None = None
     if inv_schema_path.exists():
@@ -403,10 +400,8 @@ def main() -> None:
                 except Exception as ve:
                     inv_warnings.append(f"  WARN investigation {i_name}: {ve}")
 
-            # Cross-reference check (mem3dg-readdy friction #18 — "Investigations
-            # don't validate that their study slugs exist"). Without this, an
-            # investigation seeded with `studies: [fixed-boundary, ...]` against
-            # an empty studies/ dir passes lint and 404s in the dashboard.
+            # An investigation referencing a study slug with no directory on disk
+            # passes lint but 404s in the dashboard (mem3dg-readdy friction #18).
             referenced_slugs: set[str] = set()
             for slug in (inv_data.get("studies") or []):
                 if isinstance(slug, str):
@@ -450,11 +445,9 @@ def main() -> None:
         except Exception:
             pass
 
-    # v2ecoli friction #2: `_type: 'any'` is not a registered bigraph-schema
-    # type; it slips through inline python composite builds but explodes
-    # inside the subprocess runner with "schema is not found". Surface
-    # any literal use as an advisory warning — the fix is to switch to
-    # `'node'` (the registered alias for "untyped node").
+    # `_type: 'any'` is not a registered bigraph-schema type: it slips through
+    # inline python composite builds but explodes inside the subprocess runner.
+    # Advisory only — see the warning text below.
     any_type_warnings: list[str] = []
     pkg_path = ws.get("package_path")
     if pkg_path:
@@ -482,10 +475,6 @@ def main() -> None:
     if n_studies > 3:
         study_names_preview += f", ... (+{n_studies - 3} more)"
 
-    # Build study validation label. F-friction #6: when any study fails
-    # dashboard load, the summary must say ✗ — the WARN lines underneath
-    # already say "fails dashboard load", and the headline contradicting
-    # them is exactly the bug.
     schema_check = "schema ✓" if study_schema is not None else "schema skipped"
     if not _dashboard_importable:
         dashboard_check = "dashboard skipped — install vivarium-workbench"

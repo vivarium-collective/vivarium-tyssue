@@ -139,7 +139,7 @@ observables:
     tissue growth (absolute healthy count barely falls when the sheet is proliferating)
 # readouts[].store_path is what the run handler emits to runs.db (via
 # collect_emit_paths_from_spec). The scalar stores feed TimeSeriesFromObservables;
-# the Datasets/* dataframes feed the snapshots + gif (which read vert/edge/face).
+# the Tissue State/* dataframes feed the snapshots + gif (which read vert/edge/face).
 readouts:
 - {name: tumor_births,   store_path: tumor_births,   units: events/step}
 - {name: healthy_births, store_path: healthy_births, units: events/step}
@@ -154,7 +154,7 @@ readouts:
 - {name: total_count,    store_path: total_count,    units: cells}
 - {name: healthy_fraction, store_path: healthy_fraction, units: fraction}
 # The mesh dataframes (vert_df/edge_df/face_df/cell_df) are emitted to runs.db
-# Datasets/* and consumed by the TissueSheetGif/Snapshots viz directly; they are
+# Tissue State/* and consumed by the TissueSheetGif/Snapshots viz directly; they are
 # whole-DataFrame stores, not canonical scalar selectors, so they are not listed
 # as readouts (which are evaluable observables for behavior_tests).
 visualizations:

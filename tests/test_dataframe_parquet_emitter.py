@@ -35,8 +35,8 @@ def test_flush_handles_mixed_string_and_large_string(tmp_path):
     f1 = _frame(["", "", ""], pd.ArrowDtype(pa.large_string()))
     f2 = _frame(["sc", "", "pc"], pd.ArrowDtype(pa.string()))
 
-    emitter.update({"global_time": 0.0, "Datasets_face_df": f1})
-    emitter.update({"global_time": 0.005, "Datasets_face_df": f2})
+    emitter.update({"global_time": 0.0, "Tissue State_face_df": f1})
+    emitter.update({"global_time": 0.005, "Tissue State_face_df": f2})
     emitter.close()  # flushes the trailing buffer — must not raise ArrowTypeError
 
     files = list(tmp_path.rglob("*.pq"))

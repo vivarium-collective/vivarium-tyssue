@@ -206,9 +206,8 @@ class TumorCoupling(Process):
 
     # -- behavior dict builders (shapes match gillespie.py / behaviors.py) --
     # The grower applies prefered_area *= (1 + dt*rate) ONCE PER SOLVER STEP, so dt
-    # must be the actual step interval for growth_rate/shrink_rate to be true
-    # per-tyssue-time rates (not self.dt=1.0, which inflated a cell ~100x too fast
-    # at interval 0.01 and outran mechanical relaxation).
+    # must be the actual step interval (not self.dt) for growth_rate/shrink_rate to
+    # be true per-tyssue-time rates.
     def _divide(self, uid, cell_type):
         # 3D monolayer / bulk: grow prefered_vol to a critical VOLUME and split with
         # a randomized orientation (division_3d). 2D sheet: the area-threshold path.
@@ -271,13 +270,13 @@ class TumorCoupling(Process):
         # --- Seeding step: convert the initial focus, then return. ---
         if not self._seeded:
             self._seeded = True
-            # Tumor focus is seeded at the sheet centre (a single compact patch that
-            # grows outward); stem (if any) is seeded at random.
+            # Seed a compact central focus (tumor and/or cancer stem cells) that grows
+            # outward. Both types are placed at the tissue centre.
             for healthy_uid in select_central_uids(face_df, "healthy", int(self.seed.get("tumor", 0)),
                                                    exclude=used, rng_pick=self._pick):
                 behaviors.append(self._differentiate(healthy_uid, "tumor")); used.add(healthy_uid)
-            for healthy_uid in select_uids(face_df, "healthy", int(self.seed.get("stem", 0)),
-                                           exclude=used, rng_pick=self._pick):
+            for healthy_uid in select_central_uids(face_df, "healthy", int(self.seed.get("stem", 0)),
+                                                   exclude=used, rng_pick=self._pick):
                 behaviors.append(self._differentiate(healthy_uid, "stem")); used.add(healthy_uid)
             counts = self._counts(face_df)
             return self._result(behaviors, fired, counts)
@@ -326,18 +325,21 @@ class TumorCoupling(Process):
                     fired[f"{t}_deaths"] += 1
 
     def _emit_topology(self, face_df, births, deaths, behaviors, used, fired):
-        """Real vertex-model ops (topology_ops=true): births split a cell
-        (cell_division), deaths extrude it (remove_face). Tumor birth prefers
-        differentiating a free stem cell (C->T). Requires a pandas-3-compatible
+        """Real vertex-model ops (topology_ops=true): a birth divides a cell of that
+        type (cell_division), a death extrudes one (remove_face). The bulk tumor
+        grows by dividing tumor cells; when no tumor cell exists yet, a seeded cancer
+        stem cell commits to tumor (C->T differentiation) to start the clone. Cancer
+        stem cells self-renew through their own births. Requires a pandas-3-compatible
         tyssue."""
         for t in _TYPES:
             for _ in range(births[t]):
-                if t == "tumor":
+                pick = select_uids(face_df, t, 1, exclude=used, rng_pick=self._pick)
+                if not pick and t == "tumor":
                     stem = select_uids(face_df, "stem", 1, exclude=used, rng_pick=self._pick)
                     if stem:
                         behaviors.append(self._differentiate(stem[0], "tumor")); used.add(stem[0])
-                        fired["tumor_births"] += 1; continue
-                pick = select_uids(face_df, t, 1, exclude=used, rng_pick=self._pick)
+                        fired["tumor_births"] += 1
+                    continue
                 if pick:
                     behaviors.append(self._divide(pick[0], t)); used.add(pick[0])
                     fired[f"{t}_births"] += 1

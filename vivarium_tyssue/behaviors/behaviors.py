@@ -3,6 +3,12 @@ import numpy as np
 from tyssue.topology.sheet_topology import cell_division, remove_face
 from tyssue.topology.monolayer_topology import cell_division as monolayer_cell_division
 from vivarium_tyssue.core_maps import GEOMETRY_MAP
+# Repairs the duplicate unique_ids tyssue's clone-a-row topology helpers leave
+# behind; see that module's docstring for why every division / extrusion needs it.
+from vivarium_tyssue.behaviors.unique_ids import (  # noqa: F401  (re-exported)
+    refresh_unique_ids,
+    reserve_uids as _reserve_uids,
+)
 
 # Install the tyssue topology robustness shims (drop_two_sided_faces /
 # split_vert guards) as soon as any behavior is imported — cell_division and
@@ -76,25 +82,33 @@ def divide_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
     if radius is None:
         radius = (sheet.vert_df["x"].max() - sheet.vert_df["x"].min())/2
     daughter = cell_division(sheet, cell_idx, geom)
+    refresh_unique_ids(sheet)   # daughter face + new verts/edges clone the mother's ids
     fix_points_cylinder(sheet, radius=radius)
     return daughter
 
 # ---------------------------------------------------------------------------
 # Batched grow/shrink of committed cells
 #
-# division() / apoptosis_extrusion() used to re-run one manager callback per
-# committed cell every step just to scale a single ``prefered_area`` scalar —
-# tens of thousands of pandas .loc calls dominating the crypt profile. Instead a
-# commit records the cell's *own* growth parameters (which still arrive per-cell
-# from whatever external process emitted the behavior) into transient per-face
+# A commit records the cell's *own* growth parameters (which arrive per-cell from
+# whatever external process emitted the behavior) into transient per-face
 # ``commit_*`` columns, and a single batched grower (queued once) does the whole
 # grow/shrink in one vectorized pass, firing the real topology op only for the
-# cells that crossed their own threshold. The rates stay a property of the
-# emitted behavior — nothing moves onto the sheet settings or the solver config.
+# cells that crossed their own threshold. One callback per step total, rather
+# than one per committed cell — the per-cell form cost tens of thousands of
+# pandas .loc calls and dominated the crypt profile.
 # ---------------------------------------------------------------------------
 
+# Fallback floor on a dying cell's shrinking ``prefered_area``: once the death target
+# collapses past it the cell is removed even if its actual area never reached
+# ``crit_area``. Needed where extruding cells stay mechanically stretched (the crypt's
+# free top rim). Per-commitment overridable via ``apoptosis_extrusion(death_floor=...)``
+# — set it low to hand control back to ``crit_area``.
+DEATH_FLOOR = 0.5
+
 # commit_state: 0 = not committed, 1 = dividing, 2 = extruding.
-_COMMIT_DEFAULTS = {"commit_state": 0.0, "commit_rate": 0.0, "commit_crit": 0.0, "commit_dt": 0.0}
+_COMMIT_DEFAULTS = {"commit_state": 0.0, "commit_rate": 0.0, "commit_crit": 0.0,
+                    "commit_dt": 0.0, "commit_floor": DEATH_FLOOR,
+                    "commit_contract": 0.0}
 _GROWER_NAME = "_grow_committed_cells"
 
 
@@ -129,9 +143,8 @@ def _clear_commit(sheet, idx, restore_type=None):
 
 
 def _do_division(sheet, geometry, cell_uid):
-    """Actual split of a division-ready cell (identical topology handling to the
-    former in-callback path), then restore its target cell_type and clear the
-    commit flags on both mother and daughter."""
+    """Split a division-ready cell, then restore its target cell_type and clear
+    the commit flags on both mother and daughter."""
     cell_id = face_index_for(sheet, cell_uid)
     if cell_id is None:
         return
@@ -139,6 +152,9 @@ def _do_division(sheet, geometry, cell_uid):
     target_type = sheet.face_df.loc[cell_id, "commit_type"]
     sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
     daughter = cell_division(sheet, cell_id, geometry)
+    # Before reset_index, while the clones are still the appended tail: the mother
+    # keeps cell_uid, the daughter face and the new verts/edges get fresh ids.
+    refresh_unique_ids(sheet)
     sheet.reset_index(order=True)
     geometry.update_all(sheet)
     sheet.network_changed = True
@@ -149,8 +165,7 @@ def _do_division(sheet, geometry, cell_uid):
 
 
 def _do_extrusion(sheet, geometry, cell_uid):
-    """Actual removal of an extrusion-ready cell (identical topology handling to
-    the former in-callback path)."""
+    """Remove an extrusion-ready cell from the mesh."""
     cell_id = face_index_for(sheet, cell_uid)
     if cell_id is None:
         return
@@ -165,6 +180,10 @@ def _do_extrusion(sheet, geometry, cell_uid):
         if cid is not None:
             _clear_commit(sheet, int(cid))
         return
+    # remove_face's replacement centroid vertex clones one of the collapsed
+    # vertices (which it then drops, so usually no duplicate survives) — but
+    # drop_two_sided_faces can also run here, so repair defensively.
+    refresh_unique_ids(sheet)
     sheet.reset_index(order=True)
     _drop_isolated_verts(sheet)
     # Project vertices back onto the cylinder surface BEFORE updating geometry
@@ -202,15 +221,29 @@ def _grow_committed_cells(sheet, manager, geom="SheetGeometry"):
     prefered[ext_mask] *= (1.0 - dt[ext_mask] * rate[ext_mask])
     fd["prefered_area"] = prefered
 
+    # Apoptotic constriction (opt-in per commitment): contract the dying cell's target
+    # perimeter at the same rate. A cell still holding its full prefered_perimeter
+    # cannot shrink far — on a flat square at P_0 = 3.6 its actual area plateaus
+    # around 0.35 however small the area target gets — so without this a small
+    # crit_area is simply unreachable and only the death floor can remove the cell.
+    if "prefered_perimeter" in fd.columns and "commit_contract" in fd.columns:
+        contract = ext_mask & (fd["commit_contract"].to_numpy(dtype=float) > 0.0)
+        if contract.any():
+            perim = fd["prefered_perimeter"].to_numpy(dtype=float).copy()
+            perim[contract] *= (1.0 - dt[contract] * rate[contract])
+            fd["prefered_perimeter"] = perim
+
     # Threshold crossers -> real topology ops (resolved by unique_id, since each
     # op reindexes face_df). Division on area>crit; extrusion once the actual
     # area falls below crit OR the death target (prefered_area) has collapsed.
     area = fd["area"].to_numpy(dtype=float)
     crit = fd["commit_crit"].to_numpy(dtype=float)
-    DEATH_FLOOR = 0.5
+    floor = (fd["commit_floor"].to_numpy(dtype=float)
+             if "commit_floor" in fd.columns
+             else np.full(len(fd), DEATH_FLOOR))
     uid = fd["unique_id"].to_numpy()
     div_ready = uid[div_mask & (area > crit)]
-    ext_ready = uid[ext_mask & ((area < crit) | (prefered < DEATH_FLOOR))]
+    ext_ready = uid[ext_mask & ((area < crit) | (prefered < floor))]
 
     for cell_uid in div_ready:
         _do_division(sheet, geometry, int(cell_uid))
@@ -293,12 +326,14 @@ def apoptosis_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
         cell_idx = int(face_index_for(sheet, cell_uid))
     if radius is None:
         radius = (sheet.vert_df["x"].max() - sheet.vert_df["x"].min())/2
-    vertex = remove_face(sheet, cell_idx)
+    remove_face(sheet, cell_idx)
+    refresh_unique_ids(sheet)
     fix_points_cylinder(sheet, radius=radius)
     geom.update_all(sheet)
 
 def apoptosis_extrusion(
-        sheet, manager, geom= "SheetGeometry", cell_uid=0, crit_area=0.5, shrink_rate=0.1, dt=1.
+        sheet, manager, geom="SheetGeometry", cell_uid=0, crit_area=0.5, shrink_rate=0.1,
+        dt=1., death_floor=DEATH_FLOOR, contract_perimeter=False,
 ):
     """Commit a cell to apoptotic extrusion.
 
@@ -306,10 +341,17 @@ def apoptosis_extrusion(
     it ``"extruding"``, and hands off to the batched grower, which shrinks every
     committed cell's ``prefered_area`` and removes it once its actual ``area``
     falls below ``crit_area`` OR its death target ``prefered_area`` collapses
-    below ``DEATH_FLOOR`` (0.5). The DEATH_FLOOR criterion matters in the crypt:
-    extrusion is Wnt/z-biased to the free top rim, where cells stay mechanically
-    stretched (large actual area), so without it a committed cell's actual area
-    never reaches crit_area and it would never die.
+    below ``death_floor`` (default :data:`DEATH_FLOOR` = 0.5). The floor matters in
+    the crypt: extrusion is Wnt/z-biased to the free top rim, where cells stay
+    mechanically stretched (large actual area), so without it a committed cell's
+    actual area never reaches crit_area and it would never die.
+
+    On a relaxed flat sheet the opposite holds — the floor fires long before the
+    cell has visibly shrunk, so ``crit_area`` never governs. Pass a ``death_floor``
+    below ``crit_area`` there to let the area threshold decide, and set
+    ``contract_perimeter`` so the cell's target perimeter constricts with its target
+    area: a cell holding its full ``prefered_perimeter`` stalls well above a small
+    ``crit_area`` no matter how far the area target falls.
     """
     cell_id = face_index_for(sheet, cell_uid)
     if cell_id is None:
@@ -318,11 +360,19 @@ def apoptosis_extrusion(
     cell_id = int(cell_id)
     _ensure_commit_cols(sheet)
     fd = sheet.face_df
+    # Stash the pre-extrusion type in commit_type. A live run never reads it back
+    # (only _do_division does, and this cell is on its way out), but a checkpoint
+    # taken mid-commitment needs it to restore the cell's real type on restart.
+    prior_type = fd.loc[cell_id, "cell_type"]
+    if isinstance(prior_type, str) and prior_type not in ("dividing", "extruding"):
+        fd.loc[cell_id, "commit_type"] = prior_type
     fd.loc[cell_id, "cell_type"] = "extruding"
     fd.loc[cell_id, "commit_state"] = 2.0
     fd.loc[cell_id, "commit_rate"] = shrink_rate
     fd.loc[cell_id, "commit_crit"] = crit_area
     fd.loc[cell_id, "commit_dt"] = dt
+    fd.loc[cell_id, "commit_floor"] = death_floor
+    fd.loc[cell_id, "commit_contract"] = 1.0 if contract_perimeter else 0.0
     _ensure_grower(sheet, manager, geom)
 
 def update_tension(sheet, manager, tension_update=None):
@@ -382,8 +432,8 @@ def differentiation(sheet, manager, cell_uid, new_type):
 #
 # These mirror the 2D commit-column / batched-grower design (one vectorized
 # grow pass over all committed cells per step, then fire the topology op only
-# for threshold crossers), but on cell_df / vol, and are kept separate so the
-# battle-tested 2D crypt/tumor path is untouched.
+# for threshold crossers), but on cell_df / vol. They are deliberately separate
+# functions rather than a shared dimension-agnostic path.
 # ---------------------------------------------------------------------------
 
 def _is_3d(eptm):
@@ -575,6 +625,11 @@ def _do_division_3d(eptm, geometry, cell_uid):
             _clear_cell_commit(eptm, cid, restore_type=(str(tt) if tt else None))
         eptm.network_changed = True
         return
+    # The monolayer split clones rows for the new faces / edges / vertices too, so
+    # repair those here (before reset_index); the daughter *cell* is renumbered
+    # explicitly just below, since which twin keeps cell_uid matters for the
+    # commit bookkeeping and must not depend on row order.
+    refresh_unique_ids(eptm, elements=("vert", "edge", "face"))
     # Mother and daughter now both carry cell_uid; give the daughter a fresh id.
     cd = eptm.cell_df
     twins = list(cd.index[cd["unique_id"] == cell_uid])
@@ -586,7 +641,9 @@ def _do_division_3d(eptm, geometry, cell_uid):
         eptm.network_changed = True
         return
     daughter = twins[-1]
-    new_uid = int(cd["unique_id"].max()) + 1
+    # via the shared counter rather than max()+1, so an id retired by an earlier
+    # necrosis is never handed out a second time
+    new_uid = int(_reserve_uids(eptm, "cell", 1)[0])
     cd.loc[daughter, "unique_id"] = new_uid
     if "id" in cd.columns:
         cd.loc[daughter, "id"] = int(cd["id"].max()) + 1

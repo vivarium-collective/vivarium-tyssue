@@ -7,10 +7,9 @@ cell of the grid, **runs the simulation and archives the full-resolution
 ``History`` to a compressed HDF5 file** — nothing else.
 
 All visualisation and analysis (colour-coded videos, still frames, the
-vertex-movement / T1-transition metrics and the sweep summary heatmaps) now live
-in the companion notebook ``stochastic_tension_analysis.ipynb``, which reads these
-archives back with ``tyssue``'s ``HistoryHdf5.from_archive`` so you can re-analyse
-without re-simulating (and re-simulate without disturbing previous analysis).
+vertex-movement / T1-transition metrics and the sweep summary heatmaps) live in
+the companion notebook ``stochastic_tension_analysis.ipynb``, which reads these
+archives back with ``tyssue``'s ``HistoryHdf5.from_archive``.
 
 Each run's archive lands at ``outputs/<tau..._sigma...>/history.hf5`` (git-ignored),
 the input mesh under ``data/``.
@@ -39,10 +38,12 @@ DATA_DIR = HERE / "data"
 OUT_DIR = HERE / "outputs"
 DATASET_NAME = "test_square.hf5"
 
-# 4 x 4 sweep. tau = OU relaxation timescale, sigma = noise amplitude.
-# Baseline in the repo is tau=0.2, sigma=0.1 (kept in the grid).
-TAUS = [0.1, 0.2, 0.5, 1.0]
-SIGMAS = [0.05, 0.1, 0.2, 0.4]
+# 5 x 5 sweep. tau = OU relaxation timescale, sigma = noise amplitude.
+# Baseline in the repo is tau=0.2, sigma=0.1 (kept in the grid). Both axes are
+# geometric (x2 per step) and extend the old 4 x 4 grid outward by one point, so
+# the sweep now also covers persistent noise (tau=2) and strong noise (sigma=0.8).
+TAUS = [0.1, 0.2, 0.5, 1.0, 2.0]
+SIGMAS = [0.05, 0.1, 0.2, 0.4, 0.8]
 
 TF = 15.0          # total simulated time — kept low so archived data stays small
 DT = 0.1           # emit / solver interval (~150 steps per run)
@@ -137,7 +138,7 @@ def build_spec(tau: float, sigma: float, dt: float, dataset_path: Path) -> dict:
                 "global_time": ["global_time"],
             },
             "outputs": {
-                "datasets": ["Datasets"],
+                "datasets": ["Tissue State"],
                 "network_changed": ["Network Changed"],
                 "behaviors_update": ["Behaviors"],
             },
@@ -147,7 +148,7 @@ def build_spec(tau: float, sigma: float, dt: float, dataset_path: Path) -> dict:
             "_type": "process",
             "address": "local:StochasticLineTension",
             "config": {"tau": tau, "sigma": sigma},
-            "inputs": {"datasets": ["Datasets"]},
+            "inputs": {"datasets": ["Tissue State"]},
             "outputs": {"behaviors": ["Behaviors"]},
             "interval": dt,
         },

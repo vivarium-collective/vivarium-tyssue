@@ -60,7 +60,7 @@ dashboard's Registry):
 - **`TissueCryptGif3D`** — 3D crypt animation, cells colored by type.
 
 Both follow render **Path C**: they read the study's `runs.db` directly (the run
-must emit the `Datasets` store), reconstruct the tyssue `History`, and call
+must emit the `Tissue State` store), reconstruct the tyssue `History`, and call
 tyssue's `create_gif` / `create_gif_3d` (faithful), falling back to a
 dependency-light matplotlib edge-mesh animation when the viewer stack is absent.
 
