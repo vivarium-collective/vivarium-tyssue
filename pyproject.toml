@@ -13,7 +13,7 @@ dependencies = [
     # study_verdict, report_linter, linkage_index, …). The spine landed on main
     # (0.14.0) and is not yet on PyPI (tops at 0.13.0); resolved via
     # [tool.uv.sources] below.
-    "pbg-superpowers",
+    "viva-superpowers",
     "pyyaml>=6.0",
     "jsonschema[format-nongpl]>=4.21",
     "jinja2>=3.1",
@@ -29,7 +29,6 @@ dependencies = [
     # (cell_division/remove_face) under the pandas-3.0/numpy-2.x that the COPASI
     # stack forces (read-only array in get_opposite). The fork patches that, so
     # the tumor composite can run topology_ops=true (real divisions/extrusions).
-    "tyssue",
     "pandas",
     "numpy",
     "scikit-image",
@@ -44,25 +43,29 @@ dependencies = [
     # Web-based workspace dashboard (server + templates + assets + lib helpers);
     # provides the `vivarium-workbench serve` CLI invoked by scripts/serve.sh and
     # the Dockerfile CMD. Not published to PyPI — resolved via [tool.uv.sources]
-    # below so the root-workspace git URL overrides pbg-biomodels' local-path source
+    # below so the root-workspace git URL overrides viva-biomodels' local-path source
     # (see the [tool.uv.sources] comment for details).
     "vivarium-workbench",
     # ParquetEmitter — the workspace's default emitter (see workspace.yaml
     # runtime.default_emitter and vivarium_tyssue.core). The [parquet] extra pulls
     # polars/pyarrow/duckdb/fsspec. Not on PyPI; reference the repo directly.
-    "pbg-emitters[parquet] @ git+https://github.com/vivarium-collective/pbg-emitters.git",
+    "viva-emitters[parquet] @ git+https://github.com/vivarium-collective/viva-emitters.git",
     # COPASI process (CopasiUTCProcess) wrapping basico/COPASI — runs the cached SBML
     # tumor model. Not on PyPI — resolved via [tool.uv.sources] + override-dependencies
-    # below. pbg-biomodels (the BioModels *fetcher*) is NOT a runtime dep: it pulls
-    # pbg-tellurium -> tellurium -> libroadrunner, which has no linux/arm64 wheel and
+    # below. viva-biomodels (the BioModels *fetcher*) is NOT a runtime dep: it pulls
+    # viva-tellurium -> tellurium -> libroadrunner, which has no linux/arm64 wheel and
     # breaks the multi-arch Docker build. The model is already cached at
     # workspace/datasets/BIOMD0000000903.xml, so fetching is a one-off — see the
     # `fetch` extra below.
-    "pbg-copasi",
+    "viva-copasi",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=7.4"]
+# Heavy sim backend: the vivatyssue fork build clones a demo repo over SSH,
+# which a vanilla CI runner cannot do. Installed on demand / in Docker; tests
+# needing it skip via tests/conftest.py.
+sim = ["tyssue"]
 # Optional viewer stack for the faithful 3D crypt animation (tyssue.draw.create_gif_3d
 # uses ipyvolume). Without it, TissueCryptGif3D falls back to a matplotlib 3D mesh.
 viz3d = ["ipyvolume"]
@@ -70,7 +73,7 @@ viz3d = ["ipyvolume"]
 # libroadrunner SBML stack (no linux/arm64 wheel), so it is opt-in and kept out of
 # the default install + Docker image. The fetched model is committed, so this is
 # rarely needed.
-fetch = ["pbg-biomodels @ git+https://github.com/vivarium-collective/pbg-biomodels.git"]
+fetch = ["viva-biomodels @ git+https://github.com/vivarium-collective/viva-biomodels.git"]
 # Human Reference Atlas initializers (vivarium_tyssue.hra). trimesh loads the
 # reference-organ GLB meshes; fast-simplification decimates them. The 2D FTU
 # path and ASCT+B rosters use only numpy/scipy (already core deps).
@@ -80,33 +83,33 @@ hra = ["trimesh", "fast-simplification"]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
-# uv 0.9.x bug workaround: pbg-biomodels has [tool.uv.sources] with local-path
-# entries for its sibling repos (vivarium-workbench, pbg-tellurium, pbg-copasi,
-# pbg-simbio). When uv fetches pbg-biomodels from git it incorrectly applies those
+# uv 0.9.x bug workaround: viva-biomodels has [tool.uv.sources] with local-path
+# entries for its sibling repos (vivarium-workbench, viva-tellurium, viva-copasi,
+# viva-simbio). When uv fetches viva-biomodels from git it incorrectly applies those
 # path sources, converting them to invalid
-#   git+https://…pbg-biomodels.git#subdirectory=../vivarium-workbench
+#   git+https://…viva-biomodels.git#subdirectory=../vivarium-workbench
 # URLs that fail to resolve.  override-dependencies is applied unconditionally
 # BEFORE the resolver fetches any URL, so it replaces those bad URLs with the
 # correct git refs for all four packages.
 [tool.uv]
 override-dependencies = [
     "vivarium-workbench @ git+https://github.com/vivarium-collective/vivarium-dashboard.git",
-    "pbg-tellurium @ git+https://github.com/vivarium-collective/pbg-tellurium.git",
-    "pbg-simbio @ git+https://github.com/vivarium-collective/pbg-simbio.git",
-    "pbg-copasi @ git+https://github.com/vivarium-collective/pbg-copasi.git",
-    # pbg-simbio and pbg-tellurium reference pbg-superpowers with branch = "main"
+    "viva-tellurium @ git+https://github.com/vivarium-collective/viva-tellurium.git",
+    "viva-simbio @ git+https://github.com/vivarium-collective/viva-simbio.git",
+    "viva-copasi @ git+https://github.com/vivarium-collective/viva-copasi.git",
+    # viva-simbio and viva-tellurium reference viva-superpowers with branch = "main"
     # (→ git+https://…@main), while the root uses the default-branch ref
     # (git+https://…, no branch). Uv treats these as conflicting URLs; override
     # pins to the unqualified ref so both resolve to the same HEAD commit.
-    "pbg-superpowers @ git+https://github.com/vivarium-collective/pbg-superpowers.git",
-    # Same conflict for pbg-emitters: pbg-superpowers (>=0.14.0) pins it with
+    "viva-superpowers @ git+https://github.com/vivarium-collective/viva-superpowers.git",
+    # Same conflict for viva-emitters: viva-superpowers (>=0.14.0) pins it with
     # branch = "main" (→ git+https://…@main), while the root requests the
     # unqualified ref. Pin both to the unqualified ref so they share one URL.
-    "pbg-emitters[parquet] @ git+https://github.com/vivarium-collective/pbg-emitters.git",
+    "viva-emitters[parquet] @ git+https://github.com/vivarium-collective/viva-emitters.git",
 ]
 
 # [tool.uv.sources] supplies the git URL for vivarium-workbench (not on PyPI).
-# The root-workspace source should in principle override pbg-biomodels' path source,
+# The root-workspace source should in principle override viva-biomodels' path source,
 # but override-dependencies above is the primary fix; this is belt-and-suspenders.
 [tool.uv.sources]
 # The pandas-3-compatible tyssue fork (adds VesselGeometry/model_factory_* and
@@ -114,10 +117,10 @@ override-dependencies = [
 # arrays). Required for the tumor composite's topology_ops=true path.
 tyssue = { git = "https://github.com/vivarium-collective/vivatyssue.git" }
 vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git" }
-pbg-tellurium = { git = "https://github.com/vivarium-collective/pbg-tellurium.git" }
-pbg-simbio = { git = "https://github.com/vivarium-collective/pbg-simbio.git" }
-pbg-copasi = { git = "https://github.com/vivarium-collective/pbg-copasi.git" }
-pbg-superpowers = { git = "https://github.com/vivarium-collective/pbg-superpowers.git" }
+viva-tellurium = { git = "https://github.com/vivarium-collective/viva-tellurium.git" }
+viva-simbio = { git = "https://github.com/vivarium-collective/viva-simbio.git" }
+viva-copasi = { git = "https://github.com/vivarium-collective/viva-copasi.git" }
+viva-superpowers = { git = "https://github.com/vivarium-collective/viva-superpowers.git" }
 
 # Allow the PEP 508 direct git URL for vivarium-workbench (not on PyPI).
 [tool.hatch.metadata]
