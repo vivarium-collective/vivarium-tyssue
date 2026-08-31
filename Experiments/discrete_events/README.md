@@ -88,13 +88,18 @@ what they were at `dt`=0.005.
 
 ## Mechanics, and the folding it does not fully cure
 
-Divisions add area to a tube that `VesselSurfaceElasticity` pins radially at
-`prefered_radius` = 2.5, so from `t`≈24 the sheet relieves the crowding by buckling
-and some cells become genuinely self-intersecting ("bow-tie"). This is **not**
-visible in the usual diagnostics: tyssue's `face_df.area` is a fan sum of *absolute*
-sub-triangle areas, so a folded polygon scores the same as a clean one. The working
-test is `|A_vec| / A_fan` with `A_vec = ½ Σ (S−C)×(G−C)`, which is ≈1 for a simple
-polygon and drops sharply for a fold.
+Some cells become genuinely self-intersecting ("bow-tie"): the boundary crosses
+itself and never recovers. This is **not** visible in the usual diagnostics —
+tyssue's `face_df.area` sums *absolute* sub-triangle areas
+(`sub_area = ‖n‖/2`, `sheet_geometry.py:52-56`), so a folded polygon scores the
+same as a clean one and `FaceAreaElasticity` feels no restoring force.
+
+It is tempting to read this as the tube buckling under post-division crowding,
+since `VesselSurfaceElasticity` pins the sheet radially at `prefered_radius` = 2.5.
+**That is not the cause** — the same folding occurs in the flat 2-D
+`tumor_coupling` sheet, which has no radial pin. `vessel_elasticity` helps (below)
+by suppressing cell *elongation*, which is the actual precondition, not by
+addressing crowding.
 
 Two parameters were swept against it at `tf`=45, scoring *integrated folded
 cell-frames* (`folded_frames` alone saturates once folding begins and hides the
@@ -116,11 +121,88 @@ stays at 0.05 rather than the composite's 5.0, which measured *worse* at matched
 absolute time, raising it slows the relief of post-division crowding 100× and the
 crowding folds the sheet instead of relaxing out of it.
 
-Fold statistics are near-deterministic run to run (repeats give identical
-`folded_frames` and onset) even though division counts vary by ~10%, so differences
-of this size are signal. **Folding is reduced, not eliminated** — it still sets in
-around `t`≈25 and persists, and a checkpoint carries the folded geometry forward, so
-`gillespie_restart` starts already folded at `t`=0.
+**Root cause.** Nothing in the model resists a face passing through itself. The
+area term is blind to it by construction (unsigned, above); `reconnect` only reacts
+to *short edges* and never fires here (measured: 24/24 events had no edge below
+`threshold_length`); tyssue's actual defence, `collisions/auto_collisions`, is wired
+only into `QSSolver` — `EulerSolver` deprecates `with_t1`/`with_t3` to no-ops
+(`solvers/viscous.py:72-76`) — and its CGAL backend `tyssue._collisions` is not
+built here. `validate()` is purely combinatorial and a bow-tie passes it. The
+precondition is cell **elongation**.
+
+**How to measure it.** Do **not** use `|A_vec|/A_fan`: that is a *non-convexity*
+screen, not a self-intersection test (verified — face uid 87 at `t`=10.96 scores
+0.9802 with no crossing). Two traps make hand-rolled tests silently wrong:
+
+* the ring must be chained `srce→trgt`; archived row order is **not** polygon order;
+* the projection plane must be the ring's **best-fit** plane, not its Newell normal.
+  A symmetric bow-tie's lobes cancel exactly, so its Newell vector is **zero** and
+  the frame is undefined — blind on the very case that matters most.
+
+Two equivalent criteria exist, and they name different participants: an exact
+segment-crossing test names the cell that **folded**, while "a vertex not on this
+face's ring lies inside it" names the neighbour it **invaded**. The sets are
+disjoint by construction, and every intrusion measured (62/62) traced back to a
+folded parent face.
+
+**Run-to-run spread is large — single runs cannot resolve small differences.** Two
+`gillespie` runs at identical settings ended with **2** and **10** self-intersecting
+faces on the final mesh. The crypt is not reproducible even under `np.random.seed`
+(the `EventManager` uses an unseeded `random.shuffle`), so compare aggregates over
+repeats, never one run against another.
+
+**Folding is reduced, not eliminated** — it persists, and a checkpoint carries the
+folded geometry forward, so `gillespie_restart` starts already folded at `t`=0.
+
+### Commitment ramp — why `GILL_GROWTH_RATE` is 0.25, not 0.045
+
+At `GILL_GROWTH_RATE` = 0.045 both crypt runs produced a **division burst**: nothing
+divided at all for the first 25 time units, then the whole backlog discharged as one
+wave. The cause is a queue that swallows its own pool. Only `sc` and `pc` can emit a
+division (`jump == cell_type`), which is 113 of 704 cells at `t`=0. A capable cell
+waits ~9 `t` to be picked but then takes ~24 `t` to ramp `prefered_area` to
+`GILL_DIVISION_CRIT`, so nearly all of them commit before any divides:
+
+| | free sc+pc | `dividing` | % of the capable pool locked |
+|---|---|---|---|
+| `t` = 0 | 113 | 0 | 0% |
+| `t` = 25 | 24 | **83** | **78%** |
+| `t` = 40 | 143 | 15 | 9% |
+
+Commits then stop for want of candidates — not because the rate falls. The
+controlling number is (ramp) × (per-cell commit rate), ≈ 2.6 at 0.045; it wants to be
+below ~0.3.
+
+Swept 0.045 / 0.10 / 0.15 / 0.25 / 0.35 / 0.50 / 0.75 at `tf`=40, then **5 repeats
+each at 0.25 and 0.50** — the crypt is not reproducible run to run, so single runs
+cannot separate them. At 0.25 the burst is gone: first birth at `t`=5 instead of
+`t`=25, peak `dividing` 28.4 ± 3.6 instead of 83, free `sc`+`pc` never below
+82.8 ± 4.3 instead of 24. Throughput is unchanged (77.6 ± 3.0 births vs 72) — only
+the timing moves — and there was **zero mesh corruption** in any of the 10 runs
+(no open rings, orphan faces, sub-3-sided faces, degenerate areas, duplicated
+`unique_id`s or non-finite coordinates).
+
+0.25 and 0.50 are statistically **indistinguishable** on folding (peak
+self-intersecting faces 2.0 ± 1.6 vs 4.2 ± 1.9; Welch *p*=0.085, Mann-Whitney
+*p*=0.092), on rosettes, elongation and throughput. They separate only on queue
+occupancy (peak `dividing` 28.4 vs 13.8, *p*<0.001). 0.25 keeps ~25% of the
+division-capable pool in cycle, which reads as a crypt; 0.50 keeps ~12%. Faster is
+not automatically better: 0.75 was as bad as the original (7 crossings, rank-7
+rosettes).
+
+Two things were tested and rejected. Making `prefered_perimeter` consistent with
+`prefered_area` (3.5 → 3.7224, the regular-hexagon floor) barely touched the burst
+and is **actively destructive** — retested at `tf`=72, it gave 67 self-intersecting
+faces against 2, 406 invaded vertices against 2, and 387 overlapping face pairs
+against 1. The sub-floor target is load-bearing: it acts as a constant inward
+tension that both keeps cells compact (mean shape index 3.815 → 3.990, 7× as many
+cells past 4.5) and throttles division via the ~0.884 equilibrium area (divisions
++61%; the restart leg ran away to 1674 events and was OOM-killed). See the comment
+on `GILL_PREF_PERIMETER`. Starting from a stationary-composition mesh
+(`crypt_cylinder_stable.hf5`, see `scripts/gen_crypt_stable.py`) fixes the initial
+*composition* but not the transient, because the transient is the commitment queue,
+not a composition mismatch. That mesh is still generated and available, but no
+scenario uses it.
 
 ## Workflow — simulate, then analyse
 

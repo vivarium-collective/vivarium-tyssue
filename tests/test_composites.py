@@ -156,3 +156,104 @@ def test_composite_runs_one_step(name):
     spec = load_spec(ROOT / "vivarium_tyssue" / "composites" / f"{name}.composite.yaml")
     comp = build_composite_from_spec(spec, overrides={"interval": 0.01}, core=core)
     comp.run(1)  # smoke: one solver step is enough to catch a broken step path
+
+
+# ---------------------------------------------------------------------------
+# Optional self-intersection detection (EulerSolver check_intersections)
+# ---------------------------------------------------------------------------
+
+def _intersection_spec(**cfg):
+    """anisotropic composite, emitters off, with EulerSolver config overrides."""
+    import copy
+    from pbg_superpowers.composite_spec import load_spec
+
+    spec = copy.deepcopy(
+        load_spec(ROOT / "vivarium_tyssue" / "composites" / "anisotropic.composite.yaml"))
+    spec["emitters"] = []
+    spec["state"]["Tyssue"]["config"].update(cfg)
+    return spec
+
+
+def _run_intersection_spec(spec, steps=3):
+    import sys
+    sys.path.insert(0, str(ROOT))
+    from pbg_superpowers.composite_spec import build_composite_from_spec
+    from vivarium_tyssue.core import build_core
+
+    comp = build_composite_from_spec(spec, overrides={"interval": 0.1}, core=build_core())
+    proc = comp.state["Tyssue"]["instance"]
+    comp.run(steps)
+    return proc
+
+
+def test_intersection_check_off_by_default():
+    """No composite declares the key, so every existing run must stay unarmed."""
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    proc = _run_intersection_spec(_intersection_spec())
+
+    assert proc._check_intersections is False
+    assert proc.intersection_log == []
+    # the behaviour never ran, so it left nothing behind on the epithelium
+    assert "intersections" not in proc.eptm.settings
+    assert "check_intersections" not in [f.__name__ for f, _ in proc.manager.current]
+
+
+def test_intersection_check_arms_the_behaviour():
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    from tyssue.collisions.intersections import Result
+
+    proc = _run_intersection_spec(_intersection_spec(check_intersections=True))
+
+    assert proc._check_intersections is True
+    assert isinstance(proc.eptm.settings["intersections"], Result)
+    # it re-appends itself, so it is still queued after the run
+    assert "check_intersections" in [f.__name__ for f, _ in proc.manager.current]
+
+
+def test_intersection_check_does_not_perturb_the_trajectory():
+    """Detection is report-only: arming it must not move a single vertex."""
+    import numpy as np
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+
+    off = _run_intersection_spec(_intersection_spec())
+    on = _run_intersection_spec(_intersection_spec(check_intersections=True))
+
+    a = off.eptm.vert_df[off.eptm.coords].to_numpy()
+    b = on.eptm.vert_df[on.eptm.coords].to_numpy()
+    assert a.shape == b.shape
+    np.testing.assert_array_equal(a, b)
+
+
+def test_intersection_options_are_forwarded(monkeypatch):
+    """``intersection_options`` reaches the behaviour verbatim, and throttling
+    with ``every`` still re-queues it (a dropped re-append would freeze the
+    behaviour's own step counter)."""
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    from vivarium_tyssue.processes import eulersolver
+
+    seen = {}
+    real = eulersolver.check_intersections
+
+    def spy(sheet, manager, **kwargs):
+        seen.update(kwargs)  # only the first call: the behaviour re-appends `real`
+        return real(sheet, manager, **kwargs)
+
+    monkeypatch.setattr(eulersolver, "check_intersections", spy)
+    throttled = _run_intersection_spec(
+        _intersection_spec(check_intersections=True,
+                           intersection_options={"every": 2, "strict": True}))
+    assert seen == {"every": 2, "strict": True}
+
+    every_step = _run_intersection_spec(_intersection_spec(check_intersections=True))
+    assert (throttled.eptm.settings["_intersection_step"]
+            == every_step.eptm.settings["_intersection_step"] > 1)
+
+
+def test_intersection_check_reports_a_missing_fork(monkeypatch):
+    """Asking for the feature against a tyssue without it fails loudly, at init."""
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    from vivarium_tyssue.processes import eulersolver
+
+    monkeypatch.setattr(eulersolver, "check_intersections", None)
+    with pytest.raises(ImportError, match="vivatyssue fork"):
+        _run_intersection_spec(_intersection_spec(check_intersections=True))

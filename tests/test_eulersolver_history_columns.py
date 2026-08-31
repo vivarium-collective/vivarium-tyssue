@@ -23,6 +23,7 @@ EXPECTED_SCHEMA_KEYS = {
     "ref_effector", "factory", "auto_reconnect", "bounds", "output_columns",
     "history_columns", "settings", "maps", "backend", "substeps",
     "max_displacement", "record_history", "history_file", "history_save_every",
+    "check_intersections", "intersection_options",
 }
 
 

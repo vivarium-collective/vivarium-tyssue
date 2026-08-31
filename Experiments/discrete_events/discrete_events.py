@@ -119,7 +119,30 @@ GILL_DIVISION_CRIT = 2.0
 # clear 2.0 — most of the run. Measured over tf=45: at 0.02 the crit=2.0 tissue
 # completes *zero* divisions, while 0.045 gives 87 against the old
 # crit=1.2/rate=0.02 baseline's 79, i.e. the original cadence is preserved.
-GILL_GROWTH_RATE = 0.045
+#
+# Raised again 0.045 -> 0.25 to stop the initial division BURST. At 0.045 the ramp
+# from commit to split takes ~24 time units while a division-capable cell waits only
+# ~9 t to be picked, so essentially the whole pool commits before any of it divides:
+# only sc and pc can ever emit a division (113 of 704 cells at t=0), free sc+pc fell
+# 113 -> 26, and **83 of 113 (78%) sat locked in "dividing" at once**. Commits then
+# stopped for want of candidates, and the backlog discharged as one wave — zero
+# births for the first 25 time units, then 72 of them in t=25..42. The controlling
+# number is (ramp) x (per-cell commit rate); ~2.6 at 0.045, and it needs to be <~0.3.
+#
+# Swept 0.045 / 0.10 / 0.15 / 0.25 / 0.35 / 0.50 / 0.75 at tf=40, then 5 repeats each
+# at 0.25 and 0.50 (the crypt is not reproducible — see the nondeterminism note — so
+# single runs cannot separate these). At 0.25: first birth at t=5 instead of t=25,
+# peak "dividing" 28.4 +- 3.6 instead of 83, free sc+pc never below 82.8 +- 4.3
+# instead of 24, and zero mesh corruption in any run. Throughput is unchanged
+# (77.6 +- 3.0 births vs 72); only the timing moves.
+#
+# 0.25 over 0.50: the two are statistically indistinguishable on folding
+# (peak self-intersecting faces 2.0 +- 1.6 vs 4.2 +- 1.9, Welch p=0.085,
+# Mann-Whitney p=0.092), on rosettes, elongation and throughput. They separate only
+# on queue occupancy (peak "dividing" 28.4 vs 13.8, p<0.001). 0.25 keeps ~25% of the
+# division-capable pool in cycle, which reads as a crypt; 0.50 keeps ~12%. Going
+# faster is not free — 0.75 was as bad as the baseline (7 crossings, rank-7 rosettes).
+GILL_GROWTH_RATE = 0.25
 GILL_SHRINK_RATE = 0.02        # extrusion is unaffected by the division threshold
 # Area-elastic modulus, per face. Sets how hard a cell holds its target area
 # against the perimeter (0.5) and vessel (1.0) terms. Left at 1.0: raising it to 2.0
@@ -157,6 +180,32 @@ GILL_VISCOSITY = 0.05
 # t~24.7 and persist. See the crypt-cell-overlaps notes.
 GILL_VESSEL_ELASTICITY = 10.0
 
+# Target shape index p0 = prefered_perimeter / sqrt(prefered_area). With
+# prefered_area = 1.0 this IS the target shape index. 3.5 is below the lowest value
+# any polygon can reach -- a regular hexagon's 2*sqrt(2*sqrt(3)) = 3.7224 -- so the
+# perimeter term never balances and acts as a constant inward tension rather than a
+# restoring force towards a shape.
+#
+# That sounds like a defect, and setting p0 to the hexagon value to make the two
+# targets consistent was TESTED at tf=72. It is much worse, and the sub-floor target
+# turns out to be load-bearing:
+#
+#             final mesh    folded  contained  overlapping   mean p/sqrt(A)  frac>4.5
+#   pp = 3.5     758 cells       2          2            1           3.815     0.008
+#   pp = 3.7224  809 cells      67        406          387           3.990     0.056
+#
+# Mechanism: the constant inward tension at p0 = 3.5 is what keeps cells compact.
+# Raising p0 to the achievable floor removes it, cells elongate (mean shape index
+# 3.815 -> 3.990, max 4.873 -> 6.213, seven times as many cells past 4.5), and
+# elongation is the precondition for a face folding through itself. Because nothing
+# in this model resists self-intersection -- the area term uses the UNSIGNED
+# sub_area = |n|/2, so a fold contributes positive area and feels no restoring force
+# -- perimeter tension is the only thing suppressing it.
+#
+# Replicates an earlier test of the same change at GILL_GROWTH_RATE = 0.045
+# (37 folded faces vs 6). Keep 3.5 unless an anti-self-intersection term is added.
+GILL_PREF_PERIMETER = 3.5
+
 # The tyssue History snapshots the whole mesh on every solver step and holds it in
 # RAM, so the 5x finer step would cost 5x the memory for no extra information.
 # Record every GILL_RECORD_EVERY-th step instead, which keeps the recording cadence
@@ -172,6 +221,20 @@ FLAT_ARCHIVE_FRAMES: int | None = None
 GILL_ARCHIVE_FRAMES: int | None = 1500
 ARCHIVE_COMPLIB = "blosc:zstd"
 ARCHIVE_COMPLEVEL = 5
+
+# Recording more frames than the archive will keep is pure waste: the History holds
+# every recorded frame in RAM for the whole run, and save_history then subsamples to
+# GILL_ARCHIVE_FRAMES. At GILL_RECORD_EVERY = 5 that meant recording 14400 frames and
+# discarding 12900 of them at save time -- ~10x the memory for no extra information
+# in the archive.
+#
+# This is not theoretical: on an 18 GB machine a gillespie_restart run reached 45 GB,
+# drove swap to 27/27.6 GB, and did 22 minutes of CPU work in 17.6 HOURS of wall
+# clock before it was killed. An earlier restart at the same settings was OOM-killed
+# outright. Raise the stride so the recorded cadence matches the archived one.
+if GILL_ARCHIVE_FRAMES:
+    _gill_steps = int(round(GILL_TF / GILL_SOLVER_DT))
+    GILL_RECORD_EVERY = max(GILL_RECORD_EVERY, _gill_steps // GILL_ARCHIVE_FRAMES)
 
 # ``gillespie_restart`` — same model, same parameters, same steps; only the initial
 # tissue differs. It starts from the *relaxed, compositionally settled* crypt that
@@ -251,7 +314,7 @@ def crypt_config(dataset_path: Path) -> dict:
                 "area_elasticity": GILL_AREA_ELASTICITY,
                 "prefered_area": 1.0,
                 "perimeter_elasticity": 0.5,
-                "prefered_perimeter": 3.5,
+                "prefered_perimeter": GILL_PREF_PERIMETER,
             },
             "edge_df": {"line_tension": 0.0, "is_active": 1.0},
             "vert_df": {
@@ -599,9 +662,7 @@ def run_gillespie_restart(core):
     — it starts from the checkpoint that run ends on.
 
     It writes its own checkpoint too (``outputs/gillespie_restart/stable_eptm.hf5``),
-    so a still-drifting population can be settled further by pointing another run at
-    it — the first run's tf=72 leaves ``pc`` still climbing, so its checkpoint is
-    close to but not exactly on the stationary composition."""
+    so the chain can be extended by pointing a further run at it."""
     mesh = OUT_DIR / "gillespie" / GILL_STABLE_MESH
     if not mesh.exists():
         raise SystemExit(

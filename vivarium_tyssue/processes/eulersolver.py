@@ -37,6 +37,23 @@ from tyssue.core.history import History, HistoryHdf5
 from tyssue.io.hdf5 import load_datasets
 from tyssue import config
 
+# Self-intersection detection is a vivatyssue addition, absent from upstream
+# tyssue, so it is imported defensively: every simulation here must keep running
+# against a tyssue that lacks it. Asking for the feature without it then raises in
+# initialize() with a pointed message, instead of failing at import time and taking
+# down runs that never wanted it. IntersectionError is re-exported so callers who
+# set `raise_on_detect` can name the exception from the process module.
+try:
+    from tyssue.behaviors.sheet.basic_events import (
+        IntersectionError,
+        check_intersections,
+    )
+except ImportError:  # pragma: no cover - depends on the installed tyssue
+    check_intersections = None
+
+    class IntersectionError(RuntimeError):
+        """Placeholder so `except IntersectionError` is always writable."""
+
 log = logging.getLogger(__name__)
 
 maps = {
@@ -70,6 +87,12 @@ class EulerSolver(Process):
         "ref_effector": "string",               # key into EFFECTORS_MAP
         "factory": "string",                    # key into FACTORY_MAP
         "auto_reconnect": "boolean",            # auto-perform reconnections
+        "check_intersections": "boolean",       # default False; detect folded/overlapping
+                                                # faces each step (report only, never
+                                                # repairs) -- see _init_intersections
+        "intersection_options": "map",          # kwargs for the check_intersections
+                                                # behaviour: every, strict, trigger,
+                                                # raise_on_detect, max_span_rad
         "bounds": "map[float]",                 # bounds the vertex displacement per step
         "output_columns": "map[list[string]]",  # per-df column names to emit
         "history_columns": "map[list[string]]", # per-df columns to record; unlisted
@@ -123,6 +146,9 @@ class EulerSolver(Process):
                 manager.append(reconnect)
 
         self.manager = manager
+        # After reconnect, so a step's topology surgery is already applied when the
+        # mesh is inspected; a T1 that fixes a fold shouldn't be reported as one.
+        self._init_intersections(manager)
         if len(self.config["bounds"]) > 0:
             self.bounds = self.config["bounds"]
         else:
@@ -212,6 +238,86 @@ class EulerSolver(Process):
         else:
             self.history = History(self.eptm)
         self._apply_history_columns()
+
+    def _init_intersections(self, manager):
+        """Arm tyssue's ``check_intersections`` behaviour if the config asks for it.
+
+        Off unless ``check_intersections: true``. Detection is **report-only** — it
+        never edits the mesh — so arming it cannot change a trajectory; the run is
+        bit-identical with and without it, only slower. Repair, if wanted, is a
+        separate opt-in (``raise_on_detect`` to stop at the offending step, or
+        tyssue's ``solve_self_intersect_face``).
+
+        ``intersection_options`` is forwarded verbatim to the behaviour:
+
+        ==================  ==========================================================
+        ``every``           run every N-th update (default 1). A fold develops over
+                            ~300 solver steps, so N=10 loses nothing.
+        ``strict``          also test pairwise face overlap (Test C). The only test
+                            whose cost is not negligible.
+        ``trigger``         ``"folded"`` restricts the containment test to faces
+                            neighbouring a self-crossing one. Sound only where every
+                            intrusion comes from a folded face — measured 62/62 on the
+                            crypt, but a property of that data, not a theorem.
+        ``raise_on_detect`` raise ``IntersectionError`` out of ``update()`` on the
+                            first defect, so a bad step can be caught in the debugger
+                            instead of found in the archive.
+        ``max_span_rad``    treat a face whose ring normals span more than this angle
+                            as undecidable rather than folded (a best-fit plane
+                            through a strongly curved face is a chord, and reports
+                            crossings the surface does not have).
+        ==================  ==========================================================
+
+        Measured on a 751-cell crypt: full 13.7 ms/step, ``trigger="folded"`` 5.3 ms,
+        ``every=10`` 1.2 ms, both together 0.54 ms (~2% of a production step).
+
+        The detector reads only ``vert_df[coords]`` and the ``srce``/``trgt``/``face``
+        topology columns, all of which the lean rust path keeps current in pandas, so
+        unlike the behaviours fed through ``inputs["behaviors"]`` it needs no
+        ``to_dataframes(full=True)`` materialization.
+        """
+        self.intersection_log = []
+        self._intersection_tally = None
+        self._check_intersections = bool(self.config.get("check_intersections"))
+        if not self._check_intersections:
+            return
+        if check_intersections is None:
+            raise ImportError(
+                "check_intersections: true requires a tyssue providing "
+                "tyssue.behaviors.sheet.basic_events.check_intersections (the "
+                "vivatyssue fork); the installed tyssue at "
+                f"{getattr(config, '__file__', '?')} does not have it."
+            )
+        options = dict(self.config.get("intersection_options") or {})
+        manager.append(check_intersections, **options)
+
+    def _record_intersections(self, t):
+        """Append to ``self.intersection_log`` only when the defect tally changes.
+
+        A fold is permanent, so logging per step would write ~72k identical rows on a
+        production crypt run. Recording transitions keeps the log O(events) while
+        still pinning the exact time each defect first appeared. On a throttled step
+        (``every`` > 1) the behaviour leaves the previous report in place, which
+        compares equal and is correctly skipped.
+        """
+        report = self.eptm.settings.get("intersections")
+        if report is None:  # armed, but no step has run the detector yet
+            return
+        undecidable = report.undecidable if report.undecidable is not None else ()
+        tally = (len(report.folded), len(report.contained), len(report.overlaps),
+                 len(report.open_rings), len(undecidable))
+        if tally == self._intersection_tally:
+            return
+        self._intersection_tally = tally
+        self.intersection_log.append({
+            "time": t,
+            "folded": tally[0],
+            "contained": tally[1],
+            "overlaps": tally[2],
+            "open_rings": tally[3],
+            "undecidable": tally[4],
+            "folded_faces": [int(f) for f in report.folded],
+        })
 
     def _apply_history_columns(self):
         """Trim the History's recorded columns per the ``history_columns`` config.
@@ -398,7 +504,12 @@ class EulerSolver(Process):
             eptm.vert_df[coords] = vpos
         else:
             eptm.vert_df.loc[eptm.active_verts, coords] = vpos[active_pos]
-        materialize_geometry(eptm, geom, which=("edge", "face"), full=False)
+        # geom_cls: the positions above are the only input update_height needs,
+        # and it must run before sub_vol/vol are derived from height inside
+        # materialize_geometry. Once per update, not per substep — height is a
+        # pure function of the final positions.
+        materialize_geometry(eptm, geom, which=("edge", "face"), full=False,
+                             geom_cls=self.geom)
         self._geom_stash = geom
         self._geom_lean = True
 
@@ -409,7 +520,8 @@ class EulerSolver(Process):
         ``full=True`` also refreshes the intermediate edge coordinate blocks. No-op
         on the python backend, where the frames are always current."""
         if self._geom_stash is not None and (full or self._geom_lean):
-            materialize_geometry(self.eptm, self._geom_stash, which=which, full=full)
+            materialize_geometry(self.eptm, self._geom_stash, which=which, full=full,
+                                 geom_cls=self.geom)
             if full:
                 self._geom_lean = False
         return self.eptm
@@ -499,6 +611,28 @@ class EulerSolver(Process):
 
     def update(self, inputs, interval):
         log.debug("EulerSolver step t=%s", inputs["global_time"])
+
+        # tyssue's `detach_vertices` (behaviors/sheet/actions.py:73) reads
+        #     dt = sheet.settings.get("dt", 1.0)
+        # and scales p_4 / p_5p by it, because those are documented as
+        # probabilities *per unit time*. Nothing here ever set it, so dt silently
+        # fell back to 1.0 and a 0.1/unit-time rate became 0.1 *per step* — at the
+        # crypt's interval of 0.001 that is 1000x too fast. Measured effect over
+        # 4000 steps from the same mesh: 1250 topology operations (31% of steps,
+        # merges and splits near-perfectly matched — futile cycling) versus 11 once
+        # dt is supplied, and a 15x calmer mesh. tyssue's own solvers set this
+        # (solvers/viscous.py:126, 180, 233); this one did not.
+        #
+        # `interval`, not `interval / substeps`: the EventManager — and therefore
+        # `reconnect` — executes once per update() call regardless of how many
+        # Euler substeps ran inside it.
+        #
+        # Set here rather than in initialize() because initialize() has no access
+        # to the interval (process_bigraph passes it only to update), and because
+        # the scheduler may hand over a shortened interval when synchronising with
+        # another process, so a value fixed once at startup can be wrong.
+        self.eptm.settings["dt"] = interval
+
         behavior_update = []
         if len(inputs["behaviors"]) > 0:
             for kwargs in inputs["behaviors"]:
@@ -545,6 +679,8 @@ class EulerSolver(Process):
                 self._geom_stash = None  # stale after a topology change / update_all
                 self._geom_lean = False  # update_all rewrote all geometry columns
             self.manager.update()
+            if self._check_intersections:
+                self._record_intersections(inputs["global_time"])
 
         if self.eptm.network_changed:
             network_changed = True
