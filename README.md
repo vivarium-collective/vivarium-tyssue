@@ -66,11 +66,14 @@ dependency-light matplotlib edge-mesh animation when the viewer stack is absent.
 
 ## Run it
 
+Build the environment first — **[`SETUP.md`](SETUP.md)** is the from-scratch recipe
+(conda / venv / uv) for this repo *and* the `vivatyssue` fork it depends on. The
+`uv venv && uv pip install -e ".[dev]"` flow no longer resolves; SETUP.md §6 explains
+why and what to run instead. With the environment built:
+
 ```bash
-uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"        # add ".[dev,viz3d]" for the faithful 3D path
-bash scripts/serve.sh             # launch the vivarium-workbench
-pytest tests/test_composites.py   # validate composites + the stock-tyssue run
+PYTHONUTF8=1 vivarium-dashboard serve --workspace .   # launch the dashboard
+pytest tests/test_composites.py                       # validate composites
 ```
 
 In the dashboard: the **Composites** tab lists all 7; the **Registry** tab lists

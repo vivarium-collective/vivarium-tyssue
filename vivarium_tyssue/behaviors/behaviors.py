@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 
 from tyssue.topology.sheet_topology import cell_division, remove_face
 from tyssue.topology.monolayer_topology import cell_division as monolayer_cell_division
@@ -383,6 +384,125 @@ def update_tension(sheet, manager, tension_update=None):
             sheet.edge_df["unique_id"].isin(tension_update),
             "line_tension"
         ] = sheet.edge_df["unique_id"].map(tension_update)
+
+# ---------------------------------------------------------------------------
+# Differential adhesion — tension set by the *identity* of the two cells an edge
+# separates, recomputed from the live mesh.
+#
+# In a differential-adhesion cell-sorting model the interfacial tension of a
+# junction is not a property the junction keeps, it is a property of the PAIR of
+# cells it separates: an interface between two cells of the same type is a
+# homotypic (low-tension, strongly adhering) contact, an interface between cells
+# of different types a heterotypic (high-tension, poorly adhering) one. Sorting
+# is driven by making the heterotypic tension the larger of the two, so the
+# tissue minimises its energy by shrinking the mixed interface.
+#
+# That identity must therefore be re-evaluated *every* time the mesh changes.
+# A T1 transition rewires a junction between a different pair of cells (and a
+# division / extrusion mints whole new edges), so tensions written once at
+# t = 0 and keyed by edge would end up on the wrong interfaces. The behavior
+# below re-classifies every half-edge from the current topology each time it is
+# executed, which is why the classification lives here — inside the solver's
+# EventManager, acting on the real epithelium — rather than in the process that
+# requests it, which only ever sees the mesh from before the step.
+#
+# (EventManager.update shuffles its queue, so within a step this runs either just
+# before or just after tyssue's `reconnect`; a junction born of a T1 that lands
+# after it picks up its tension on the next step. Never more than one step stale.)
+# ---------------------------------------------------------------------------
+
+def opposite_half_edges(sheet):
+    """Positional index of each half-edge's opposite, ``-1`` where there is none.
+
+    Half-edge ``(srce, trgt)`` of face ``f`` is opposed by ``(trgt, srce)`` of the
+    neighbouring face. A boundary edge of an open sheet has no opposite. We derive
+    this from ``srce``/``trgt`` rather than trusting ``edge_df["opposite"]``: that
+    column is written by ``Sheet.get_opposite()`` and is only as fresh as the last
+    call, whereas this is computed from the topology as it stands right now.
+
+    Returned indices are **positional** (0..Ne-1), so they index numpy arrays taken
+    from ``edge_df`` in row order — not ``edge_df.loc`` labels.
+    """
+    edge_df = sheet.edge_df
+    srce = edge_df["srce"].to_numpy()
+    trgt = edge_df["trgt"].to_numpy()
+    forward = pd.Series(
+        np.arange(len(edge_df)),
+        index=pd.MultiIndex.from_arrays([srce, trgt]),
+    )
+    # A well-formed mesh has one half-edge per (srce, trgt); dedup defensively so a
+    # transiently degenerate mesh raises no reindex error mid-run.
+    forward = forward[~forward.index.duplicated(keep="first")]
+    opposite = forward.reindex(pd.MultiIndex.from_arrays([trgt, srce])).to_numpy()
+    return np.where(np.isnan(opposite), -1, np.nan_to_num(opposite)).astype(int)
+
+
+def heterotypic_edges(sheet, type_column="cell_type", opposite=None):
+    """Boolean mask over half-edges: ``True`` where the two faces sharing the edge
+    carry different ``type_column`` values.
+
+    Boundary half-edges (no opposite) are ``False`` — they separate a cell from the
+    outside, not from another cell type; :func:`differential_adhesion` gives them
+    their own tension if one is configured. Pass ``opposite`` to reuse an already
+    computed :func:`opposite_half_edges`.
+    """
+    if opposite is None:
+        opposite = opposite_half_edges(sheet)
+    own = sheet.upcast_face(sheet.face_df[type_column]).to_numpy()
+    # `opposite` is -1 on boundary edges; index with 0 there and mask it out after.
+    neighbour = own[np.where(opposite >= 0, opposite, 0)]
+    return (opposite >= 0) & (own != neighbour)
+
+
+def differential_adhesion(
+        sheet,
+        manager,
+        homotypic_tension=0.0,
+        heterotypic_tension=0.0,
+        boundary_tension=None,
+        type_column="cell_type",
+        record_column="heterotypic",
+):
+    """Set every junction's ``line_tension`` from the identity of the cells it separates.
+
+    Parameters
+    ----------
+    sheet : a :class:`Sheet` object
+    manager : a :class:`EventManager` object
+    homotypic_tension : float
+        tension on an interface between two cells of the SAME ``type_column`` value.
+    heterotypic_tension : float
+        tension on an interface between two cells of DIFFERENT ``type_column``
+        values. Making this the larger of the two is what drives sorting.
+    boundary_tension : float or None
+        tension on half-edges with no opposite (the free border of an open sheet).
+        ``None`` (default) leaves them at ``homotypic_tension``. A closed sheet has
+        none of these.
+    type_column : str
+        the ``face_df`` column holding the cell type. Any hashable labels work.
+    record_column : str or None
+        if the ``edge_df`` column of this name exists, the 0/1 heterotypic flag is
+        written into it so the classification is recorded in the solver's History
+        alongside the tension (the column must already exist at solver start-up —
+        declare it in the EulerSolver ``parameters`` — because tyssue's History
+        fixes its column list when it is built).
+    """
+    edge_df = sheet.edge_df
+    if len(edge_df) == 0 or type_column not in sheet.face_df.columns:
+        return
+    if edge_df["line_tension"].dtype != np.float64:
+        edge_df["line_tension"] = edge_df["line_tension"].astype(float)
+
+    opposite = opposite_half_edges(sheet)
+    hetero = heterotypic_edges(sheet, type_column=type_column, opposite=opposite)
+    tension = np.where(hetero, float(heterotypic_tension), float(homotypic_tension))
+    if boundary_tension is not None:
+        tension = np.where(opposite < 0, float(boundary_tension), tension)
+
+    edge_df["line_tension"] = tension
+    if record_column and record_column in edge_df.columns:
+        edge_df[record_column] = hetero.astype(float)
+
 
 def cell_jamming(sheet, manager, rate, limits, dt):
     if (sheet.face_df["prefered_perimeter"].mean()) > limits[0] or (sheet.face_df["prefered_perimeter"].mean() < limits[1]):
