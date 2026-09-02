@@ -77,7 +77,7 @@ def build_core():
     # COPASI SBML process (pbg-copasi) — needed by the tumor composite. Degrade
     # gracefully if the COPASI/basico stack isn't installed.
     try:
-        from pbg_copasi.processes import CopasiUTCProcess
+        from viva_copasi.processes import CopasiUTCProcess
         if "CopasiUTCProcess" not in core.link_registry:
             core.register_link("CopasiUTCProcess", CopasiUTCProcess)
     except Exception as exc:  # noqa: BLE001
@@ -86,7 +86,7 @@ def build_core():
     # Framework timeseries viz (pbg-superpowers) — plots scalar observables
     # (tumor_births, healthy_deaths, *_count) the TumorCoupling process emits.
     try:
-        from pbg_superpowers.visualizations.timeseries_from_observables import TimeSeriesFromObservables
+        from viva_superpowers.visualizations.timeseries_from_observables import TimeSeriesFromObservables
         if "TimeSeriesFromObservables" not in core.link_registry:
             core.register_link("TimeSeriesFromObservables", TimeSeriesFromObservables)
     except Exception as exc:  # noqa: BLE001

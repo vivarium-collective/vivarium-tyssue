@@ -29,7 +29,7 @@ import json
 import sqlite3
 from pathlib import Path
 
-from pbg_superpowers.visualization import Visualization
+from viva_superpowers.visualization import Visualization
 
 # Crypt cell-type palette (inlined from vivarium_tyssue.draw.kwd_functions so this
 # module doesn't import the tyssue-dependent draw package at discovery time).

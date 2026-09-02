@@ -21,7 +21,7 @@ from __future__ import annotations
 
 import io
 
-from pbg_superpowers.visualization import Visualization
+from viva_superpowers.visualization import Visualization
 from vivarium_tyssue.visualizations.tissue_gif import (
     _load_frames, _empty_html, _embed_figure, CELL_TYPE_COLORS,
 )

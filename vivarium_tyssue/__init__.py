@@ -4,7 +4,7 @@
 def _ensure_top_level_metadata() -> None:
     """Self-heal the dist-info ``top_level.txt`` for composite discovery.
 
-    pbg_superpowers.composite_discovery.discover_composites() (the dashboard's
+    viva_superpowers.composite_discovery.discover_composites() (the dashboard's
     run-path composite resolver) finds a distribution's packages by reading
     ``top_level.txt`` from its dist-info. The hatchling/uv wheel build for this
     workspace does NOT emit ``top_level.txt``, so discovery skips our composites

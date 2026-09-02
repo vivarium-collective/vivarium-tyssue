@@ -251,7 +251,7 @@ def test_vessel_gradient_matches_compute_gradient():
     import sys
 
     sys.path.insert(0, str(ROOT))
-    from pbg_superpowers.composite_spec import build_composite_from_spec, load_spec
+    from viva_superpowers.composite_spec import build_composite_from_spec, load_spec
     from vivarium_tyssue.core import build_core
     from vivarium_tyssue.processes.utils import rust_sheet_gradient
 
@@ -427,7 +427,7 @@ def test_sheet_compositional_backend_end_to_end():
     import sys
 
     sys.path.insert(0, str(ROOT))
-    from pbg_superpowers.composite_spec import build_composite_from_spec, load_spec
+    from viva_superpowers.composite_spec import build_composite_from_spec, load_spec
     from vivarium_tyssue.core import build_core
 
     def run(backend):
@@ -487,7 +487,7 @@ def _run_composite_backend(composite, backend, steps, interval=0.1):
     import sys
 
     sys.path.insert(0, str(ROOT))
-    from pbg_superpowers.composite_spec import build_composite_from_spec, load_spec
+    from viva_superpowers.composite_spec import build_composite_from_spec, load_spec
     from vivarium_tyssue.core import build_core
 
     core = build_core()
@@ -532,7 +532,7 @@ def test_supported_composites_run_on_rust(composite):
 def _build_proc(composite, substeps, interval):
     import sys
     sys.path.insert(0, str(ROOT))
-    from pbg_superpowers.composite_spec import build_composite_from_spec, load_spec
+    from viva_superpowers.composite_spec import build_composite_from_spec, load_spec
     from vivarium_tyssue.core import build_core
     spec = load_spec(ROOT / "vivarium_tyssue" / "composites" / f"{composite}.composite.yaml")
     spec["emitters"] = []

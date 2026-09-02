@@ -29,7 +29,7 @@ EXPECTED_SCHEMA_KEYS = {
 
 def _build(history_columns=None, history_file=None):
     pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
-    from pbg_superpowers.composite_spec import load_spec, build_composite_from_spec
+    from viva_superpowers.composite_spec import load_spec, build_composite_from_spec
     from vivarium_tyssue.core import build_core
 
     spec = copy.deepcopy(load_spec(ANISO))

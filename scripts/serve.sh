@@ -15,12 +15,11 @@ export PYTHONUTF8=1
 WS_ROOT="$(pwd)"
 [ -f "$WS_ROOT/workspace.yaml" ] || { echo "ERROR: run from workspace root" >&2; exit 1; }
 
-# The dashboard CLI is named `vivarium-dashboard` at the generation pyproject.toml
-# pins, and `vivarium-workbench` at the repo's HEAD (the dist was renamed — see the
-# GENERATION PIN note in pyproject.toml). Try both, venv first (matches the
-# pbg-template scaffolding flow), then a system-wide install.
+# The dashboard CLI is `vivarium-workbench` on the current (viva-*) generation and
+# `vivarium-dashboard` on the older one. Try both — current name first — venv first
+# (matches the viva-template scaffolding flow), then a system-wide install.
 DASH=""
-for name in vivarium-dashboard vivarium-workbench; do
+for name in vivarium-workbench vivarium-dashboard; do
     if [ -x "$WS_ROOT/.venv/bin/$name" ]; then
         DASH="$WS_ROOT/.venv/bin/$name"; break
     fi

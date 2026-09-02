@@ -68,15 +68,18 @@ dependency-light matplotlib edge-mesh animation when the viewer stack is absent.
 
 ```bash
 uv venv && source .venv/bin/activate
-uv pip install -e ".[dev]"        # add ".[dev,viz3d]" for the faithful 3D path
+uv pip install -e ".[dev,sim]"    # `sim` pulls the tyssue fork; add `viz3d` for the 3D path
 bash scripts/serve.sh             # launch the dashboard
-pytest tests/                     # 124 passed, 45 skipped (the skips need §5.1 of SETUP.md)
+pytest tests/                     # 124 passed, 45 skipped (the skips need the Rust kernels)
 ```
 
+`tyssue` lives in the optional **`sim`** extra: CI installs only `.[dev]` and
+`tests/conftest.py` skips the backend test modules, so a plain `.[dev]` env runs the
+backend-free checks and nothing simulator-shaped. Any real run needs `.[dev,sim]`.
+
 **[`SETUP.md`](SETUP.md)** is the full from-scratch recipe — conda and plain-`venv`
-variants (neither reads `[tool.uv.sources]`, so both need the explicit install order),
-the `vivatyssue` fork, the optional Rust kernels, and why every git dependency in
-`pyproject.toml` is pinned to an exact commit.
+variants (neither reads `[tool.uv.sources]`, so both need an explicit install order),
+the `vivatyssue` fork and why it is pinned, and the optional Rust kernels.
 
 In the dashboard: the **Composites** tab lists all 7; the **Registry** tab lists
 the processes + the two Visualization Steps. Create a Study, add a baseline

@@ -148,7 +148,7 @@ def describe_spec(spec):
 
 # **Composite `monolayer_liftoff`** — `spec_monolayer_liftoff` (a plain, editable dict)
 
-from pbg_superpowers.composite_spec import load_spec
+from viva_superpowers.composite_spec import load_spec
 spec_monolayer_liftoff = load_spec(REPO / 'vivarium_tyssue/composites/monolayer_liftoff.composite.yaml')
 describe_spec(spec_monolayer_liftoff)
 

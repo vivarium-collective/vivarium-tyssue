@@ -1,6 +1,6 @@
 """DataFrame-native Parquet emitter for tyssue (and any process emitting pandas DataFrames).
 
-The generic ``pbg_emitters.ParquetEmitter`` is *row-oriented*: every emit is
+The generic ``viva_emitters.ParquetEmitter`` is *row-oriented*: every emit is
 ``flatten_dict``-ed into a single history row, with per-field numpy/Polars dtype
 reconciliation. That model fights tyssue, whose per-tick observables are whole
 pandas DataFrames (``vert_df`` 410x11, ``edge_df`` ~1200xN, ``face_df``,

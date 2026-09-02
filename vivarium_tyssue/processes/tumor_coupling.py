@@ -157,7 +157,7 @@ class TumorCoupling(Process):
         self._copasi = None
         model_source = config.get("model_source", "")
         if model_source:
-            from pbg_copasi.processes import CopasiUTCProcess
+            from viva_copasi.processes import CopasiUTCProcess
             core = getattr(self, "core", None)
             if core is None:
                 from vivarium_tyssue.core import build_core

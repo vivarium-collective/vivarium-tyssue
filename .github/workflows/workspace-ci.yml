@@ -1,7 +1,35 @@
-name: workspace-ci
-on: [push, pull_request]
+# >>> viva-template-provenance >>>
+# This GitHub Actions workflow is GENERATED from viva-template. Do not edit
+# it by hand: your changes are lost the next time it is regenerated, and a
+# hand-edit is invisible to the drift guard.
+#
+# If viva-template's copy of this workflow changes, this file becomes STALE
+# and workspace CI flags it (scripts/check-workflow-freshness.py). Refresh by
+# re-scaffolding, or by copying the current source from
+#   vivarium-collective/viva-template/template/.github/workflows/<template>
+# template: workspace-ci.yml.j2
+# sha256: 12577c7a4f0e0f732a6ac0c14fcd4e964c4a56a96f19f82ed3ec528bd64a6ee6
+# <<< viva-template-provenance <<<
 
-# CI for a workspace scaffolded from pbg-template.
+name: workspace-ci
+
+# Trigger scope keeps CI honest without flooding: pushes run CI only on the
+# default branch, while all other-branch validation happens via the PR. That
+# stops every work-in-progress push to a feature branch from firing a run (and
+# emailing a failure) — you get ONE run per PR sync instead of a push + a
+# pull_request run per commit. The concurrency group then cancels a superseded
+# run when you push again, so rapid iteration no longer leaves a trail of
+# completed red runs.
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: workspace-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+# CI for a workspace scaffolded from viva-template.
 #
 # Sequence:
 #   1. Check out the workspace (no submodules — workspace tests don't need them,
@@ -13,22 +41,30 @@ on: [push, pull_request]
 #   4. Lint workspace.yaml against the JSON schema.
 #   5. Run pytest at the workspace root (if any test files exist).
 #
-# This file ships in pbg-template as `.j2` so GitHub does NOT run it on the
+# This file ships in viva-template as `.j2` so GitHub does NOT run it on the
 # template repo itself (which has no real pyproject.toml). template-init.sh
 # renders it to `.yml` when a user scaffolds a workspace.
 
 jobs:
   test:
     runs-on: ubuntu-latest
-    # COPASI/basico (pbg-copasi dep) resets LC_CTYPE to "C" on import, which makes
-    # locale-default file reads (composite/study YAML via read_text()) crash on the
-    # non-ASCII em-dash in generated YAML comments. Force Python UTF-8 mode globally.
-    env:
-      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v6
         with:
           submodules: false
+      # Fail fast if a local absolute path (file:///, /Users/, /home/) was
+      # committed into a dependency/config file — a recurring CI break when a
+      # sibling editable install leaks into pyproject.toml. Only needs the repo,
+      # so it runs right after checkout, before any venv-dependent step.
+      # Guarded on presence: an older workspace scaffolded before this script
+      # existed must skip it, not fail with "No such file or directory" (127).
+      - name: Check for leaked local paths
+        run: |
+          if [ -f scripts/check-no-local-paths.sh ]; then
+            bash scripts/check-no-local-paths.sh
+          else
+            echo "scripts/check-no-local-paths.sh not present — skipping local-path check."
+          fi
       - name: Init external submodules (best-effort, non-recursive)
         run: |
           # Default `git submodule update` is non-recursive — omit --recursive
@@ -41,26 +77,80 @@ jobs:
           ls -la external/ 2>&1 || true
       - uses: actions/setup-python@v6
         with:
+          # DEVIATES FROM viva-template (which renders "3.11") on purpose: this
+          # workspace's pyproject.toml sets requires-python = ">=3.12", so the
+          # editable install below fails outright on 3.11 with
+          #   "the current Python version (3.11.x) does not satisfy Python>=3.12".
+          # Push this upstream (template should follow requires-python) rather
+          # than reverting it on the next regeneration.
           python-version: "3.12"
       - name: Install uv
         run: pip install uv
-      - name: Rewrite SSH GitHub URLs to HTTPS (vivatyssue submodule)
-        # The vivatyssue fork (the tyssue source in pyproject) declares a docs-only
-        # submodule `doc/notebooks` via an SSH URL (git@github.com:damcb/tyssue-demo.git).
-        # uv initialises submodules when cloning a git source, so the install below
-        # fails with "Permission denied (publickey)" (no SSH key in CI). Rewrite SSH
-        # GitHub URLs to anonymous HTTPS so the public submodule clones without creds.
-        # Mirrors the same fix in the Dockerfile (commit da8cc39).
-        run: git config --global url."https://github.com/".insteadOf "git@github.com:"
       - name: Set up venv and install
         run: |
           uv venv .venv
           source .venv/bin/activate
-          uv pip install -e ".[dev]"
+          # A scaffolded workspace ships a root pyproject.toml (rendered from
+          # pyproject.toml.j2) with a `dev` extra, so the normal path is the
+          # editable install below. Guard it so a workspace that has diverged
+          # (e.g. no root package yet) still gets the dev tooling and a green
+          # CI run instead of `uv pip install` aborting with
+          # "does not appear to be a Python project".
+          if [ -f pyproject.toml ] || [ -f setup.py ]; then
+            uv pip install -e ".[dev]"
+          else
+            echo "No root pyproject.toml/setup.py found — installing dev tooling only."
+            uv pip install pytest
+          fi
       - name: Lint workspace
         run: |
           source .venv/bin/activate
-          python scripts/lint-workspace.py
+          # Scaffolded workspaces ship this linter; tolerate its absence so a
+          # trimmed-down workspace doesn't fail CI on a missing script.
+          if [ -f scripts/lint-workspace.py ]; then
+            python scripts/lint-workspace.py
+          else
+            echo "No scripts/lint-workspace.py found — skipping workspace lint."
+          fi
+      - name: Check README generated tables are fresh (non-blocking)
+        run: |
+          source .venv/bin/activate
+          # README's <!-- BEGIN:composites/investigations --> tables are generated
+          # from the workspace by `vivarium-workbench gen-readme` (the same sets
+          # the dashboard shows). Adding/editing composites or investigations
+          # without re-running it leaves the tables stale.
+          #
+          # This is COSMETIC drift (the README mirrors content that also lives in
+          # the dashboard), so it is a NON-BLOCKING warning — it must not gate
+          # merges. Correctness (workspace lint + tests) still fails the build.
+          # This prevents the recurring "CI red on every content edit" churn.
+          # Refresh anytime with: vivarium-workbench gen-readme --workspace .
+          #
+          # Guard on availability so a workspace pinned to an older
+          # vivarium-workbench (before gen-readme) doesn't warn spuriously.
+          if vivarium-workbench gen-readme --help >/dev/null 2>&1; then
+            if ! vivarium-workbench gen-readme --workspace . --check; then
+              echo "::warning title=Stale README tables::README generated tables are out of date. Run 'vivarium-workbench gen-readme --workspace .' and commit to refresh them."
+            fi
+          else
+            echo "vivarium-workbench gen-readme unavailable (older pin) — skipping README freshness check."
+          fi
+      - name: Check generated workflows are fresh vs viva-template
+        run: |
+          # Every workflow scaffolded from viva-template carries a provenance
+          # stamp in its header (# >>> viva-template-provenance >>>). This step
+          # fails if viva-template's copy of a workflow has since changed and
+          # this generated copy is now STALE — the recurring "stale generated CI
+          # workflow" rot. Regenerate by re-scaffolding from viva-template, or by
+          # copying the current source from
+          #   vivarium-collective/viva-template/template/.github/workflows/
+          # The checker is stdlib-only; an unreachable upstream (network flake or
+          # an older pin) is treated as non-fatal — only real drift fails here.
+          if [ -f scripts/check-workflow-freshness.py ]; then
+            python scripts/check-workflow-freshness.py --check
+          else
+            echo "scripts/check-workflow-freshness.py not present — skipping workflow drift check."
+          fi
       - name: Run workspace tests
         if: hashFiles('tests/**/*.py') != ''
         run: |

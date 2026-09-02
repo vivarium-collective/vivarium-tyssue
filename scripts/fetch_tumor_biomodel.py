@@ -1,12 +1,6 @@
 """Fetch + cache BioModels BIOMD0000000903 SBML into workspace/datasets/.
 
 Run once; the cached XML is committed so composite runs are reproducible/offline.
-
-pbg_biomodels is NOT a declared dependency — the `fetch` extra was removed because
-pbg-biomodels no longer resolves (see the note above [tool.uv] in pyproject.toml).
-Install it ad hoc before running this:
-
-    pip install "git+https://github.com/vivarium-collective/pbg-biomodels.git"
 """
 import io
 import shutil

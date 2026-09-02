@@ -136,7 +136,7 @@ def write(name, *, description, tags, processes, state, parameters=None):
         "description": description,
         "tags": tags,
         "requires": {"processes": processes, "types": ["tyssue_data", "behaviors"]},
-        # Composite default-emitter convention (pbg_superpowers.composite_generator
+        # Composite default-emitter convention (viva_superpowers.composite_generator
         # emitter_defaults / install_default_emitters): ship every tyssue composite
         # with the DataFrameParquetEmitter sink instead of relying on the dashboard's
         # RAM/SQLite injection. tyssue's per-tick observables are whole pandas
