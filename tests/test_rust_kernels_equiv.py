@@ -427,7 +427,7 @@ def test_sheet_compositional_backend_end_to_end():
     import sys
 
     sys.path.insert(0, str(ROOT))
-    from pbg_superpowers.composite_spec import build_composite_from_spec, load_spec
+    from viva_superpowers.composite_spec import build_composite_from_spec, load_spec
     from vivarium_tyssue.core import build_core
 
     def run(backend):
@@ -603,3 +603,116 @@ def test_to_dataframes_materializes_and_returns_eptm():
     assert eptm is proc.eptm
     # face area equals the native stash it was materialized from
     assert np.allclose(eptm.face_df["area"].values, proc._geom_stash["area"], atol=0, rtol=0)
+
+
+# ---------------------------------------------------------------------------
+# vert_df height/rho (SheetGeometry.update_height) — the one step of update_all
+# with no kernel equivalent. It was silently omitted from the Rust path, which
+# froze rho/height at their load-time values and fed the stale height into the
+# derived sub_vol/vol. These pin each link of that chain.
+# ---------------------------------------------------------------------------
+
+def _perturbed_pair(mesh, tissue, geom, sigma=0.02):
+    """Two copies of a mesh with the same random displacement applied."""
+    from vivarium_tyssue.maps import GEOMETRY_MAP
+
+    geom_cls = GEOMETRY_MAP[geom]
+    a, b = _load_eptm(mesh, tissue, geom), _load_eptm(mesh, tissue, geom)
+    delta = np.random.default_rng(0).normal(0, sigma, (a.Nv, len(a.coords)))
+    a.vert_df[a.coords] += delta
+    b.vert_df[b.coords] += delta
+    vmap = {v: i for i, v in enumerate(b.vert_df.index)}
+    fmap = {v: i for i, v in enumerate(b.face_df.index)}
+    srce = np.ascontiguousarray(b.edge_df["srce"].map(vmap).values, np.uint32)
+    trgt = np.ascontiguousarray(b.edge_df["trgt"].map(vmap).values, np.uint32)
+    face = np.ascontiguousarray(b.edge_df["face"].map(fmap).values, np.uint32)
+    return geom_cls, a, b, (srce, trgt, face)
+
+
+@pytest.mark.parametrize("mesh,tissue,geom", SHEET_MESHES,
+                         ids=lambda x: x if isinstance(x, str) else "")
+@pytest.mark.parametrize("mode", ["flat", "cylindrical", "spherical", "surfacic"])
+def test_rust_geometry_update_refreshes_height(mesh, tissue, geom, mode):
+    """rho/height track the new positions on the Rust path, for every geometry
+    mode — not just the one the fixture meshes happen to declare."""
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    from vivarium_tyssue.processes.utils import rust_geometry_update
+
+    geom_cls, a, b, (srce, trgt, face) = _perturbed_pair(mesh, tissue, geom)
+    a.settings["geometry"] = b.settings["geometry"] = mode
+    frozen = b.vert_df["rho"].to_numpy().copy()
+
+    geom_cls.update_all(a)
+    geom_cls.update_boundary_index(b)
+    rust_geometry_update(b, geom_cls, srce, trgt, face)
+
+    for df, col in (("vert_df", "rho"), ("vert_df", "height"),
+                    ("face_df", "rho"), ("face_df", "height"),
+                    ("edge_df", "sub_vol"), ("face_df", "vol")):
+        va = getattr(a, df)[col].to_numpy(float)
+        vb = getattr(b, df)[col].to_numpy(float)
+        assert np.allclose(va, vb, atol=1e-9, rtol=0.0, equal_nan=True), (
+            f"{df}.{col}: max|Δ|={np.nanmax(np.abs(va - vb)):.3e}")
+
+    # and it is genuinely recomputed, not merely equal by luck on a mesh whose
+    # rho happens not to move (the original bug read as "equal" on flat sheets).
+    if mode != "surfacic":
+        assert not np.allclose(b.vert_df["rho"].to_numpy(), frozen), (
+            f"rho unchanged by the update in {mode} mode — stale, not recomputed")
+
+
+def test_materialize_geometry_refuses_without_geom_cls():
+    """Deriving sub_vol/vol needs a refreshed height, so omitting the geometry
+    class must fail loudly rather than silently reuse a stale one."""
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    from vivarium_tyssue.processes.utils import compute_geometry, materialize_geometry
+
+    geom_cls, _, b, (srce, trgt, face) = _perturbed_pair(*SHEET_MESHES[0])
+    assert "height" in b.vert_df.columns
+    stash = compute_geometry(b, srce, trgt, face,
+                             b.vert_df[b.coords].values,
+                             b.edge_df["length"].values.copy())
+    with pytest.raises(ValueError, match="geom_cls"):
+        materialize_geometry(b, stash, which=("edge", "face"), full=False)
+
+
+def test_native_substeps_refresh_height():
+    """The native substep loop materializes once at the end; height must be
+    refreshed there too, or sub_vol/vol are derived from a stale height."""
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    pytest.importorskip("tables", reason="HDF5 mesh loading needs pytables")
+    import contextlib, io
+
+    proc = _build_proc("anisotropic", substeps=5, interval=0.05)
+    assert proc._native_substeps is True
+    eptm = proc.eptm
+    # anisotropic is a flat sheet sitting at z = 0, where rho ("flat" mode) is 0
+    # both when correct and when stale — the degeneracy that hid this bug. Lift
+    # the sheet out of the plane so a frozen rho is distinguishable from a live one.
+    eptm.vert_df["z"] += np.random.default_rng(0).normal(0, 0.05, eptm.Nv)
+    frozen = eptm.vert_df["rho"].to_numpy().copy()
+
+    with contextlib.redirect_stdout(io.StringIO()):
+        proc.update({"behaviors": [], "global_time": 0.0}, 0.05)
+
+    assert not np.allclose(eptm.vert_df["rho"].to_numpy(), frozen), "rho is stale"
+    # and it equals the python reference recomputed from the same final positions
+    ref = eptm.vert_df["rho"].to_numpy().copy()
+    proc.geom.update_all(eptm)
+    assert np.allclose(eptm.vert_df["rho"].to_numpy(), ref, atol=1e-12, rtol=0.0)
+
+
+def test_backend_equivalence_includes_height_columns():
+    """End-to-end: python and rust backends agree on the height-derived columns
+    after several steps, not just on positions."""
+    pytest.importorskip("tyssue_kernels", reason="Rust kernels not built")
+    _, pp = _run_composite_backend("anisotropic", "python", steps=0.4, interval=0.1)
+    _, pr = _run_composite_backend("anisotropic", "rust", steps=0.4, interval=0.1)
+    assert pp._rust_geometry is False and pr._rust_geometry is True
+    for df, col in (("vert_df", "rho"), ("vert_df", "height"),
+                    ("face_df", "rho"), ("face_df", "height"),
+                    ("edge_df", "sub_vol"), ("face_df", "vol")):
+        va = getattr(pp.eptm, df)[col].to_numpy(float)
+        vb = getattr(pr.eptm, df)[col].to_numpy(float)
+        assert np.allclose(va, vb, atol=1e-9, rtol=0.0, equal_nan=True), (
+            f"backends diverged on {df}.{col}: max|Δ|={np.nanmax(np.abs(va - vb)):.3e}")

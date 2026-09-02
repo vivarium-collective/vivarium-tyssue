@@ -37,6 +37,23 @@ from tyssue.core.history import History, HistoryHdf5
 from tyssue.io.hdf5 import load_datasets
 from tyssue import config
 
+# Self-intersection detection is a vivatyssue addition, absent from upstream
+# tyssue, so it is imported defensively: every simulation here must keep running
+# against a tyssue that lacks it. Asking for the feature without it then raises in
+# initialize() with a pointed message, instead of failing at import time and taking
+# down runs that never wanted it. IntersectionError is re-exported so callers who
+# set `raise_on_detect` can name the exception from the process module.
+try:
+    from tyssue.behaviors.sheet.basic_events import (
+        IntersectionError,
+        check_intersections,
+    )
+except ImportError:  # pragma: no cover - depends on the installed tyssue
+    check_intersections = None
+
+    class IntersectionError(RuntimeError):
+        """Placeholder so `except IntersectionError` is always writable."""
+
 log = logging.getLogger(__name__)
 
 maps = {
@@ -61,46 +78,36 @@ class EulerSolver(Process):
     """Generalized Euler solver for Tyssue-based epithelial simulations
     """
     config_schema = {
-        "name": "string", #name for epithelium object
-        "eptm": "string", #saved tyssue epithelium file
-        "tissue_type": "string", #key indicating the desired tissue type from TISSUE_MAP
+        "name": "string",                       # name for the epithelium object
+        "eptm": "string",                       # saved tyssue epithelium file
+        "tissue_type": "string",                # key into TISSUE_MAP
         "parameters": "map[map]",
-        "geom": "string", #key indicating the desired geometry class in GEOMETRY_MAP
-        "effectors": "list[string]", #list of strings representing effectors from the EFFECTORS_MAP
-        "ref_effector": "string", #string, representing the effector from the EFFECTORS_MAP
-        "factory": "string", #key indicating the factory class to generate from the FACTORY_MAP
-        "auto_reconnect": "boolean", # if True, will automatically perform reconnections
-        "bounds": "map[float]", # bounds the displacement of the vertices at each time step
-        "output_columns": "map[list[string]]", # dict containing lists of column names to emit for each dataframe
-        "history_columns": "map[list[string]]", # per-df extra columns to RECORD in
-                             # the History (keys vert_df/edge_df/face_df/cell_df).
-                             # Absent/empty for a df -> record all columns (default).
-                             # When a df is listed, record only the coords+topology
-                             # minimum needed to rebuild the eptm PLUS the listed cols.
+        "geom": "string",                       # key into GEOMETRY_MAP
+        "effectors": "list[string]",            # keys into EFFECTORS_MAP
+        "ref_effector": "string",               # key into EFFECTORS_MAP
+        "factory": "string",                    # key into FACTORY_MAP
+        "auto_reconnect": "boolean",            # auto-perform reconnections
+        "check_intersections": "boolean",       # default False; detect folded/overlapping
+                                                # faces each step (report only, never
+                                                # repairs) -- see _init_intersections
+        "intersection_options": "map",          # kwargs for the check_intersections
+                                                # behaviour: every, strict, trigger,
+                                                # raise_on_detect, max_span_rad
+        "bounds": "map[float]",                 # bounds the vertex displacement per step
+        "output_columns": "map[list[string]]",  # per-df column names to emit
+        "history_columns": "map[list[string]]", # per-df columns to record; unlisted
+                                                # -> all (see _apply_history_columns)
         "settings": "map",
-        "maps": "map", #map of maps, leave empty if using default
-        "backend": "string", # "python" (default) or "rust": route compute_gradient
-                             # through the tyssue_kernels sheet_gradient kernel when
-                             # the model is supported; falls back to python otherwise.
-        "substeps": "integer", # >1 integrates this many native Euler steps of
-                               # dt=interval/substeps per update(), materializing
-                               # the DataFrames only once at the end (rust sheet
-                               # models). Default 1 = one step, bit-identical.
-        "max_displacement": "float", # >0 clamps the per-step |Δposition| of every
-                               # vertex to this value (explicit-Euler safety net).
-                               # Default 0 = off (unchanged behavior). Used by the
-                               # gillespie crypt model, where a division / extrusion
-                               # (remove_face) transient can momentarily produce a
-                               # huge local gradient that would otherwise explode to
-                               # NaN in one step; clamping lets it relax over a few
-                               # steps instead.
-        "record_history": "boolean", # default True: build a tyssue History and
-                               # record every step so `.history` drives create_gif
-                               # / to_archive. Set False for large rust runs to
-                               # avoid the per-step full-copy RAM growth.
-        "history_file": "string", # stream history to this HDF5 file (HistoryHdf5)
-                               # instead of RAM; flat memory, reusable archive.
-        "history_save_every": "integer", # with history_file, record every N-th step.
+        "maps": "map",                          # map of maps; empty = defaults
+        "backend": "string",                    # "python" (default) or "rust"; falls
+                                                # back to python if unsupported
+        "substeps": "integer",                  # native Euler steps per update
+                                                # (default 1, rust sheet models only)
+        "max_displacement": "float",            # >0 clamps per-step |Δposition| (0 = off);
+                                                # guards division transients against NaN
+        "record_history": "boolean",            # default True; False avoids per-step copies
+        "history_file": "string",               # stream History to HDF5 instead of RAM
+        "history_save_every": "integer",        # with history_file, record every N-th step
     }
 
     def initialize(self, config):
@@ -121,12 +128,9 @@ class EulerSolver(Process):
             for dataframe, parameters in config["parameters"].items():
                 df = getattr(self.eptm, dataframe)
                 for parameter, value in parameters.items():
-                    # A dict value sets the parameter per mesh segment (apical /
-                    # basal / lateral / sagittal), e.g. line_tension:
-                    #   {apical: 1.0, default: 0.0}  ->  high tension on apical
-                    # edges only (a 3D-monolayer "purse-string"). Falls back to
-                    # the literal value when the df has no 'segment' column (a
-                    # flat Sheet) so scalar configs are unchanged.
+                    # A dict value sets the parameter per mesh segment, e.g.
+                    # line_tension {apical: 1.0, default: 0.0}. Dfs with no
+                    # 'segment' column (a flat Sheet) get the default.
                     if isinstance(value, dict):
                         if "segment" in df.columns:
                             default = value.get("default", 0.0)
@@ -142,14 +146,16 @@ class EulerSolver(Process):
                 manager.append(reconnect)
 
         self.manager = manager
+        # After reconnect, so a step's topology surgery is already applied when the
+        # mesh is inspected; a T1 that fixes a fold shouldn't be reported as one.
+        self._init_intersections(manager)
         if len(self.config["bounds"]) > 0:
             self.bounds = self.config["bounds"]
         else:
             self.bounds = None
 
-        # Backend selection: route compute_gradient through the Rust kernel when
-        # requested AND the model is one the kernel reproduces exactly. Otherwise
-        # fall back to Python transparently (with a warning if rust was asked for).
+        # Rust routes compute_gradient through the kernel only when it reproduces
+        # the model exactly; otherwise fall back to Python (with a warning).
         self._backend = (config.get("backend") or "python").lower()
         self._is_bound = config["factory"] == "model_factory_bound"
         self._with_vessel = has_vessel_effector(config["effectors"])
@@ -157,28 +163,19 @@ class EulerSolver(Process):
         self._rust_geometry = False
         self._topo = None  # cached (signature, srce, trgt, face, active_pos) arrays
         self._active_full = False  # every vertex active & in order -> fast pos I/O
-        self._geom_stash = None  # geometry arrays from the last rust set_pos, fed
-        # straight to the next gradient (skips re-reading them from pandas)
-        self._geom_lean = False  # True when the hot loop wrote only observable
-        # geometry (edge length + face frame) and the intermediate edge coordinate
-        # blocks in edge_df are stale — materialised full on demand (Phase B).
+        self._geom_stash = None  # geometry from the last rust set_pos, fed straight
+        # to the next gradient (skips re-reading it from pandas)
+        self._geom_lean = False  # hot loop wrote only observable geometry; the
+        # intermediate edge coordinate blocks in edge_df are stale until materialised
         self._substeps = max(1, int(config.get("substeps") or 1))
-        # Explicit-Euler safety clamp on per-step vertex displacement (0 = off).
         self._max_disp = float(config.get("max_displacement") or 0.0)
-        # Native multi-substep integration (DataFrames materialized once per
-        # update instead of per step) needs both rust halves and a plain sheet
-        # model — the vessel term reads position-derived vertex columns we don't
-        # refresh mid-loop, so vessel/python fall back to per-step materializing.
         self._bulk_geometry = is_bulk_geometry(self.geom.__name__)
-        # Effector classes + factory name, kept for the compositional rust path.
         self._effectors = effectors
         self._factory_name = config["factory"]
-        # Compositional per-effector rust gradient: engages whenever the rust
-        # kernels are available. Each effector runs through a rust primitive if
-        # one is registered (kernels.EFFECTOR_KERNELS), else its tyssue
-        # ``.gradient`` — so any model runs on the rust backend, covered terms
-        # accelerated, nothing regressing. The fused ``_rust_gradient`` path below
-        # is a faster special case for the standard 3-effector sheet model.
+        # Compositional rust gradient: each effector runs through a rust primitive
+        # if one is registered (kernels.EFFECTOR_KERNELS), else its tyssue
+        # ``.gradient``. The fused ``_rust_gradient`` below is a faster special
+        # case for the standard 3-effector sheet model.
         self._rust_model = False
         if self._backend == "rust":
             self._rust_geometry = geometry_supported(self.geom.__name__, self.eptm.dim)
@@ -201,6 +198,8 @@ class EulerSolver(Process):
                     "is not importable — falling back to Python. Build it with "
                     "`maturin develop --release` in rust-kernels/ (see its README)."
                 )
+        # Vessel is excluded: its term reads position-derived vertex columns that
+        # the native loop doesn't refresh mid-substep.
         self._native_substeps = (
             self._rust_gradient and self._rust_geometry and not self._with_vessel
         )
@@ -209,12 +208,9 @@ class EulerSolver(Process):
                 "substeps>1 needs the rust sheet backend (geometry+gradient, "
                 "non-vessel); integrating one step per update instead."
             )
-        # Normalize any StringDtype columns from parameter assignment (pandas 3.0).
         self._coerce_string_columns()
 
-        # Build after parameters so configured columns are recorded. With
-        # history_file, stream each snapshot to HDF5 (HistoryHdf5) so memory stays
-        # flat over long/repeated runs instead of accumulating a copy per step.
+        # Built after parameters are applied, so configured columns get recorded.
         self._record_history = bool(config.get("record_history", False))
         history_file = config.get("history_file")
         save_every = config.get("history_save_every") or None  # 0/"" -> every step
@@ -232,8 +228,8 @@ class EulerSolver(Process):
                 self.eptm, hf5file=history_file, overwrite=True,
                 save_every=save_every, dt=1.0 if save_every else None,
             )
-            # HDF5 tables can't serialize object-dtype columns (tyssue's topology
-            # bookkeeping: cell, *_o, unique_id_max); drop them — gifs don't need them.
+            # HDF5 tables can't serialize object-dtype columns (cell, *_o,
+            # unique_id_max); drop them — gifs don't need them.
             ds = self.eptm.datasets
             for el in list(self.history.columns):
                 keep = [c for c in self.history.columns[el] if ds[el][c].dtype != object]
@@ -243,14 +239,92 @@ class EulerSolver(Process):
             self.history = History(self.eptm)
         self._apply_history_columns()
 
+    def _init_intersections(self, manager):
+        """Arm tyssue's ``check_intersections`` behaviour if the config asks for it.
+
+        Off unless ``check_intersections: true``. Detection is **report-only** — it
+        never edits the mesh — so arming it cannot change a trajectory; the run is
+        bit-identical with and without it, only slower. Repair, if wanted, is a
+        separate opt-in (``raise_on_detect`` to stop at the offending step, or
+        tyssue's ``solve_self_intersect_face``).
+
+        ``intersection_options`` is forwarded verbatim to the behaviour:
+
+        ==================  ==========================================================
+        ``every``           run every N-th update (default 1). A fold develops over
+                            ~300 solver steps, so N=10 loses nothing.
+        ``strict``          also test pairwise face overlap (Test C). The only test
+                            whose cost is not negligible.
+        ``trigger``         ``"folded"`` restricts the containment test to faces
+                            neighbouring a self-crossing one. Sound only where every
+                            intrusion comes from a folded face — measured 62/62 on the
+                            crypt, but a property of that data, not a theorem.
+        ``raise_on_detect`` raise ``IntersectionError`` out of ``update()`` on the
+                            first defect, so a bad step can be caught in the debugger
+                            instead of found in the archive.
+        ``max_span_rad``    treat a face whose ring normals span more than this angle
+                            as undecidable rather than folded (a best-fit plane
+                            through a strongly curved face is a chord, and reports
+                            crossings the surface does not have).
+        ==================  ==========================================================
+
+        Measured on a 751-cell crypt: full 13.7 ms/step, ``trigger="folded"`` 5.3 ms,
+        ``every=10`` 1.2 ms, both together 0.54 ms (~2% of a production step).
+
+        The detector reads only ``vert_df[coords]`` and the ``srce``/``trgt``/``face``
+        topology columns, all of which the lean rust path keeps current in pandas, so
+        unlike the behaviours fed through ``inputs["behaviors"]`` it needs no
+        ``to_dataframes(full=True)`` materialization.
+        """
+        self.intersection_log = []
+        self._intersection_tally = None
+        self._check_intersections = bool(self.config.get("check_intersections"))
+        if not self._check_intersections:
+            return
+        if check_intersections is None:
+            raise ImportError(
+                "check_intersections: true requires a tyssue providing "
+                "tyssue.behaviors.sheet.basic_events.check_intersections (the "
+                "vivatyssue fork); the installed tyssue at "
+                f"{getattr(config, '__file__', '?')} does not have it."
+            )
+        options = dict(self.config.get("intersection_options") or {})
+        manager.append(check_intersections, **options)
+
+    def _record_intersections(self, t):
+        """Append to ``self.intersection_log`` only when the defect tally changes.
+
+        A fold is permanent, so logging per step would write ~72k identical rows on a
+        production crypt run. Recording transitions keeps the log O(events) while
+        still pinning the exact time each defect first appeared. On a throttled step
+        (``every`` > 1) the behaviour leaves the previous report in place, which
+        compares equal and is correctly skipped.
+        """
+        report = self.eptm.settings.get("intersections")
+        if report is None:  # armed, but no step has run the detector yet
+            return
+        undecidable = report.undecidable if report.undecidable is not None else ()
+        tally = (len(report.folded), len(report.contained), len(report.overlaps),
+                 len(report.open_rings), len(undecidable))
+        if tally == self._intersection_tally:
+            return
+        self._intersection_tally = tally
+        self.intersection_log.append({
+            "time": t,
+            "folded": tally[0],
+            "contained": tally[1],
+            "overlaps": tally[2],
+            "open_rings": tally[3],
+            "undecidable": tally[4],
+            "folded_faces": [int(f) for f in report.folded],
+        })
+
     def _apply_history_columns(self):
         """Trim the History's recorded columns per the ``history_columns`` config.
 
-        Only dataframes named in the config are touched, so the default (record
-        everything) is unchanged. A listed dataframe records the coords/topology
-        minimum needed to rebuild the epithelium plus the listed columns, and
-        nothing else. Config keys are ``vert_df``/``edge_df``/``face_df``/``cell_df``
-        (mirroring ``output_columns``); History elements drop the ``_df`` suffix.
+        A listed dataframe records the coords/topology minimum needed to rebuild
+        the epithelium plus the listed columns; unlisted ones keep the default
+        (everything). Config keys carry the ``_df`` suffix, History elements don't.
         """
         requested = self.config.get("history_columns") or {}
         if self.history is None or not requested:
@@ -283,11 +357,11 @@ class EulerSolver(Process):
             self.history.columns[el] = keep
 
     def _coerce_string_columns(self):
-        """pandas 3.0 gives scalar-string column assignments (e.g. ``cell_type``)
-        a ``StringDtype``, which bigraph-schema's ``get_frame_schema`` can't
-        introspect ('StringDtype' object has no attribute 'fields'). Coerce any
-        such columns back to plain object dtype on the live epithelium dataframes
-        so both ``outputs()`` (schema) and emission work."""
+        """Coerce pandas-3.0 ``StringDtype`` columns back to object dtype.
+
+        Scalar-string assignments (e.g. ``cell_type``) get a ``StringDtype`` that
+        bigraph-schema's ``get_frame_schema`` can't introspect, breaking both
+        ``outputs()`` and emission."""
         import pandas as pd
         for df_name in ("vert_df", "edge_df", "face_df", "cell_df"):
             df = getattr(self.eptm, df_name, None)
@@ -299,7 +373,6 @@ class EulerSolver(Process):
 
     def output_dfs(self):
         output_columns = self.config.get("output_columns", {})
-        # if output_columns is empty, just dump all dataframes as dicts
         output_dfs = {}
         if not output_columns:
             for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
@@ -342,13 +415,13 @@ class EulerSolver(Process):
         return vd.loc[self.eptm.active_verts, coords].values.ravel()
 
     def _topo_arrays(self):
-        """Cached topology lookups for the current mesh, rebuilt only when the
-        signature (Nv, Ne, Nf) changes. Returns ``(srce, trgt, face, active_pos)``:
-        the positional uint32 srce/trgt/face index arrays the kernels consume, plus
-        ``active_pos`` — the positions of ``active_verts`` in ``vert_df`` order, so
-        the gradient can be sliced to the active DOFs without rebuilding a lookup
-        dict every step. ``active_verts`` is a stable epithelium attribute reset
-        only on an index reset, which is exactly when our signature changes."""
+        """Cached ``(srce, trgt, face, active_pos)`` positional index arrays for the
+        kernels, rebuilt only when the signature (Nv, Ne, Nf) changes.
+
+        ``active_pos`` holds the positions of ``active_verts`` in ``vert_df`` order,
+        so the gradient can be sliced to the active DOFs without rebuilding a lookup
+        every step. Caching on the signature is safe because ``active_verts`` is
+        reset only on an index reset, which is exactly when the signature changes."""
         e = self.eptm
         sig = (e.Nv, e.Ne, e.Nf)
         if self._topo is None or self._topo[0] != sig:
@@ -378,7 +451,7 @@ class EulerSolver(Process):
         eptm = self.eptm
         srce, trgt, face, _ = self._topo_arrays()  # also refreshes _active_full
         p = pos.reshape((-1, eptm.dim))
-        if self._active_full:  # whole-column write, ~20× cheaper than .loc[active]
+        if self._active_full:  # whole-column write (see _topo_arrays)
             eptm.vert_df[eptm.coords] = p
             # p already IS the full vertex-position array — hand it to the kernel
             # so it needn't re-read what we just wrote.
@@ -395,7 +468,7 @@ class EulerSolver(Process):
         else:
             # Sheet path: the Rust gradient reads geometry from the stash, so the
             # hot loop only needs the observable columns in pandas each step; the
-            # intermediate coordinate blocks are materialised on demand (Phase B).
+            # intermediate coordinate blocks are materialised on demand.
             self._geom_stash = rust_geometry_update(
                 eptm, self.geom, srce, trgt, face, pos=kernel_pos, full=False
             )
@@ -431,29 +504,33 @@ class EulerSolver(Process):
             eptm.vert_df[coords] = vpos
         else:
             eptm.vert_df.loc[eptm.active_verts, coords] = vpos[active_pos]
-        materialize_geometry(eptm, geom, which=("edge", "face"), full=False)
+        # geom_cls: the positions above are the only input update_height needs,
+        # and it must run before sub_vol/vol are derived from height inside
+        # materialize_geometry. Once per update, not per substep — height is a
+        # pure function of the final positions.
+        materialize_geometry(eptm, geom, which=("edge", "face"), full=False,
+                             geom_cls=self.geom)
         self._geom_stash = geom
         self._geom_lean = True
 
     def to_dataframes(self, which=("edge", "face"), full=True):
-        """Materialize the current native geometry into the epithelium DataFrames
-        and return the epithelium. Public "convert only where you need it" hook:
-        after a native run the frames already hold positions + the observable
-        geometry (length/area/perimeter); call this to also refresh the full
-        intermediate edge coordinate blocks (``full=True``, the default) — e.g.
-        before inspecting raw geometry. No-op on the python backend (frames are
-        always current)."""
+        """Materialize the native geometry into the epithelium DataFrames.
+
+        A native run leaves the frames holding positions + observable geometry;
+        ``full=True`` also refreshes the intermediate edge coordinate blocks. No-op
+        on the python backend, where the frames are always current."""
         if self._geom_stash is not None and (full or self._geom_lean):
-            materialize_geometry(self.eptm, self._geom_stash, which=which, full=full)
+            materialize_geometry(self.eptm, self._geom_stash, which=which, full=full,
+                                 geom_cls=self.geom)
             if full:
                 self._geom_lean = False
         return self.eptm
 
     def record(self, t):
-        """Snapshot the current epithelium into the tyssue History (no-op when
-        history recording is disabled). On the rust/lean hot path the intermediate
-        edge-coordinate blocks are left native, so materialize the full geometry
-        first, otherwise History would archive stale sub-coordinates."""
+        """Snapshot the epithelium into the tyssue History (no-op if disabled).
+
+        The lean hot path leaves the edge-coordinate blocks native, so materialize
+        first — otherwise History archives stale sub-coordinates."""
         if self.history is None:
             return
         if self._geom_lean:
@@ -475,11 +552,8 @@ class EulerSolver(Process):
             )  # (Nv, dim)
             grad_U = grad[active_pos]
         elif self._rust_model:
-            # Compositional rust path: assemble the gradient effector-by-effector
-            # (covered terms via rust primitives, the rest via their tyssue
-            # ``.gradient``). Pass the native stash only when geometry is lean
-            # (its intermediate edge blocks aren't in pandas); otherwise the
-            # freshly-materialized frames are current.
+            # Assemble the gradient effector-by-effector. Pass the native stash
+            # only when geometry is lean; otherwise the frames are current.
             srce, trgt, face, active_pos = self._topo_arrays()
             geom = self._geom_stash if self._geom_lean else None
             grad = rust_model_gradient(
@@ -501,11 +575,11 @@ class EulerSolver(Process):
         }
 
     def _frame_schema_cached(self, name, df):
-        """``get_frame_schema`` re-introspects every column each call, and the
-        engine invokes ``outputs()`` on every process update — but the schema
-        only changes when a df's columns or dtypes change (division adds columns,
-        StringDtype coercion changes dtypes). Cache on a cheap (name, dtype)
-        signature and recompute only when it actually changes."""
+        """Cache ``get_frame_schema`` on a cheap (name, dtype) signature.
+
+        The engine calls ``outputs()`` every update and ``get_frame_schema``
+        re-introspects every column, but the schema only changes when a df's
+        columns or dtypes do."""
         sig = tuple(zip(map(str, df.columns), map(str, df.dtypes)))
         cache = getattr(self, "_schema_cache", None)
         if cache is None:
@@ -537,6 +611,28 @@ class EulerSolver(Process):
 
     def update(self, inputs, interval):
         log.debug("EulerSolver step t=%s", inputs["global_time"])
+
+        # tyssue's `detach_vertices` (behaviors/sheet/actions.py:73) reads
+        #     dt = sheet.settings.get("dt", 1.0)
+        # and scales p_4 / p_5p by it, because those are documented as
+        # probabilities *per unit time*. Nothing here ever set it, so dt silently
+        # fell back to 1.0 and a 0.1/unit-time rate became 0.1 *per step* — at the
+        # crypt's interval of 0.001 that is 1000x too fast. Measured effect over
+        # 4000 steps from the same mesh: 1250 topology operations (31% of steps,
+        # merges and splits near-perfectly matched — futile cycling) versus 11 once
+        # dt is supplied, and a 15x calmer mesh. tyssue's own solvers set this
+        # (solvers/viscous.py:126, 180, 233); this one did not.
+        #
+        # `interval`, not `interval / substeps`: the EventManager — and therefore
+        # `reconnect` — executes once per update() call regardless of how many
+        # Euler substeps ran inside it.
+        #
+        # Set here rather than in initialize() because initialize() has no access
+        # to the interval (process_bigraph passes it only to update), and because
+        # the scheduler may hand over a shortened interval when synchronising with
+        # another process, so a value fixed once at startup can be wrong.
+        self.eptm.settings["dt"] = interval
+
         behavior_update = []
         if len(inputs["behaviors"]) > 0:
             for kwargs in inputs["behaviors"]:
@@ -560,37 +656,31 @@ class EulerSolver(Process):
                 dot_r = np.clip(dot_r, *self.bounds)
             delta = dot_r * interval
             if self._max_disp:
-                # Bound any single-step motion (division / extrusion transient)
-                # so a momentary huge gradient relaxes over several steps instead
-                # of exploding to NaN. Component-wise clamp keeps it cheap.
+                # Component-wise clamp (see max_displacement in config_schema).
                 np.clip(delta, -self._max_disp, self._max_disp, out=delta)
             pos = pos + delta
             self.set_pos(pos)
 
         if self.manager is not None:
-            # Behaviours may read the full edge geometry (normals, ucoords, …) that
-            # the lean hot-loop left native; refresh the frames only when behaviours
-            # actually run this step (the manager is repopulated from inputs each
-            # update, so no behaviours in → nothing to execute). Pure integration
-            # steps skip it and keep the lean fast path.
+            # Behaviours may read full edge geometry that the lean hot loop left
+            # native. The manager is repopulated from inputs each update, so no
+            # behaviours in → nothing to execute → keep the lean fast path.
             if inputs["behaviors"] and self._geom_lean:
                 self.to_dataframes(full=True)
             self.manager.execute(self.eptm)
-            # Only rebuild geometry if a behavior actually changed the mesh.
-            # Every topology-changing path (division, T1/T2, reconnect) sets
-            # network_changed (both tyssue's topology ops and our behaviors do);
-            # parameter-only behaviors (e.g. line-tension setters) don't move
-            # vertices, so the geometry from set_pos above is still current and
-            # a second full update_all is pure waste (~half of update_all cost).
+            # Every topology-changing path sets network_changed. Parameter-only
+            # behaviors don't move vertices, so set_pos's geometry is still current
+            # and a second update_all would be pure waste (~half of update_all cost).
             if self.eptm.network_changed:
-                # Topology changed: full python update_all rebuilds geometry AND
-                # the boundary/opposite index for the new mesh; drop the cached
-                # positional arrays so the next set_pos rebuilds them.
+                # update_all rebuilds geometry AND the boundary/opposite index for
+                # the new mesh; drop the cached arrays so set_pos rebuilds them.
                 self.geom.update_all(self.eptm)
                 self._topo = None
                 self._geom_stash = None  # stale after a topology change / update_all
                 self._geom_lean = False  # update_all rewrote all geometry columns
             self.manager.update()
+            if self._check_intersections:
+                self._record_intersections(inputs["global_time"])
 
         if self.eptm.network_changed:
             network_changed = True
@@ -599,10 +689,8 @@ class EulerSolver(Process):
 
         self.eptm.network_changed = False
 
-        # Behaviors (differentiation, division) may re-introduce StringDtype
-        # cell_type columns under pandas 3.0; coerce before schema/emission.
-        # Nothing else adds string columns mid-run (init already coerced), so
-        # skip the all-column scan on plain integration steps — the common case.
+        # Only behaviors re-introduce StringDtype columns mid-run (init already
+        # coerced), so plain integration steps skip the all-column scan.
         if inputs["behaviors"] or network_changed:
             self._coerce_string_columns()
 
@@ -621,12 +709,7 @@ if __name__ == "__main__":
     from vivarium_tyssue.processes import register_processes
     import pandas as pd
     from matplotlib import pyplot as plt
-    # create the core object
     core = allocate_core()
     core.register_link("EulerSolver", EulerSolver)
     core = register_types(core)
     core = register_processes(core)
-    # register data types
-
-
-

@@ -1,8 +1,15 @@
 import numpy as np
+import pandas as pd
 
 from tyssue.topology.sheet_topology import cell_division, remove_face
 from tyssue.topology.monolayer_topology import cell_division as monolayer_cell_division
 from vivarium_tyssue.core_maps import GEOMETRY_MAP
+# Repairs the duplicate unique_ids tyssue's clone-a-row topology helpers leave
+# behind; see that module's docstring for why every division / extrusion needs it.
+from vivarium_tyssue.behaviors.unique_ids import (  # noqa: F401  (re-exported)
+    refresh_unique_ids,
+    reserve_uids as _reserve_uids,
+)
 
 # Install the tyssue topology robustness shims (drop_two_sided_faces /
 # split_vert guards) as soon as any behavior is imported — cell_division and
@@ -76,25 +83,33 @@ def divide_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
     if radius is None:
         radius = (sheet.vert_df["x"].max() - sheet.vert_df["x"].min())/2
     daughter = cell_division(sheet, cell_idx, geom)
+    refresh_unique_ids(sheet)   # daughter face + new verts/edges clone the mother's ids
     fix_points_cylinder(sheet, radius=radius)
     return daughter
 
 # ---------------------------------------------------------------------------
 # Batched grow/shrink of committed cells
 #
-# division() / apoptosis_extrusion() used to re-run one manager callback per
-# committed cell every step just to scale a single ``prefered_area`` scalar —
-# tens of thousands of pandas .loc calls dominating the crypt profile. Instead a
-# commit records the cell's *own* growth parameters (which still arrive per-cell
-# from whatever external process emitted the behavior) into transient per-face
+# A commit records the cell's *own* growth parameters (which arrive per-cell from
+# whatever external process emitted the behavior) into transient per-face
 # ``commit_*`` columns, and a single batched grower (queued once) does the whole
 # grow/shrink in one vectorized pass, firing the real topology op only for the
-# cells that crossed their own threshold. The rates stay a property of the
-# emitted behavior — nothing moves onto the sheet settings or the solver config.
+# cells that crossed their own threshold. One callback per step total, rather
+# than one per committed cell — the per-cell form cost tens of thousands of
+# pandas .loc calls and dominated the crypt profile.
 # ---------------------------------------------------------------------------
 
+# Fallback floor on a dying cell's shrinking ``prefered_area``: once the death target
+# collapses past it the cell is removed even if its actual area never reached
+# ``crit_area``. Needed where extruding cells stay mechanically stretched (the crypt's
+# free top rim). Per-commitment overridable via ``apoptosis_extrusion(death_floor=...)``
+# — set it low to hand control back to ``crit_area``.
+DEATH_FLOOR = 0.5
+
 # commit_state: 0 = not committed, 1 = dividing, 2 = extruding.
-_COMMIT_DEFAULTS = {"commit_state": 0.0, "commit_rate": 0.0, "commit_crit": 0.0, "commit_dt": 0.0}
+_COMMIT_DEFAULTS = {"commit_state": 0.0, "commit_rate": 0.0, "commit_crit": 0.0,
+                    "commit_dt": 0.0, "commit_floor": DEATH_FLOOR,
+                    "commit_contract": 0.0}
 _GROWER_NAME = "_grow_committed_cells"
 
 
@@ -129,9 +144,8 @@ def _clear_commit(sheet, idx, restore_type=None):
 
 
 def _do_division(sheet, geometry, cell_uid):
-    """Actual split of a division-ready cell (identical topology handling to the
-    former in-callback path), then restore its target cell_type and clear the
-    commit flags on both mother and daughter."""
+    """Split a division-ready cell, then restore its target cell_type and clear
+    the commit flags on both mother and daughter."""
     cell_id = face_index_for(sheet, cell_uid)
     if cell_id is None:
         return
@@ -139,6 +153,9 @@ def _do_division(sheet, geometry, cell_uid):
     target_type = sheet.face_df.loc[cell_id, "commit_type"]
     sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
     daughter = cell_division(sheet, cell_id, geometry)
+    # Before reset_index, while the clones are still the appended tail: the mother
+    # keeps cell_uid, the daughter face and the new verts/edges get fresh ids.
+    refresh_unique_ids(sheet)
     sheet.reset_index(order=True)
     geometry.update_all(sheet)
     sheet.network_changed = True
@@ -149,8 +166,7 @@ def _do_division(sheet, geometry, cell_uid):
 
 
 def _do_extrusion(sheet, geometry, cell_uid):
-    """Actual removal of an extrusion-ready cell (identical topology handling to
-    the former in-callback path)."""
+    """Remove an extrusion-ready cell from the mesh."""
     cell_id = face_index_for(sheet, cell_uid)
     if cell_id is None:
         return
@@ -165,6 +181,10 @@ def _do_extrusion(sheet, geometry, cell_uid):
         if cid is not None:
             _clear_commit(sheet, int(cid))
         return
+    # remove_face's replacement centroid vertex clones one of the collapsed
+    # vertices (which it then drops, so usually no duplicate survives) — but
+    # drop_two_sided_faces can also run here, so repair defensively.
+    refresh_unique_ids(sheet)
     sheet.reset_index(order=True)
     _drop_isolated_verts(sheet)
     # Project vertices back onto the cylinder surface BEFORE updating geometry
@@ -202,15 +222,29 @@ def _grow_committed_cells(sheet, manager, geom="SheetGeometry"):
     prefered[ext_mask] *= (1.0 - dt[ext_mask] * rate[ext_mask])
     fd["prefered_area"] = prefered
 
+    # Apoptotic constriction (opt-in per commitment): contract the dying cell's target
+    # perimeter at the same rate. A cell still holding its full prefered_perimeter
+    # cannot shrink far — on a flat square at P_0 = 3.6 its actual area plateaus
+    # around 0.35 however small the area target gets — so without this a small
+    # crit_area is simply unreachable and only the death floor can remove the cell.
+    if "prefered_perimeter" in fd.columns and "commit_contract" in fd.columns:
+        contract = ext_mask & (fd["commit_contract"].to_numpy(dtype=float) > 0.0)
+        if contract.any():
+            perim = fd["prefered_perimeter"].to_numpy(dtype=float).copy()
+            perim[contract] *= (1.0 - dt[contract] * rate[contract])
+            fd["prefered_perimeter"] = perim
+
     # Threshold crossers -> real topology ops (resolved by unique_id, since each
     # op reindexes face_df). Division on area>crit; extrusion once the actual
     # area falls below crit OR the death target (prefered_area) has collapsed.
     area = fd["area"].to_numpy(dtype=float)
     crit = fd["commit_crit"].to_numpy(dtype=float)
-    DEATH_FLOOR = 0.5
+    floor = (fd["commit_floor"].to_numpy(dtype=float)
+             if "commit_floor" in fd.columns
+             else np.full(len(fd), DEATH_FLOOR))
     uid = fd["unique_id"].to_numpy()
     div_ready = uid[div_mask & (area > crit)]
-    ext_ready = uid[ext_mask & ((area < crit) | (prefered < DEATH_FLOOR))]
+    ext_ready = uid[ext_mask & ((area < crit) | (prefered < floor))]
 
     for cell_uid in div_ready:
         _do_division(sheet, geometry, int(cell_uid))
@@ -293,12 +327,14 @@ def apoptosis_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
         cell_idx = int(face_index_for(sheet, cell_uid))
     if radius is None:
         radius = (sheet.vert_df["x"].max() - sheet.vert_df["x"].min())/2
-    vertex = remove_face(sheet, cell_idx)
+    remove_face(sheet, cell_idx)
+    refresh_unique_ids(sheet)
     fix_points_cylinder(sheet, radius=radius)
     geom.update_all(sheet)
 
 def apoptosis_extrusion(
-        sheet, manager, geom= "SheetGeometry", cell_uid=0, crit_area=0.5, shrink_rate=0.1, dt=1.
+        sheet, manager, geom="SheetGeometry", cell_uid=0, crit_area=0.5, shrink_rate=0.1,
+        dt=1., death_floor=DEATH_FLOOR, contract_perimeter=False,
 ):
     """Commit a cell to apoptotic extrusion.
 
@@ -306,10 +342,17 @@ def apoptosis_extrusion(
     it ``"extruding"``, and hands off to the batched grower, which shrinks every
     committed cell's ``prefered_area`` and removes it once its actual ``area``
     falls below ``crit_area`` OR its death target ``prefered_area`` collapses
-    below ``DEATH_FLOOR`` (0.5). The DEATH_FLOOR criterion matters in the crypt:
-    extrusion is Wnt/z-biased to the free top rim, where cells stay mechanically
-    stretched (large actual area), so without it a committed cell's actual area
-    never reaches crit_area and it would never die.
+    below ``death_floor`` (default :data:`DEATH_FLOOR` = 0.5). The floor matters in
+    the crypt: extrusion is Wnt/z-biased to the free top rim, where cells stay
+    mechanically stretched (large actual area), so without it a committed cell's
+    actual area never reaches crit_area and it would never die.
+
+    On a relaxed flat sheet the opposite holds — the floor fires long before the
+    cell has visibly shrunk, so ``crit_area`` never governs. Pass a ``death_floor``
+    below ``crit_area`` there to let the area threshold decide, and set
+    ``contract_perimeter`` so the cell's target perimeter constricts with its target
+    area: a cell holding its full ``prefered_perimeter`` stalls well above a small
+    ``crit_area`` no matter how far the area target falls.
     """
     cell_id = face_index_for(sheet, cell_uid)
     if cell_id is None:
@@ -318,11 +361,19 @@ def apoptosis_extrusion(
     cell_id = int(cell_id)
     _ensure_commit_cols(sheet)
     fd = sheet.face_df
+    # Stash the pre-extrusion type in commit_type. A live run never reads it back
+    # (only _do_division does, and this cell is on its way out), but a checkpoint
+    # taken mid-commitment needs it to restore the cell's real type on restart.
+    prior_type = fd.loc[cell_id, "cell_type"]
+    if isinstance(prior_type, str) and prior_type not in ("dividing", "extruding"):
+        fd.loc[cell_id, "commit_type"] = prior_type
     fd.loc[cell_id, "cell_type"] = "extruding"
     fd.loc[cell_id, "commit_state"] = 2.0
     fd.loc[cell_id, "commit_rate"] = shrink_rate
     fd.loc[cell_id, "commit_crit"] = crit_area
     fd.loc[cell_id, "commit_dt"] = dt
+    fd.loc[cell_id, "commit_floor"] = death_floor
+    fd.loc[cell_id, "commit_contract"] = 1.0 if contract_perimeter else 0.0
     _ensure_grower(sheet, manager, geom)
 
 def update_tension(sheet, manager, tension_update=None):
@@ -333,6 +384,125 @@ def update_tension(sheet, manager, tension_update=None):
             sheet.edge_df["unique_id"].isin(tension_update),
             "line_tension"
         ] = sheet.edge_df["unique_id"].map(tension_update)
+
+# ---------------------------------------------------------------------------
+# Differential adhesion — tension set by the *identity* of the two cells an edge
+# separates, recomputed from the live mesh.
+#
+# In a differential-adhesion cell-sorting model the interfacial tension of a
+# junction is not a property the junction keeps, it is a property of the PAIR of
+# cells it separates: an interface between two cells of the same type is a
+# homotypic (low-tension, strongly adhering) contact, an interface between cells
+# of different types a heterotypic (high-tension, poorly adhering) one. Sorting
+# is driven by making the heterotypic tension the larger of the two, so the
+# tissue minimises its energy by shrinking the mixed interface.
+#
+# That identity must therefore be re-evaluated *every* time the mesh changes.
+# A T1 transition rewires a junction between a different pair of cells (and a
+# division / extrusion mints whole new edges), so tensions written once at
+# t = 0 and keyed by edge would end up on the wrong interfaces. The behavior
+# below re-classifies every half-edge from the current topology each time it is
+# executed, which is why the classification lives here — inside the solver's
+# EventManager, acting on the real epithelium — rather than in the process that
+# requests it, which only ever sees the mesh from before the step.
+#
+# (EventManager.update shuffles its queue, so within a step this runs either just
+# before or just after tyssue's `reconnect`; a junction born of a T1 that lands
+# after it picks up its tension on the next step. Never more than one step stale.)
+# ---------------------------------------------------------------------------
+
+def opposite_half_edges(sheet):
+    """Positional index of each half-edge's opposite, ``-1`` where there is none.
+
+    Half-edge ``(srce, trgt)`` of face ``f`` is opposed by ``(trgt, srce)`` of the
+    neighbouring face. A boundary edge of an open sheet has no opposite. We derive
+    this from ``srce``/``trgt`` rather than trusting ``edge_df["opposite"]``: that
+    column is written by ``Sheet.get_opposite()`` and is only as fresh as the last
+    call, whereas this is computed from the topology as it stands right now.
+
+    Returned indices are **positional** (0..Ne-1), so they index numpy arrays taken
+    from ``edge_df`` in row order — not ``edge_df.loc`` labels.
+    """
+    edge_df = sheet.edge_df
+    srce = edge_df["srce"].to_numpy()
+    trgt = edge_df["trgt"].to_numpy()
+    forward = pd.Series(
+        np.arange(len(edge_df)),
+        index=pd.MultiIndex.from_arrays([srce, trgt]),
+    )
+    # A well-formed mesh has one half-edge per (srce, trgt); dedup defensively so a
+    # transiently degenerate mesh raises no reindex error mid-run.
+    forward = forward[~forward.index.duplicated(keep="first")]
+    opposite = forward.reindex(pd.MultiIndex.from_arrays([trgt, srce])).to_numpy()
+    return np.where(np.isnan(opposite), -1, np.nan_to_num(opposite)).astype(int)
+
+
+def heterotypic_edges(sheet, type_column="cell_type", opposite=None):
+    """Boolean mask over half-edges: ``True`` where the two faces sharing the edge
+    carry different ``type_column`` values.
+
+    Boundary half-edges (no opposite) are ``False`` — they separate a cell from the
+    outside, not from another cell type; :func:`differential_adhesion` gives them
+    their own tension if one is configured. Pass ``opposite`` to reuse an already
+    computed :func:`opposite_half_edges`.
+    """
+    if opposite is None:
+        opposite = opposite_half_edges(sheet)
+    own = sheet.upcast_face(sheet.face_df[type_column]).to_numpy()
+    # `opposite` is -1 on boundary edges; index with 0 there and mask it out after.
+    neighbour = own[np.where(opposite >= 0, opposite, 0)]
+    return (opposite >= 0) & (own != neighbour)
+
+
+def differential_adhesion(
+        sheet,
+        manager,
+        homotypic_tension=0.0,
+        heterotypic_tension=0.0,
+        boundary_tension=None,
+        type_column="cell_type",
+        record_column="heterotypic",
+):
+    """Set every junction's ``line_tension`` from the identity of the cells it separates.
+
+    Parameters
+    ----------
+    sheet : a :class:`Sheet` object
+    manager : a :class:`EventManager` object
+    homotypic_tension : float
+        tension on an interface between two cells of the SAME ``type_column`` value.
+    heterotypic_tension : float
+        tension on an interface between two cells of DIFFERENT ``type_column``
+        values. Making this the larger of the two is what drives sorting.
+    boundary_tension : float or None
+        tension on half-edges with no opposite (the free border of an open sheet).
+        ``None`` (default) leaves them at ``homotypic_tension``. A closed sheet has
+        none of these.
+    type_column : str
+        the ``face_df`` column holding the cell type. Any hashable labels work.
+    record_column : str or None
+        if the ``edge_df`` column of this name exists, the 0/1 heterotypic flag is
+        written into it so the classification is recorded in the solver's History
+        alongside the tension (the column must already exist at solver start-up —
+        declare it in the EulerSolver ``parameters`` — because tyssue's History
+        fixes its column list when it is built).
+    """
+    edge_df = sheet.edge_df
+    if len(edge_df) == 0 or type_column not in sheet.face_df.columns:
+        return
+    if edge_df["line_tension"].dtype != np.float64:
+        edge_df["line_tension"] = edge_df["line_tension"].astype(float)
+
+    opposite = opposite_half_edges(sheet)
+    hetero = heterotypic_edges(sheet, type_column=type_column, opposite=opposite)
+    tension = np.where(hetero, float(heterotypic_tension), float(homotypic_tension))
+    if boundary_tension is not None:
+        tension = np.where(opposite < 0, float(boundary_tension), tension)
+
+    edge_df["line_tension"] = tension
+    if record_column and record_column in edge_df.columns:
+        edge_df[record_column] = hetero.astype(float)
+
 
 def cell_jamming(sheet, manager, rate, limits, dt):
     if (sheet.face_df["prefered_perimeter"].mean()) > limits[0] or (sheet.face_df["prefered_perimeter"].mean() < limits[1]):
@@ -382,8 +552,8 @@ def differentiation(sheet, manager, cell_uid, new_type):
 #
 # These mirror the 2D commit-column / batched-grower design (one vectorized
 # grow pass over all committed cells per step, then fire the topology op only
-# for threshold crossers), but on cell_df / vol, and are kept separate so the
-# battle-tested 2D crypt/tumor path is untouched.
+# for threshold crossers), but on cell_df / vol. They are deliberately separate
+# functions rather than a shared dimension-agnostic path.
 # ---------------------------------------------------------------------------
 
 def _is_3d(eptm):
@@ -575,6 +745,11 @@ def _do_division_3d(eptm, geometry, cell_uid):
             _clear_cell_commit(eptm, cid, restore_type=(str(tt) if tt else None))
         eptm.network_changed = True
         return
+    # The monolayer split clones rows for the new faces / edges / vertices too, so
+    # repair those here (before reset_index); the daughter *cell* is renumbered
+    # explicitly just below, since which twin keeps cell_uid matters for the
+    # commit bookkeeping and must not depend on row order.
+    refresh_unique_ids(eptm, elements=("vert", "edge", "face"))
     # Mother and daughter now both carry cell_uid; give the daughter a fresh id.
     cd = eptm.cell_df
     twins = list(cd.index[cd["unique_id"] == cell_uid])
@@ -586,7 +761,9 @@ def _do_division_3d(eptm, geometry, cell_uid):
         eptm.network_changed = True
         return
     daughter = twins[-1]
-    new_uid = int(cd["unique_id"].max()) + 1
+    # via the shared counter rather than max()+1, so an id retired by an earlier
+    # necrosis is never handed out a second time
+    new_uid = int(_reserve_uids(eptm, "cell", 1)[0])
     cd.loc[daughter, "unique_id"] = new_uid
     if "id" in cd.columns:
         cd.loc[daughter, "id"] = int(cd["id"].max()) + 1

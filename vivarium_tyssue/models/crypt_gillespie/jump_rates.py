@@ -114,9 +114,24 @@ def cell_to_wnt(face_df, cell_uid, uid_pos=None, axis="z"):
     pos = _face_pos(face_df, cell_uid, uid_pos)
     return float(np.asarray(face_df[axis])[pos])
 
+# Floor on the area used for the density regulator. A face can be *momentarily*
+# degenerate — area exactly 0.0 — right after a division, an extrusion's remove_face
+# collapses its vertices, or a T1 swap, before geometry is refreshed and the remnant
+# pruned; the Gillespie reads face_df through the shared store and can sample it in
+# that window, where 1/area raised ZeroDivisionError and killed the whole run.
+#
+# Clamping is exact here, not an approximation: this value feeds
+# reg_pol(x, K, k) with K=1, k=0.3 for every density-regulated transition, and that
+# smoothstep saturates at 1 for x >= K+k, i.e. for any area <= ~0.77. So every area
+# below the floor already yields the same regulation value as the area -> 0 limit
+# (infinite density = maximal crowding).
+_MIN_DENSITY_AREA = 1e-9
+
+
 def cell_to_density(face_df, cell_uid, uid_pos=None):
     pos = _face_pos(face_df, cell_uid, uid_pos)
-    return 1 / float(np.asarray(face_df["area"])[pos])
+    area = float(np.asarray(face_df["area"])[pos])
+    return 1 / max(area, _MIN_DENSITY_AREA)
 
 #dict mapping regulation label to regulation value function
 regulations_map = {

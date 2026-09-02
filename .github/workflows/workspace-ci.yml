@@ -77,7 +77,13 @@ jobs:
           ls -la external/ 2>&1 || true
       - uses: actions/setup-python@v6
         with:
-          python-version: "3.11"
+          # DEVIATES FROM viva-template (which renders "3.11") on purpose: this
+          # workspace's pyproject.toml sets requires-python = ">=3.12", so the
+          # editable install below fails outright on 3.11 with
+          #   "the current Python version (3.11.x) does not satisfy Python>=3.12".
+          # Push this upstream (template should follow requires-python) rather
+          # than reverting it on the next regeneration.
+          python-version: "3.12"
       - name: Install uv
         run: pip install uv
       - name: Set up venv and install

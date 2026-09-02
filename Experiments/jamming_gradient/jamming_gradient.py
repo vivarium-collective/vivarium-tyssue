@@ -16,11 +16,12 @@ line-tension fluctuations act on every edge.
 This script **only runs the simulations and archives each scenario's
 full-resolution ``History`` to a compressed HDF5 file**
 (``outputs/<jamming|gradient>/history.hf5``). All visualisation (colour-coded GIF,
-still frames) and analysis (migrating-cell trace, displacement / velocity /
-preferred-perimeter plots, cell-circularity plots) now live in the companion
-notebook ``jamming_gradient_analysis.ipynb``, which reopens the archives with
-``tyssue``'s ``HistoryHdf5.from_archive``. Re-analyse without re-simulating, and
-re-simulate without disturbing previous analysis.
+still frames) and analysis (migrating-cell trace, a combined over-time figure per
+scenario — displacement + circularity for jamming, displacement + preferred
+perimeter for the gradient — velocity vs x, circularity binned along x) live in the
+companion notebook
+``jamming_gradient_analysis.ipynb``, which reopens the archives with ``tyssue``'s
+``HistoryHdf5.from_archive``.
 
 Everything lands under ``outputs/`` (input mesh under ``data/``), both git-ignored.
 Run from the repo's ``vivarium-tyssue`` conda env:
@@ -63,7 +64,11 @@ GRAD_TF, GRAD_DT = 400.0, 0.05
 GRAD_ARGS = {"m": -0.1, "c": 4.6}   # prefered_perimeter = m*x + c
 
 COORDS = ["x", "y"]
-SEED = 20260714
+# One seed per scenario, applied immediately before that run, so either scenario
+# reproduces its own archive when re-run on its own. (With a single seed at the top
+# of main(), the gradient run depended on the jamming run having consumed the stream
+# first, so re-running one scenario silently changed the other.)
+SEEDS = {"jamming": 20260811, "gradient": 20260714}
 
 # Colour range the analysis notebook uses for the prefered-perimeter colour map;
 # defined here so both scenarios share one source of truth.
@@ -143,7 +148,7 @@ def _base_spec(config: dict, dt: float) -> dict:
             "config": config,
             "inputs": {"behaviors": ["Behaviors"], "global_time": ["global_time"]},
             "outputs": {
-                "datasets": ["Datasets"],
+                "datasets": ["Tissue State"],
                 "network_changed": ["Network Changed"],
                 "behaviors_update": ["Behaviors"],
             },
@@ -153,7 +158,7 @@ def _base_spec(config: dict, dt: float) -> dict:
             "_type": "process",
             "address": "local:StochasticLineTension",
             "config": {"tau": TAU, "sigma": SIGMA},
-            "inputs": {"datasets": ["Datasets"]},
+            "inputs": {"datasets": ["Tissue State"]},
             "outputs": {"behaviors": ["Behaviors"]},
             "interval": dt,
         },
@@ -171,7 +176,7 @@ def build_jamming_spec(dataset_path: Path) -> dict:
         "_type": "process",
         "address": "local:CellJamming",
         "config": {"trigger_time": JAM_TRIGGER, "rate": JAM_RATE, "limits": JAM_LIMITS},
-        "inputs": {"global_time": ["global_time"], "datasets": ["Datasets"]},
+        "inputs": {"global_time": ["global_time"], "datasets": ["Tissue State"]},
         "outputs": {"behaviors": ["Behaviors"]},
         "interval": JAM_DT,
     }
@@ -190,7 +195,7 @@ def build_gradient_spec(dataset_path: Path) -> dict:
             "args": GRAD_ARGS,
             "model_parameters": {"prefered_perimeter": "face"},
         },
-        "inputs": {"datasets": ["Datasets"]},
+        "inputs": {"datasets": ["Tissue State"]},
         "outputs": {"behaviors": ["Behaviors"]},
     }
     return spec
@@ -255,7 +260,6 @@ def save_history(history, path: Path, keep_frames: int | None = ARCHIVE_FRAMES):
 # Driver
 # ---------------------------------------------------------------------------
 def main():
-    np.random.seed(SEED)
     sys.path.insert(0, str(REPO))
     from vivarium_tyssue.core import build_core
 
@@ -267,6 +271,7 @@ def main():
     jam_dir = OUT_DIR / "jamming"
     jam_dir.mkdir(parents=True, exist_ok=True)
     print(f"[jamming] running tf={JAM_TF} dt={JAM_DT} (python backend) ...", flush=True)
+    np.random.seed(SEEDS["jamming"])
     hist_j = run(core, build_jamming_spec(dataset), JAM_TF)
     save_history(hist_j, jam_dir / "history.hf5")
     print(f"[jamming] archived {len(list(hist_j.time_stamps))} frames -> {jam_dir / 'history.hf5'}", flush=True)
@@ -275,6 +280,7 @@ def main():
     grad_dir = OUT_DIR / "gradient"
     grad_dir.mkdir(parents=True, exist_ok=True)
     print(f"[gradient] running tf={GRAD_TF} dt={GRAD_DT} (python backend) ...", flush=True)
+    np.random.seed(SEEDS["gradient"])
     hist_g = run(core, build_gradient_spec(dataset), GRAD_TF)
     save_history(hist_g, grad_dir / "history.hf5")
     print(f"[gradient] archived {len(list(hist_g.time_stamps))} frames -> {grad_dir / 'history.hf5'}", flush=True)

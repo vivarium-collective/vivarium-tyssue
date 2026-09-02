@@ -98,7 +98,7 @@ readouts:
 - {name: tumor_births,   store_path: tumor_births,   units: events/step}
 - {name: healthy_deaths, store_path: healthy_deaths, units: events/step}
 # The mesh dataframes (vert_df/edge_df/face_df/cell_df) are emitted to runs.db
-# Datasets/* and consumed by the TissueSheetGif/Snapshots viz directly; they are
+# Tissue State/* and consumed by the TissueSheetGif/Snapshots viz directly; they are
 # whole-DataFrame stores, not canonical scalar selectors, so they are not listed
 # as readouts (which are evaluable observables for behavior_tests).
 visualizations:

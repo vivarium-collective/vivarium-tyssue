@@ -1,6 +1,6 @@
 """DataFrame-native Parquet emitter for tyssue (and any process emitting pandas DataFrames).
 
-The generic ``pbg_emitters.ParquetEmitter`` is *row-oriented*: every emit is
+The generic ``viva_emitters.ParquetEmitter`` is *row-oriented*: every emit is
 ``flatten_dict``-ed into a single history row, with per-field numpy/Polars dtype
 reconciliation. That model fights tyssue, whose per-tick observables are whole
 pandas DataFrames (``vert_df`` 410x11, ``edge_df`` ~1200xN, ``face_df``,
@@ -86,10 +86,18 @@ class DataFrameParquetEmitter(Emitter):
         parts = [f"{k}={self.metadata.get(k, '')}" for k in self.partitioning_keys]
         return os.path.join(*parts) if parts else ""
 
-    @staticmethod
-    def _frame_name(port: str) -> str:
-        """Clean dataset name from the wired port key (strips a `Datasets_` prefix)."""
-        return port[len("Datasets_"):] if port.startswith("Datasets_") else port
+    # Store prefixes stripped off a wired port key (`Tissue State/vert_df` arrives
+    # as the port `Tissue State_vert_df`). `Datasets_` is the store's former name,
+    # kept so parquet written by older specs still lands in the same frame dirs.
+    _STORE_PREFIXES = ("Tissue State_", "Datasets_")
+
+    @classmethod
+    def _frame_name(cls, port: str) -> str:
+        """Clean dataset name from the wired port key (strips the store prefix)."""
+        for prefix in cls._STORE_PREFIXES:
+            if port.startswith(prefix):
+                return port[len(prefix):]
+        return port
 
     @staticmethod
     def _canonical_string_types(table):

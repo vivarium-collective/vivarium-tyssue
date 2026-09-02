@@ -93,7 +93,7 @@ def composite_doc(name, description, eptm_rel, tissue_type="Sheet", interval=0.0
                     "max_displacement": max_displacement,
                 },
                 "inputs": {"behaviors": ["Behaviors"], "global_time": ["global_time"]},
-                "outputs": {"datasets": ["Datasets"], "network_changed": ["Network Changed"],
+                "outputs": {"datasets": ["Tissue State"], "network_changed": ["Network Changed"],
                             "behaviors_update": ["Behaviors"]},
                 "interval": "${interval}",
             },

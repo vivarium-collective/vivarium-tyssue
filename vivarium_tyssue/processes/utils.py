@@ -88,9 +88,11 @@ def rust_bulk_geometry_update(eptm, srce, trgt, face, cell, pos=None):
 
 def rust_geometry_update(eptm, geom, srce, trgt, face, pos=None, full=True):
     """Rust replacement for ``geom.update_all``: the SheetGeometry core via the
-    kernel, plus any cheap geometry-specific vertex steps. VesselGeometry adds
-    ``update_tangents`` + ``update_vert_distance`` (vectorized numpy, no groupby),
-    replayed here so the result is bit-identical to the python update_all.
+    kernel, plus the vertex steps the kernel does not cover, so the result matches
+    the python ``update_all``: ``SheetGeometry.update_height`` (rho/height, and the
+    sub_vol/vol derived from them — see ``materialize_geometry``) for every sheet
+    geometry, and for VesselGeometry additionally ``update_tangents`` +
+    ``update_vert_distance`` (vectorized numpy, no groupby).
 
     ``pos`` is an optional full ``(Nv, dim)`` float64 vertex-position array the
     caller already holds (from the integration step), passed to skip re-reading
@@ -99,7 +101,8 @@ def rust_geometry_update(eptm, geom, srce, trgt, face, pos=None, full=True):
     Returns the ``stash`` dict of gradient-input arrays from the kernel (see
     ``rust_update_geometry``) so the caller can feed it straight into
     ``rust_sheet_gradient`` and skip re-reading those columns from pandas."""
-    stash = rust_update_geometry(eptm, srce, trgt, face, pos=pos, full=full)
+    stash = rust_update_geometry(eptm, srce, trgt, face, pos=pos, full=full,
+                                 geom_cls=geom)
     if geom.__name__ == "VesselGeometry":
         geom.update_tangents(eptm)
         geom.update_vert_distance(eptm)
@@ -142,7 +145,7 @@ def compute_geometry(eptm, srce, trgt, face, pos, old_len):
     }
 
 
-def materialize_geometry(eptm, geom, which=("edge", "face"), full=True):
+def materialize_geometry(eptm, geom, which=("edge", "face"), full=True, geom_cls=None):
     """Modular converter: write native geometry arrays (from ``compute_geometry``)
     back into the epithelium's tyssue DataFrames — the single place the Rust path
     touches pandas for geometry.
@@ -165,10 +168,23 @@ def materialize_geometry(eptm, geom, which=("edge", "face"), full=True):
       ``geom`` stash, not pandas, and nothing downstream (emitters, viz, behaviours)
       reads them, so skipping their write each step is unobservable. They stay
       materialisable on demand via ``EulerSolver.to_dataframes(full=True)``.
+
+    ``geom_cls`` is the tyssue geometry class (``SheetGeometry``/``VesselGeometry``).
+    It is required whenever the mesh carries a ``height`` column, because ``sub_vol``
+    and ``vol`` are derived from ``vert_df["height"]`` and only ``update_height``
+    refreshes that — the Rust kernel has no equivalent for it.
     """
     coords = eptm.coords
     ed, fd = eptm.edge_df, eptm.face_df
     has_height = "height" in eptm.vert_df.columns
+    if has_height and geom_cls is None:
+        # sub_vol/vol below are derived from vert_df["height"], which only
+        # update_height refreshes. Refusing loudly beats silently deriving them
+        # from a stale height -- the bug this parameter exists to close.
+        raise ValueError(
+            "materialize_geometry needs geom_cls to refresh vert_df['height'] "
+            "before deriving sub_vol/vol; pass the geometry class."
+        )
     # A stash whose edge/face counts no longer match the frames is stale (a
     # topology change the solver didn't rebuild it after): writing it would raise
     # a length-mismatch. Skip rather than corrupt/crash — the next set_pos rebuilds
@@ -177,6 +193,13 @@ def materialize_geometry(eptm, geom, which=("edge", "face"), full=True):
         return
     if "face" in which and len(np.asarray(geom["area"])) != len(fd):
         return
+    if has_height:
+        # The Rust kernel computes the edge/face core only; height/rho are a
+        # separate vertex step of SheetGeometry.update_all that has no kernel
+        # equivalent. Delegated rather than reimplemented so the geometry-mode
+        # branching (flat / cylindrical / spherical / rod / surfacic) has exactly
+        # one implementation. Must run BEFORE the sub_vol write below.
+        geom_cls.update_height(eptm)
     if "edge" in which:
         ed["length"] = geom["length"]
         if full:
@@ -263,7 +286,7 @@ def materialize_geometry_bulk(eptm, geom, which=("edge", "face", "cell")):
         cd["vol"] = geom["cell_vol"]
 
 
-def rust_update_geometry(eptm, srce, trgt, face, pos=None, full=True):
+def rust_update_geometry(eptm, srce, trgt, face, pos=None, full=True, geom_cls=None):
     """In-place replacement for ``SheetGeometry.update_all`` via the Rust kernel:
     ``compute_geometry`` then ``materialize_geometry`` (both edge and face frames).
 
@@ -275,13 +298,14 @@ def rust_update_geometry(eptm, srce, trgt, face, pos=None, full=True):
 
     ``full=False`` writes only the observable geometry (edge length + face frame);
     the intermediate coordinate blocks stay in the returned ``geom`` stash. See
-    ``materialize_geometry``."""
+    ``materialize_geometry``, which also documents the required ``geom_cls``."""
     coords = eptm.coords
     if pos is None:
         pos = eptm.vert_df[coords].values
     old_len = eptm.edge_df["length"].values.copy()  # stale length feeds ucoords
     geom = compute_geometry(eptm, srce, trgt, face, pos, old_len)
-    materialize_geometry(eptm, geom, which=("edge", "face"), full=full)
+    materialize_geometry(eptm, geom, which=("edge", "face"), full=full,
+                         geom_cls=geom_cls)
     return geom
 
 

@@ -68,7 +68,7 @@ state:
       - global_time
     outputs:
       datasets:
-      - Datasets
+      - Tissue State
       network_changed:
       - Network Changed
       behaviors_update:

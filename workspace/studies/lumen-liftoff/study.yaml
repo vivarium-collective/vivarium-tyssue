@@ -102,7 +102,7 @@ readouts:
 - {name: interior_cell_z,  store_path: interior_cell_z,  units: length}
 - {name: dome_height,      store_path: dome_height,      units: length}
 # The mesh dataframes (vert_df/edge_df/face_df/cell_df) are emitted to runs.db
-# Datasets/* and consumed by the TissueSheetGif/Snapshots viz directly; they are
+# Tissue State/* and consumed by the TissueSheetGif/Snapshots viz directly; they are
 # whole-DataFrame stores, not canonical scalar selectors, so they are not listed
 # as readouts (which are evaluable observables for behavior_tests).
 visualizations:

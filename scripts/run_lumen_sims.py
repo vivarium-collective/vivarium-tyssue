@@ -127,7 +127,7 @@ def run_study(study: str, sim_name: str, composite, steps: int,
             }
             if e.cell_df is not None and len(e.cell_df) > 0:
                 datasets["cell_df"] = _jsonable(e.cell_df)
-            state["Datasets"] = datasets
+            state["Tissue State"] = datasets
         conn.execute("INSERT OR REPLACE INTO history (simulation_id, step, global_time, state)"
                      " VALUES (?,?,?,?)", (run_id, step, gt, json.dumps(state)))
 

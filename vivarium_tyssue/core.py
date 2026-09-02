@@ -41,7 +41,7 @@ def build_core():
     core = register_types(core)
 
     # DataFrameParquetEmitter — the workspace's default emitter. tyssue's per-tick
-    # observables are whole pandas DataFrames (Datasets/vert_df|face_df|edge_df|
+    # observables are whole pandas DataFrames (Tissue State/vert_df|face_df|edge_df|
     # cell_df); this table-oriented emitter streams each to its own hive-partitioned
     # parquet dataset via Arrow, instead of the generic ParquetEmitter's row/flatten
     # model (which can't write the DataFrame Object columns). Registered so
@@ -77,7 +77,7 @@ def build_core():
     # COPASI SBML process (pbg-copasi) — needed by the tumor composite. Degrade
     # gracefully if the COPASI/basico stack isn't installed.
     try:
-        from pbg_copasi.processes import CopasiUTCProcess
+        from viva_copasi.processes import CopasiUTCProcess
         if "CopasiUTCProcess" not in core.link_registry:
             core.register_link("CopasiUTCProcess", CopasiUTCProcess)
     except Exception as exc:  # noqa: BLE001

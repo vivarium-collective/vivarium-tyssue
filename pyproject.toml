@@ -115,7 +115,12 @@ override-dependencies = [
 # The pandas-3-compatible tyssue fork (adds VesselGeometry/model_factory_* and
 # patches get_opposite so cell_division/remove_face work under read-only pandas-3
 # arrays). Required for the tumor composite's topology_ops=true path.
-tyssue = { git = "https://github.com/vivarium-collective/vivatyssue.git" }
+# Pinned to the `intersections` branch of the fork. That is the ONLY branch that
+# ships tyssue.collisions.intersections, which tests/test_composites.py
+# (test_intersection_check_arms_the_behaviour) and EulerSolver's check_intersections
+# import by name — the fork's default branch resolves without it and that test fails.
+# The branch also drops the CGAL dependency and makes History self-sufficient.
+tyssue = { git = "https://github.com/vivarium-collective/vivatyssue.git", rev = "7b5dedcceffb96680841044f4cbde7b268f8b81f" }
 vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git" }
 viva-tellurium = { git = "https://github.com/vivarium-collective/viva-tellurium.git" }
 viva-simbio = { git = "https://github.com/vivarium-collective/viva-simbio.git" }

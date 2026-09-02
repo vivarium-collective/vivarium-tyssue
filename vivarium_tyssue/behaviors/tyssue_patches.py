@@ -33,6 +33,15 @@ runs.
    Patched on ``sheet_topology`` *and* on ``behaviors.sheet.actions`` (which binds
    ``sheet_split = sheet_topology.split_vert`` at import time and is the name
    ``detach_vertices`` actually calls).
+
+3. ``sheet_topology.split_vert`` again, for ``unique_id``: the split builds the new
+   vertex by cloning the old one's row (and ``close_face`` clones an edge row), so
+   both carry the same ``unique_id`` — see
+   :mod:`vivarium_tyssue.behaviors.unique_ids`. Every other element-creating path
+   is driven from ``behaviors.py``, which repairs ids itself; this one is not,
+   because ``reconnect`` is queued by ``EulerSolver`` directly from tyssue and no
+   behavior of ours runs after it. Patching here is therefore what keeps vertex and
+   edge ids unique over a long run.
 """
 
 
@@ -75,21 +84,27 @@ def _patch_split_vert() -> None:
         from tyssue.topology import sheet_topology as _st
     except Exception:
         return
+    from vivarium_tyssue.behaviors.unique_ids import refresh_unique_ids
     if getattr(_st.split_vert, "_vivarium_tyssue_patched", False):
         return
 
     _orig_split_vert = _st.split_vert
 
     def split_vert(sheet, vert, face=None, *args, **kwargs):
-        """Guarded split_vert: skip (return []) a vertex whose chosen face does not
-        border it with exactly one in/out edge, instead of raising ValueError on the
-        ``(prev_v,) = ...`` unpack (see module docstring, bug 2)."""
+        """Guarded split_vert that also repairs unique_ids (see module docstring,
+        bugs 2 and 3)."""
         try:
-            return _orig_split_vert(sheet, vert, face, *args, **kwargs)
+            result = _orig_split_vert(sheet, vert, face, *args, **kwargs)
         except ValueError:
             # too many / too few values to unpack -> degenerate local topology;
             # leave the vertex intact (reconnect tolerates a skipped detach).
             return []
+        # The split clones the vertex row (and close_face clones an edge row), so
+        # both carry the original's unique_id until renumbered. This is the only
+        # element-creating path the behaviors never see: `reconnect` is queued by
+        # EulerSolver straight from tyssue, so patching here is what covers it.
+        refresh_unique_ids(sheet, elements=("vert", "edge"))
+        return result
 
     split_vert._vivarium_tyssue_patched = True
     _st.split_vert = split_vert

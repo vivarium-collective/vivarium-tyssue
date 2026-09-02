@@ -8,6 +8,7 @@ BEHAVIOR_MAP = {
     "division": division,
     "contraction": contraction,
     "update_tension": update_tension,
+    "differential_adhesion": differential_adhesion,
     "cell_jamming": cell_jamming,
     "apply_gradient": apply_gradient,
     "apoptosis_extrusion": apoptosis_extrusion,

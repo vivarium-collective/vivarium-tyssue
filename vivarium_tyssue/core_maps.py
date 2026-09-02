@@ -30,3 +30,11 @@ _WANTED = [
     "BulkGeometry", "RNRGeometry", "MonolayerGeometry", "ClosedMonolayerGeometry",
 ]
 GEOMETRY_MAP = {name: _ns[name] for name in _WANTED if name in _ns}
+
+# Geometries this package adds on top of tyssue's. Kept behind a try so a partial
+# install still yields the tyssue-provided map (same policy as the imports above).
+try:
+    from vivarium_tyssue.geometry import LOCAL_GEOMETRIES as _LOCAL_GEOMETRIES
+except Exception:  # noqa: BLE001
+    _LOCAL_GEOMETRIES = {}
+GEOMETRY_MAP.update(_LOCAL_GEOMETRIES)

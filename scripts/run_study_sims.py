@@ -7,7 +7,7 @@ visualizations expect:
 
   - scalar observables (tumor/healthy/stem/dead_count, *_births, *_deaths) — for
     TimeSeriesFromObservables (reads history.state[<name>] per step)
-  - Datasets/{vert,edge,face}_df — for TissueSheetSnapshots / TissueSheetGif
+  - Tissue State/{vert,edge,face}_df — for TissueSheetSnapshots / TissueSheetGif
 
 runs.db schema matches the dashboard (runs_meta / history / simulations), keyed
 so RunReader / TimeSeriesFromObservables._load_runs pick it up. Counts are
@@ -140,7 +140,7 @@ def run_study(study: str, sim_name: str, composite, steps: int,
             state[k] = max(cur - prev[k], 0.0)
             prev[k] = cur
         if step % snapshot_every == 0 or step == steps:
-            state["Datasets"] = {
+            state["Tissue State"] = {
                 "vert_df": _jsonable(eptm.vert_df),
                 "edge_df": _jsonable(eptm.edge_df),
                 "face_df": _jsonable(eptm.face_df),

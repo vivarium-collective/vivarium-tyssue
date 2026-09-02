@@ -11,6 +11,8 @@ def register_processes(core):
     core.register_link("CellJamming", CellJamming)
     core.register_link("ParameterGradient", ParameterGradient)
     core.register_link("AnisotropicTension", AnisotropicTension)
+    core.register_link("DirectionalLineTension", DirectionalLineTension)
+    core.register_link("DifferentialAdhesion", DifferentialAdhesion)
     core.register_link("Gillespie", Gillespie)
     core.register_link("TumorCoupling", TumorCoupling)
     return core
