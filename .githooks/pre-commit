@@ -1,0 +1,23 @@
+#!/bin/sh
+# Protect EulerSolver from autonomous AI-agent edits.
+#
+# Blocks a commit that stages changes to vivarium_tyssue/processes/eulersolver.py
+# ONLY when running inside an AI-agent session (CLAUDECODE / AI_AGENT set). Manual
+# commits from your own terminal are never affected. To allow an explicitly
+# authorized agent commit, set ALLOW_EULERSOLVER_EDIT=1.
+#
+# Enable once per clone:  git config core.hooksPath .githooks
+GUARDED="vivarium_tyssue/processes/eulersolver.py"
+
+if git diff --cached --name-only | grep -qx "$GUARDED"; then
+    if [ -n "$CLAUDECODE" ] || [ -n "$AI_AGENT" ]; then
+        if [ "$ALLOW_EULERSOLVER_EDIT" = "1" ]; then
+            exit 0
+        fi
+        echo "BLOCKED: $GUARDED is staged in an AI-agent session." >&2
+        echo "EulerSolver is protected from autonomous edits. Commit this from your" >&2
+        echo "own terminal, or set ALLOW_EULERSOLVER_EDIT=1 to authorize it explicitly." >&2
+        exit 1
+    fi
+fi
+exit 0
