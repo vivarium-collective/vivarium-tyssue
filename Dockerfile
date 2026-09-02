@@ -42,4 +42,6 @@ RUN uv sync --no-install-project || uv sync
 
 EXPOSE 9863
 
-CMD ["uv", "run", "vivarium-workbench", "serve", "--workspace", "/app", "--host", "0.0.0.0", "--port", "9863"]
+# CLI name follows the pinned dashboard generation (`vivarium-dashboard`); the
+# repo's HEAD renamed it to `vivarium-workbench`. See pyproject.toml's GENERATION PIN.
+CMD ["uv", "run", "vivarium-dashboard", "serve", "--workspace", "/app", "--host", "0.0.0.0", "--port", "9863"]

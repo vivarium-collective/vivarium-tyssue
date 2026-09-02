@@ -66,15 +66,17 @@ dependency-light matplotlib edge-mesh animation when the viewer stack is absent.
 
 ## Run it
 
-Build the environment first — **[`SETUP.md`](SETUP.md)** is the from-scratch recipe
-(conda / venv / uv) for this repo *and* the `vivatyssue` fork it depends on. The
-`uv venv && uv pip install -e ".[dev]"` flow no longer resolves; SETUP.md §6 explains
-why and what to run instead. With the environment built:
-
 ```bash
-PYTHONUTF8=1 vivarium-dashboard serve --workspace .   # launch the dashboard
-pytest tests/test_composites.py                       # validate composites
+uv venv && source .venv/bin/activate
+uv pip install -e ".[dev]"        # add ".[dev,viz3d]" for the faithful 3D path
+bash scripts/serve.sh             # launch the dashboard
+pytest tests/                     # 124 passed, 45 skipped (the skips need §5.1 of SETUP.md)
 ```
+
+**[`SETUP.md`](SETUP.md)** is the full from-scratch recipe — conda and plain-`venv`
+variants (neither reads `[tool.uv.sources]`, so both need the explicit install order),
+the `vivatyssue` fork, the optional Rust kernels, and why every git dependency in
+`pyproject.toml` is pinned to an exact commit.
 
 In the dashboard: the **Composites** tab lists all 7; the **Registry** tab lists
 the processes + the two Visualization Steps. Create a Study, add a baseline

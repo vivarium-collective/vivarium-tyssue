@@ -15,20 +15,24 @@ export PYTHONUTF8=1
 WS_ROOT="$(pwd)"
 [ -f "$WS_ROOT/workspace.yaml" ] || { echo "ERROR: run from workspace root" >&2; exit 1; }
 
-# Prefer the workspace venv (matches the pbg-template scaffolding flow);
-# fall back to a system-wide install if the venv has no vivarium-workbench.
-if [ -x "$WS_ROOT/.venv/bin/vivarium-workbench" ]; then
-    DASH="$WS_ROOT/.venv/bin/vivarium-workbench"
-else
-    DASH="$(command -v vivarium-workbench 2>/dev/null || true)"
-fi
+# The dashboard CLI is named `vivarium-dashboard` at the generation pyproject.toml
+# pins, and `vivarium-workbench` at the repo's HEAD (the dist was renamed — see the
+# GENERATION PIN note in pyproject.toml). Try both, venv first (matches the
+# pbg-template scaffolding flow), then a system-wide install.
+DASH=""
+for name in vivarium-dashboard vivarium-workbench; do
+    if [ -x "$WS_ROOT/.venv/bin/$name" ]; then
+        DASH="$WS_ROOT/.venv/bin/$name"; break
+    fi
+    if command -v "$name" >/dev/null 2>&1; then
+        DASH="$(command -v "$name")"; break
+    fi
+done
 
 if [ -z "$DASH" ]; then
-    echo "ERROR: vivarium-workbench is not installed." >&2
-    echo "Install it into the workspace venv, e.g." >&2
-    echo "    .venv/bin/pip install vivarium-workbench" >&2
-    echo "or, for local dev:" >&2
-    echo "    .venv/bin/pip install -e /path/to/vivarium-workbench" >&2
+    echo "ERROR: the dashboard is not installed (looked for vivarium-dashboard and" >&2
+    echo "       vivarium-workbench, in .venv/bin and on PATH)." >&2
+    echo "Build the environment first — see SETUP.md at the repo root." >&2
     exit 2
 fi
 
