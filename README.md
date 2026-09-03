@@ -52,7 +52,7 @@ change needed.
 
 ## Visualizations
 
-Two `pbg_superpowers.visualization.Visualization` Steps (auto-discovered into the
+Two `viva_superpowers.visualization.Visualization` Steps (auto-discovered into the
 dashboard's Registry):
 
 - **`TissueSheetGif`** — 2D animation of the sheet evolving. `coords: ["x","z"]`

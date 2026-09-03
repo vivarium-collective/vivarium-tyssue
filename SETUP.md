@@ -398,7 +398,9 @@ everything else.
 
 ## 9. Reference: known-good versions
 
-The environment this was validated against.
+The environment this was validated against. Re-checked 2026-09-02 — the §7 verify and
+the full suite still give the expected output; the loose PyPI entries had drifted since
+first writing and are refreshed here.
 
 | Package | Version | Source |
 |---|---|---|
@@ -414,14 +416,17 @@ The environment this was validated against.
 | tables | 3.10.2 | PyPI |
 | ipywidgets | 8.1.7 | PyPI |
 | ipyvolume / pythreejs | 0.6.3 / 2.4.2 | PyPI (optional, §5.2) |
-| process-bigraph | 1.4.17 | PyPI |
-| bigraph-schema | 1.4.1 | PyPI |
+| process-bigraph | 1.8.3 | PyPI |
+| bigraph-schema | 1.6.0 | PyPI |
 | bigraph-viz | 2.0.3 | PyPI |
-| viva-superpowers | git `HEAD` | git |
-| viva-emitters | git `HEAD` | git |
-| pbg-basic-processes | git `HEAD` | git |
+| viva-superpowers | 0.22.0, git `HEAD` | git |
+| viva-emitters | 0.3.0, git `HEAD` | git |
+| viva-workspace | 0.1.0, git `HEAD` | git |
+| viva-marketplace | 0.1.0, git `HEAD` | git |
+| investigation-contracts | 0.2.0, git `HEAD` | git |
+| pbg-basic-processes | 0.1.0, git `HEAD` | git (name NOT renamed — see §6.1) |
 | vivarium-workbench | 0.3.78, git `HEAD` | git |
-| viva-copasi | git `HEAD` | git |
+| viva-copasi | 0.1.0, git `HEAD` | git |
 | copasi-basico / python-copasi | 0.86 / 4.46.300 | PyPI (via viva-copasi) |
 | polars / pyarrow / duckdb / fsspec | 1.41.2 / 24.0.0 / 1.5.4 / 2026.6.0 | PyPI |
 | tyssue-kernels | 0.1.0 (editable, `rust-kernels/`) | maturin (optional, §5.1) |
