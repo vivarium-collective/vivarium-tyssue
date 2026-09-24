@@ -57,7 +57,8 @@ state:
       factory: model_factory
       settings:
         threshold_length: 0.03
-      auto_reconnect: true
+      auto_reconnect:
+        enabled: true
       bounds: {}
       output_columns: {}
       history_columns: {}

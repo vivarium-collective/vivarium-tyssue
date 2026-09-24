@@ -86,7 +86,15 @@ class EulerSolver(Process):
         "effectors": "list[string]",            # keys into EFFECTORS_MAP
         "ref_effector": "string",               # key into EFFECTORS_MAP
         "factory": "string",                    # key into FACTORY_MAP
-        "auto_reconnect": "boolean",            # auto-perform reconnections
+        "auto_reconnect": "map",                # {enabled, p_4, p_5p}: enable T1/T3
+                                                # reconnections and optionally set the
+                                                # rosette detachment rates. p_4 (rank-4
+                                                # vertices) and p_5p (rank 5+) are
+                                                # probabilities *per unit time* -- tyssue
+                                                # multiplies them by settings["dt"].
+                                                # Omit them for tyssue's own defaults
+                                                # (p_4=0.1, p_5p=1e-2). A bare boolean is
+                                                # still accepted as {"enabled": <bool>}.
         "check_intersections": "boolean",       # default False; detect folded/overlapping
                                                 # faces each step (report only, never
                                                 # repairs) -- see _init_intersections
@@ -141,9 +149,23 @@ class EulerSolver(Process):
                         df[parameter] = value
 
         manager = EventManager()
-        if self.config["auto_reconnect"]:
+        reconnect_cfg = self.config["auto_reconnect"]
+        # Back-compat: `auto_reconnect: true` means {"enabled": True}.
+        if isinstance(reconnect_cfg, bool):
+            reconnect_cfg = {"enabled": reconnect_cfg}
+        if reconnect_cfg.get("enabled", False):
+            # tyssue's detach_vertices reads p_4/p_5p off sheet.settings and scales
+            # both by settings["dt"], so these are rates per unit time rather than
+            # per step. `reconnect` merges whatever kwargs it gets into
+            # sheet.settings and re-appends itself with them, so passing them once
+            # here carries through the run. Unset -> tyssue's defaults.
+            detach_rates = {
+                key: float(reconnect_cfg[key])
+                for key in ("p_4", "p_5p")
+                if reconnect_cfg.get(key) is not None
+            }
             if "reconnect" not in [n[0].__name__ for n in manager.next]:
-                manager.append(reconnect)
+                manager.append(reconnect, **detach_rates)
 
         self.manager = manager
         # After reconnect, so a step's topology surgery is already applied when the

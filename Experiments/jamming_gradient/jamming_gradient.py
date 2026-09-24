@@ -60,8 +60,27 @@ JAM_RATE, JAM_LIMITS = -0.05, [3.0, 4.2]
 JAM_PREF_PERIM = 3.8
 
 # Gradient scenario (notebook spec 06). Notebook runs to t=300; we extend by 100.
-GRAD_TF, GRAD_DT = 400.0, 0.05
+GRAD_TF, GRAD_DT = 600.0, 0.05
 GRAD_ARGS = {"m": -0.1, "c": 4.6}   # prefered_perimeter = m*x + c
+
+
+def _july_detach_rates(dt: float) -> dict:
+    """tyssue's default rosette detachment rates restored to their pre-August
+    *effective* value for a run at solver interval ``dt``.
+
+    ``detach_vertices`` reads ``p_4``/``p_5p`` off ``sheet.settings`` and scales
+    both by ``settings["dt"]``, so they are rates per unit time. EulerSolver now
+    sets that ``dt`` to the solver interval; before commit 2dcb8c9 nothing set it
+    and tyssue defaulted to 1.0, so detachments effectively fired ``1 / dt`` times
+    more often. Dividing tyssue's own defaults by ``dt`` reproduces the effective
+    per-step rate the July runs had -- the rate the pre-August displacement
+    figures were measured against.
+    """
+    return {"p_4": 0.1 / dt, "p_5p": 1e-2 / dt}
+
+
+JAM_DETACH = _july_detach_rates(JAM_DT)
+GRAD_DETACH = _july_detach_rates(GRAD_DT)
 
 COORDS = ["x", "y"]
 # One seed per scenario, applied immediately before that run, so either scenario
@@ -128,7 +147,7 @@ def _flat_config(dataset_path: Path) -> dict:
         "ref_effector": "FaceAreaElasticity",
         "factory": "model_factory_bound",
         "settings": {"threshold_length": 0.03},
-        "auto_reconnect": True,
+        "auto_reconnect": {"enabled": True},
         "bounds": None,
         "output_columns": {},
         "history_columns": {},
@@ -171,6 +190,7 @@ def _base_spec(config: dict, dt: float) -> dict:
 def build_jamming_spec(dataset_path: Path) -> dict:
     cfg = _flat_config(dataset_path)
     cfg["parameters"]["face_df"]["prefered_perimeter"] = JAM_PREF_PERIM
+    cfg["auto_reconnect"] = {"enabled": True, **JAM_DETACH}
     spec = _base_spec(cfg, JAM_DT)
     spec["Jamming"] = {
         "_type": "process",
@@ -185,6 +205,7 @@ def build_jamming_spec(dataset_path: Path) -> dict:
 
 def build_gradient_spec(dataset_path: Path) -> dict:
     cfg = _flat_config(dataset_path)
+    cfg["auto_reconnect"] = {"enabled": True, **GRAD_DETACH}
     spec = _base_spec(cfg, GRAD_DT)
     spec["Gradient"] = {
         "_type": "step",

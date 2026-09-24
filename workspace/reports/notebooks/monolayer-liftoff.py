@@ -181,7 +181,7 @@ spec_monolayer_liftoff['state']['Tyssue']['config']['effectors'] = ['CellVolumeE
 spec_monolayer_liftoff['state']['Tyssue']['config']['ref_effector'] = 'FaceAreaElasticity'
 spec_monolayer_liftoff['state']['Tyssue']['config']['factory'] = 'model_factory'
 spec_monolayer_liftoff['state']['Tyssue']['config']['settings']['threshold_length'] = 0.03
-spec_monolayer_liftoff['state']['Tyssue']['config']['auto_reconnect'] = False
+spec_monolayer_liftoff['state']['Tyssue']['config']['auto_reconnect'] = {'enabled': False}
 
 # ### Run
 #

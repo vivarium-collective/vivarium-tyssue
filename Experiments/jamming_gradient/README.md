@@ -10,11 +10,37 @@ line-tension fluctuations act on every edge.
   ramping every cell's preferred perimeter down so the tissue solidifies and the
   migrating cell arrests.
 - **Gradient** — `ParameterGradient` imposes a linear `prefered_perimeter`
-  gradient along x (`m = -0.1`, `c = 4.6`; `dt = 0.05`, run to `t = 400` — the
-  notebook's `t = 300` extended by 100), so the migrating cell moves through a
+  gradient along x (`m = -0.1`, `c = 4.6`; `dt = 0.05`, run to `t = 600` — the
+  notebook's `t = 300` extended), so the migrating cell moves through a
   stiffness gradient.
 
+Both scenarios set explicit rosette detachment rates through `auto_reconnect`
+(`JAM_DETACH` / `GRAD_DETACH` in `jamming_gradient.py`) — see **Detachment
+rates** below.
+
 Both run on the **python** backend (`ActiveMigration` is not rust-supported).
+
+## Detachment rates
+
+`auto_reconnect` is a map, not a boolean: `{enabled, p_4, p_5p}`. `p_4` (rank-4
+vertices) and `p_5p` (rank 5+) are rosette detachment probabilities **per unit
+time** — tyssue multiplies both by `settings["dt"]`. EulerSolver now sets that
+`dt` to the solver interval; before commit `2dcb8c9` (2026-08-31) nothing set it
+and tyssue defaulted to `1.0`, so detachments effectively fired `1/dt` times more
+often and the migrating cell slipped through its neighbours far more easily.
+
+Both scenarios therefore restore those rates via `_july_detach_rates(dt)`, which
+returns tyssue's own defaults divided by `dt`:
+
+| scenario | `dt` | `p_4` | `p_5p` | effective `p_4` / `p_5p` |
+|---|---|---|---|---|
+| jamming  | 0.10 | 1.0 | 0.1 | 0.1 / 0.01 |
+| gradient | 0.05 | 2.0 | 0.2 | 0.1 / 0.01 |
+
+The nominal values differ only because the two scenarios integrate at different
+`dt`; the *effective* per-step rate is identical, and matches July's. On the
+jamming run this takes the final displacement from 2.630 back to **9.194**,
+against the July `run.log` figure of 9.854.
 
 ## Workflow — simulate, then analyse
 

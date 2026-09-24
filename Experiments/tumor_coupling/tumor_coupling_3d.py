@@ -215,7 +215,7 @@ def monolayer_config(dataset_path: Path) -> dict:
         # topology stays numerically stable. Even so the layer is only marginally
         # unjammed, which is why the 3D clone saturates at a modest stable size.
         "settings": {"threshold_length": 0.05},
-        "auto_reconnect": True,
+        "auto_reconnect": {"enabled": True},
         "bounds": None,
         "output_columns": {},
         "history_columns": {},

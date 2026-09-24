@@ -151,7 +151,7 @@ def tumor_config(dataset_path: Path) -> dict:
         # readily, letting the crowded tumor core rearrange instead of locking
         # into a tangle as the clone grows.
         "settings": {"threshold_length": 0.15},
-        "auto_reconnect": True,
+        "auto_reconnect": {"enabled": True},
         "bounds": None,
         "output_columns": {},
         "history_columns": {},

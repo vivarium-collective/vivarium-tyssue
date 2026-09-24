@@ -97,7 +97,8 @@ state:
       # freezes a spurious dome) because interval is small; keep them in sync.
       max_displacement: 0.2
       # Keep topology fixed so we observe pure shape change (no T1/rearrangements).
-      auto_reconnect: false
+      auto_reconnect:
+        enabled: false
       bounds: {}
       output_columns: {}
       history_columns: {}

@@ -55,7 +55,7 @@ def get_test_config():
         "settings": {
             "threshold_length": 0.03
         },
-        "auto_reconnect": True, # if True, will automatically perform reconnections
+        "auto_reconnect": {"enabled": True}, # if True, will automatically perform reconnections
         "bounds": None, # bounds the displacement of the vertices at each time step
         "output_columns": {}, # dict containing lists of column names to emit for each dataframe
         "history_columns": {}, # per-df extra columns to record in the History (empty = record all)
@@ -104,7 +104,7 @@ def get_test_config_flat():
         "settings": {
             "threshold_length": 0.03
         },
-        "auto_reconnect": True, # if True, will automatically perform reconnections
+        "auto_reconnect": {"enabled": True}, # if True, will automatically perform reconnections
         "bounds": None, # bounds the displacement of the vertices at each time step
         "output_columns": {}, # dict containing lists of column names to emit for each dataframe
         "history_columns": {}, # per-df extra columns to record in the History (empty = record all)
@@ -510,7 +510,7 @@ def get_test_tumor_config(
         "ref_effector": "FaceAreaElasticity",
         "factory": "model_factory",
         "settings": {"threshold_length": 0.03},
-        "auto_reconnect": True,
+        "auto_reconnect": {"enabled": True},
         "bounds": None,
         "output_columns": {},
         "history_columns": {}, # per-df extra columns to record in the History (empty = record all)

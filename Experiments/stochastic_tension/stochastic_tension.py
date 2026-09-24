@@ -117,7 +117,7 @@ def build_spec(tau: float, sigma: float, dt: float, dataset_path: Path) -> dict:
         "ref_effector": "FaceAreaElasticity",
         "factory": "model_factory_bound",
         "settings": {"threshold_length": 0.03},
-        "auto_reconnect": True,
+        "auto_reconnect": {"enabled": True},
         "bounds": None,
         "output_columns": {},
         "history_columns": {},

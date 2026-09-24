@@ -87,7 +87,8 @@ state:
         threshold_length: 0.1
         radius: 2.5
         axis: z
-      auto_reconnect: true
+      auto_reconnect:
+        enabled: true
       bounds: {}
       output_columns: {}
       history_columns: {}
