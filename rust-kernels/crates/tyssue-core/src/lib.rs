@@ -61,9 +61,9 @@ pub fn scatter_add(values: &[f64], index: &[u32], n_vert: usize, dim: usize) -> 
 ///   * `update_areas`    — `sub_area = ||normal|| / 2`, `area = Σ sub_area`
 ///   * `update_perimeters` — `perimeter = Σ length`
 ///
-/// Deliberately excludes `update_ucoords` (divides by the *stale* length from
-/// the previous update — stateful) and `update_vol` (needs geometry-specific
-/// vertex heights). Those stay in Python for now.
+/// Excludes `update_ucoords` (`dcoords / length`, derived in Python from this
+/// kernel's outputs) and `update_vol` (needs geometry-specific vertex
+/// heights). Those stay in Python for now.
 ///
 /// `face` is the positional face index (0..n_face) of each edge. `dim` must be
 /// 3 (all demo meshes are 3D sheets/monolayers).
@@ -183,11 +183,11 @@ pub struct BulkGeometry {
 /// Bulk / Monolayer `update_all` core (BulkGeometry + RNRGeometry): like the
 /// sheet kernel but with a **length-weighted** face centroid, per-**cell**
 /// centroids / areas / volumes, and the tetrahedral sub-volume. Reproduces
-/// `MonolayerGeometry.update_all` bit-identically (minus the stale `ucoords`,
-/// which the caller derives from the previous length, exactly as for the sheet).
+/// `MonolayerGeometry.update_all` bit-identically (minus `ucoords`, which the
+/// caller derives as `dcoords / length`, exactly as for the sheet).
 ///
 /// `cell` is the positional cell index (0..n_cell) of each edge. Excludes the
-/// `update_ucoords` stale-length step (stateful — done in Python).
+/// `update_ucoords` step (done in Python).
 pub fn update_geometry_bulk(
     pos: &[f64],
     srce: &[u32],
@@ -315,9 +315,8 @@ pub fn update_geometry_bulk(
 ///
 /// It *consumes* the geometry columns tyssue already wrote (ucoords, normals,
 /// sub_area, r_ak = srce-face, r_aj = trgt-face) rather than recomputing them,
-/// so it reproduces `compute_gradient` exactly — including tyssue's quirk that
-/// `ucoords` is normalized by the previous step's (stale) length. It only
-/// replaces the pandas arithmetic + the two `groupby.sum()` reductions.
+/// so it reproduces `compute_gradient` exactly. It only replaces the pandas
+/// arithmetic + the two `groupby.sum()` reductions.
 ///
 /// Per-edge tension coefficient is `0.5*line_active + gamma_face[f]`
 /// (LineTension carries the 0.5 on half-edges; PerimeterElasticity does not).
@@ -407,7 +406,7 @@ pub struct PlanarGeometryOut {
 /// `update_geometry`. The out-of-plane normal collapses to the signed scalar
 /// `nz = rx*dy - ry*dx`, and `sub_area = nz/2` is **signed** (tyssue does not
 /// take the absolute value in 2D). `dim` is 2; `face` is the positional face
-/// index of each edge. Excludes the stale-length `ucoords` step (done in Python).
+/// index of each edge. Excludes the `ucoords` step (done in Python).
 pub fn update_geometry_planar(
     pos: &[f64],
     srce: &[u32],

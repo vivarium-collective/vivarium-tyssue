@@ -41,7 +41,7 @@ class CellDivisions(Process):
     Formerly ``TestRegulations``, which fired divisions on a deterministic period.
     Each update draws the number of division events in the elapsed ``interval``
     from ``Poisson(rate * interval)``; that many distinct alive cells are chosen
-    uniformly at random and given the ``division`` behavior (grow the preferred
+    uniformly at random and given the ``grow_divide`` behavior (grow the preferred
     area at ``growth_rate`` until ``crit_area``, then split). When the tissue
     tracks ``cell_type`` (e.g. the crypt), the chosen cell is flagged
     ``"dividing"`` while it grows and restored to its own type on division, so it
@@ -90,7 +90,7 @@ class CellDivisions(Process):
 
         chosen = np.random.choice(eligible.index.to_numpy(), size=n_events, replace=False)
         base = {
-            "func": "division",
+            "func": "grow_divide",
             "geom": self.config["geom"],
             "crit_area": self.config["crit_area"],
             "growth_rate": self.config["growth_rate"],

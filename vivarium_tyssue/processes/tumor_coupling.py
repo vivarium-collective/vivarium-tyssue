@@ -216,7 +216,7 @@ class TumorCoupling(Process):
             return {"func": "division_3d", "geom": self.geom, "cell_uid": int(uid),
                     "dt": self._step_interval, "cell_type": cell_type, "crit_vol": self.division_crit,
                     "growth_rate": self.growth_rate, "orientation": orientation}
-        return {"func": "division", "geom": self.geom, "cell_uid": int(uid),
+        return {"func": "grow_divide", "geom": self.geom, "cell_uid": int(uid),
                 "dt": self._step_interval, "cell_type": cell_type, "crit_area": self.division_crit,
                 "growth_rate": self.growth_rate}
 

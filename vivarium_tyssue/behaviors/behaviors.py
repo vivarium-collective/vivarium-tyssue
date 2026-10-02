@@ -107,9 +107,11 @@ def divide_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
 DEATH_FLOOR = 0.5
 
 # commit_state: 0 = not committed, 1 = dividing, 2 = extruding.
+# commit_perim0: a dividing cell's prefered_perimeter when it committed (0 = its
+# perimeter target is not scaled with its growing area target).
 _COMMIT_DEFAULTS = {"commit_state": 0.0, "commit_rate": 0.0, "commit_crit": 0.0,
                     "commit_dt": 0.0, "commit_floor": DEATH_FLOOR,
-                    "commit_contract": 0.0}
+                    "commit_contract": 0.0, "commit_perim0": 0.0}
 _GROWER_NAME = "_grow_committed_cells"
 
 
@@ -140,6 +142,8 @@ def _clear_commit(sheet, idx, restore_type=None):
     fd.loc[idx, "commit_rate"] = 0.0
     fd.loc[idx, "commit_crit"] = 0.0
     fd.loc[idx, "commit_dt"] = 0.0
+    if "commit_perim0" in fd.columns:
+        fd.loc[idx, "commit_perim0"] = 0.0
     fd.loc[idx, "commit_type"] = ""
 
 
@@ -152,6 +156,11 @@ def _do_division(sheet, geometry, cell_uid):
     cell_id = int(cell_id)
     target_type = sheet.face_df.loc[cell_id, "commit_type"]
     sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
+    # Both halves start from the perimeter target the mother had before growing.
+    if "commit_perim0" in sheet.face_df.columns:
+        perim0 = sheet.face_df.loc[cell_id, "commit_perim0"]
+        if perim0 > 0:
+            sheet.face_df.loc[cell_id, "prefered_perimeter"] = perim0
     daughter = cell_division(sheet, cell_id, geometry)
     # Before reset_index, while the clones are still the appended tail: the mother
     # keeps cell_uid, the daughter face and the new verts/edges get fresh ids.
@@ -218,9 +227,21 @@ def _grow_committed_cells(sheet, manager, geom="SheetGeometry"):
     prefered = fd["prefered_area"].to_numpy(dtype=float).copy()
     rate = fd["commit_rate"].to_numpy(dtype=float)
     dt = fd["commit_dt"].to_numpy(dtype=float)
-    prefered[div_mask] *= (1.0 + dt[div_mask] * rate[div_mask])
+    growth = 1.0 + dt[div_mask] * rate[div_mask]
+    prefered[div_mask] *= growth
     prefered[ext_mask] *= (1.0 - dt[ext_mask] * rate[ext_mask])
     fd["prefered_area"] = prefered
+
+    # A growing cell's target perimeter follows its target area geometrically,
+    # P_0 ∝ sqrt(A_0): doubling P_0 quadruples A_0, so the cell grows at its own
+    # target shape instead of being held to its pre-growth perimeter.
+    if "prefered_perimeter" in fd.columns and "commit_perim0" in fd.columns:
+        scaled = fd["commit_perim0"].to_numpy(dtype=float)[div_mask] > 0.0
+        if scaled.any():
+            perim = fd["prefered_perimeter"].to_numpy(dtype=float).copy()
+            idx = np.flatnonzero(div_mask)[scaled]
+            perim[idx] *= np.sqrt(growth[scaled])
+            fd["prefered_perimeter"] = perim
 
     # Apoptotic constriction (opt-in per commitment): contract the dying cell's target
     # perimeter at the same rate. A cell still holding its full prefered_perimeter
@@ -258,8 +279,9 @@ def _grow_committed_cells(sheet, manager, geom="SheetGeometry"):
         _ensure_grower(sheet, manager, geom)
 
 
-def division(
-        sheet, manager, geom= "SheetGeometry", cell_uid=0, cell_type=None, crit_area=2.0, growth_rate=0.1, dt=1.
+def grow_divide(
+        sheet, manager, geom= "SheetGeometry", cell_uid=0, cell_type=None, crit_area=2.0, growth_rate=0.1, dt=1.,
+        scale_perimeter=True,
 ):
     """Commit a cell to division.
 
@@ -283,6 +305,11 @@ def division(
     growth_rate: float
         increase in the prefered area per unit time
         A_0(t + dt) = A0(t) * (1 + growth_rate * dt)
+    scale_perimeter: bool
+        If True (default) and the sheet has a ``prefered_perimeter`` column, the
+        cell's target perimeter grows with its target area as
+        P_0(t) = P_0(commit) * sqrt(A_0(t) / A_0(commit)), and both halves get
+        P_0(commit) back on division.
     """
     # The cell may have been extruded between when the coupling queued this
     # division and when the manager runs it — its unique_id is then gone.
@@ -300,7 +327,91 @@ def division(
     fd.loc[cell_id, "commit_rate"] = growth_rate
     fd.loc[cell_id, "commit_crit"] = crit_area
     fd.loc[cell_id, "commit_dt"] = dt
+    # Record the pre-growth perimeter target once: a cell re-committed while
+    # already growing keeps its original base.
+    if (scale_perimeter and "prefered_perimeter" in fd.columns
+            and fd.loc[cell_id, "commit_perim0"] <= 0.0):
+        fd.loc[cell_id, "commit_perim0"] = fd.loc[cell_id, "prefered_perimeter"]
     _ensure_grower(sheet, manager, geom)
+
+
+# ---------------------------------------------------------------------------
+# Growth and division as separate behaviors
+#
+# ``grow_divide`` couples the two: commit, grow, split on reaching crit_area.
+# A process that decides *when* each happens -- e.g. a cell-cycle model that
+# grows cells in G1/G2 and divides them on entering M -- emits these instead.
+# Both are batched over unique_ids, so one call per step covers every cell.
+# ---------------------------------------------------------------------------
+
+def grow_cells(sheet, manager, cell_uids=(), growth_rate=0.1, dt=1.0,
+               scale_perimeter=True):
+    """Grow the target shape of the listed cells for one step.
+
+    A_0 <- A_0 * (1 + growth_rate * dt). With ``scale_perimeter`` (and a
+    ``prefered_perimeter`` column) P_0 <- P_0 * sqrt(1 + growth_rate * dt), so the
+    target shape is kept: doubling P_0 quadruples A_0.
+
+    Parameters
+    ----------
+    cell_uids : iterable of int
+        unique_ids of the cells to grow this step
+    growth_rate : float
+        relative growth of ``prefered_area`` per unit time
+    dt : float
+        the step the growth covers
+    """
+    fd = sheet.face_df
+    mask = fd["unique_id"].isin(list(cell_uids)).to_numpy()
+    if not mask.any():
+        return
+    factor = 1.0 + growth_rate * dt
+    fd.loc[mask, "prefered_area"] *= factor
+    if scale_perimeter and "prefered_perimeter" in fd.columns:
+        fd.loc[mask, "prefered_perimeter"] *= np.sqrt(factor)
+
+
+def split_cells(sheet, manager, geom="SheetGeometry", cell_uids=(), prefered_area=1.0):
+    """Divide each listed cell now, whatever its size.
+
+    Before the split the cell's target area is reset to ``prefered_area`` and its
+    ``prefered_perimeter`` scaled by sqrt(prefered_area / A_0), undoing growth made
+    with ``grow_cells(scale_perimeter=True)``. tyssue's ``cell_division`` copies the
+    mother's face row, so both halves start from those targets. The mother keeps
+    its unique_id; the daughter gets a fresh one and records the mother's in a
+    ``mother_uid`` column (-1 for cells not born this way), so a process can hand
+    the daughter its mother's internal state rather than the copied row.
+
+    Parameters
+    ----------
+    cell_uids : iterable of int
+        unique_ids of the cells to divide
+    prefered_area : float
+        target area of each half
+    """
+    geometry = GEOMETRY_MAP[geom] if isinstance(geom, str) else geom
+    for cell_uid in cell_uids:
+        # Resolve by unique_id each time: every split reindexes face_df.
+        cell_id = face_index_for(sheet, int(cell_uid))
+        if cell_id is None:
+            continue
+        cell_id = int(cell_id)
+        fd = sheet.face_df
+        if "prefered_perimeter" in fd.columns:
+            fd.loc[cell_id, "prefered_perimeter"] *= np.sqrt(
+                prefered_area / fd.loc[cell_id, "prefered_area"])
+        fd.loc[cell_id, "prefered_area"] = prefered_area
+        daughter = cell_division(sheet, cell_id, geometry)
+        fd = sheet.face_df
+        if "mother_uid" not in fd.columns:
+            fd["mother_uid"] = -1
+        fd.loc[daughter, "mother_uid"] = int(cell_uid)
+        # Before reset_index, while the clones are still the appended tail.
+        refresh_unique_ids(sheet)
+        sheet.reset_index(order=True)
+        geometry.update_all(sheet)
+        sheet.network_changed = True
+
 
 def _drop_isolated_verts(sheet):
     """Drop vertices that no edge references (isolated after a face removal).
@@ -623,7 +734,7 @@ def division_3d(
         crit_vol=2.0, growth_rate=0.1, orientation="vertical", dt=1.0,
 ):
     """Commit a 3D cell to division (monolayer / bulk analogue of
-    :func:`division`).
+    :func:`grow_divide`).
 
     Records the cell's own growth parameters into its ``commit_*`` columns on
     ``cell_df``, flags it ``"dividing"``, and hands off to the batched grower

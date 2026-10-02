@@ -58,6 +58,9 @@ dependencies = [
     # workspace/datasets/BIOMD0000000903.xml, so fetching is a one-off — see the
     # `fetch` extra below.
     "viva-copasi",
+    # SBML parser for vivarium_tyssue.sbml (per-cell subcellular models compiled to
+    # a vectorised numpy RHS — SBMLCellCycle). Has linux/arm64 wheels.
+    "python-libsbml",
 ]
 
 [project.optional-dependencies]

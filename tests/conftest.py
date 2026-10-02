@@ -18,7 +18,7 @@ except Exception:  # noqa: BLE001
 # imports tyssue) — a source scan cannot see those, so they stay listed by hand.
 _BACKEND_TEST_MODULES = [
     "test_composites.py", "test_rust_kernels_equiv.py", "test_tumor_composites.py",
-    "test_tumor_core.py", "test_tumor_coupling.py", "tests.py",
+    "test_tumor_core.py", "test_tumor_coupling.py", "test_sbml_cell_cycle.py", "tests.py",
 ]
 
 

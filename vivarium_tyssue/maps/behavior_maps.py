@@ -5,7 +5,9 @@ from vivarium_tyssue.behaviors import *
 BEHAVIOR_MAP = {
     "apoptosis_basic": apoptosis_cell,
     "apoptosis": apoptosis,
-    "division": division,
+    "grow_divide": grow_divide,
+    "grow_cells": grow_cells,
+    "split_cells": split_cells,
     "contraction": contraction,
     "update_tension": update_tension,
     "differential_adhesion": differential_adhesion,
