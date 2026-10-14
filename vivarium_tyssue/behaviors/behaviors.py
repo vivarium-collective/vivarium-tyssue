@@ -487,14 +487,55 @@ def apoptosis_extrusion(
     fd.loc[cell_id, "commit_contract"] = 1.0 if contract_perimeter else 0.0
     _ensure_grower(sheet, manager, geom)
 
-def update_tension(sheet, manager, tension_update=None):
-    if sheet.edge_df["line_tension"].dtype == "int64":
-        sheet.edge_df["line_tension"] = sheet.edge_df["line_tension"].astype(float)
-    if tension_update:
-        sheet.edge_df.loc[
-            sheet.edge_df["unique_id"].isin(tension_update),
-            "line_tension"
-        ] = sheet.edge_df["unique_id"].map(tension_update)
+# ---------------------------------------------------------------------------
+# Additive parameter updates.
+#
+# A regulating process ships a DELTA per element (``unique_id -> increment``),
+# never a new value, and the behaviors below add it in place. Several processes
+# can then drive the same parameter (e.g. directional + stochastic line tension):
+# each one owns a share of it and moves only that share. Each process may also
+# mirror its share in its own ``component`` column. The column is added to by the
+# same delta, so it always holds exactly what that process has contributed. A
+# row cloned by a topology change (division, vertex split) copies the column
+# along with the parameter, which is how the process learns the share an element
+# it has never seen already carries.
+# ---------------------------------------------------------------------------
+
+def _add_by_uid(df, column, delta, component=None):
+    """Adds ``delta`` (``{unique_id: increment}``) in place to ``df[column]`` and,
+    if given, to ``df[component]``. Rows whose uid is not in ``delta`` are left
+    alone; missing columns are created at 0."""
+    if not delta or len(df) == 0:
+        return
+    inc = df["unique_id"].map(delta)
+    hit = inc.notna().to_numpy()
+    if not hit.any():
+        return
+    inc = inc[hit].astype(float)
+    for col in (column, component):
+        if not col:
+            continue
+        if col not in df.columns:
+            df[col] = 0.0
+        elif df[col].dtype != np.float64:
+            df[col] = df[col].astype(float)
+        df.loc[hit, col] += inc
+
+
+def update_parameter(sheet, manager, parameter, dataframe, parameter_update=None,
+                     component=None):
+    """Adds ``parameter_update`` (``{unique_id: delta}``) in place to the
+    ``parameter`` column of the ``dataframe`` element table (``"edge"``,
+    ``"face"``, ``"vert"`` or ``"cell"``; an ``"_df"`` suffix is accepted), and to
+    the sending process's ``component`` column if it names one.
+
+    This is the one behavior every parameter-setting process uses, e.g.
+    ``parameter="line_tension", dataframe="edge"`` for the tension processes.
+    """
+    df = sheet.datasets[dataframe.removesuffix("_df")]
+    if parameter in df.columns and df[parameter].dtype != np.float64:
+        df[parameter] = df[parameter].astype(float)
+    _add_by_uid(df, parameter, parameter_update, component)
 
 # ---------------------------------------------------------------------------
 # Differential adhesion — tension set by the *identity* of the two cells an edge
@@ -573,8 +614,16 @@ def differential_adhesion(
         boundary_tension=None,
         type_column="cell_type",
         record_column="heterotypic",
+        component="adhesion_tension",
 ):
-    """Set every junction's ``line_tension`` from the identity of the cells it separates.
+    """Set every junction's adhesion share of ``line_tension`` from the identity of
+    the cells it separates.
+
+    The share lives in the ``component`` column. Each call moves it to the target
+    and adds the same delta to ``line_tension``, so tension other processes have
+    added (e.g. stochastic line tension) is kept. Without the column the share
+    starts at 0; to make adhesion own a ``line_tension`` seeded at the homotypic
+    value, seed ``component`` at that value too.
 
     Parameters
     ----------
@@ -597,6 +646,8 @@ def differential_adhesion(
         alongside the tension (the column must already exist at solver start-up —
         declare it in the EulerSolver ``parameters`` — because tyssue's History
         fixes its column list when it is built).
+    component : str
+        the ``edge_df`` column holding adhesion's share of ``line_tension``.
     """
     edge_df = sheet.edge_df
     if len(edge_df) == 0 or type_column not in sheet.face_df.columns:
@@ -610,15 +661,29 @@ def differential_adhesion(
     if boundary_tension is not None:
         tension = np.where(opposite < 0, float(boundary_tension), tension)
 
-    edge_df["line_tension"] = tension
+    if component not in edge_df.columns:
+        edge_df[component] = 0.0
+    elif edge_df[component].dtype != np.float64:
+        edge_df[component] = edge_df[component].astype(float)
+    delta = tension - edge_df[component].to_numpy()
+    edge_df["line_tension"] += delta
+    edge_df[component] = tension
     if record_column and record_column in edge_df.columns:
         edge_df[record_column] = hetero.astype(float)
 
 
-def cell_jamming(sheet, manager, rate, limits, dt):
-    if (sheet.face_df["prefered_perimeter"].mean()) > limits[0] or (sheet.face_df["prefered_perimeter"].mean() < limits[1]):
-        sheet.face_df["prefered_perimeter"] *= (1 + rate * dt)
-        manager.append(cell_jamming, rate=rate, limits=limits, dt=dt)
+def cell_jamming(sheet, manager, rate, limits, dt, component=None):
+    """Ramps every cell's ``prefered_perimeter`` by ``rate * dt`` of its current
+    value per step, re-queuing itself until the mean leaves ``limits``. The ramp
+    is an increment added in place (see :func:`_add_by_uid`), so it stacks with
+    other processes driving the same parameter; ``component`` optionally records
+    its running total."""
+    face_df = sheet.face_df
+    pp = face_df["prefered_perimeter"]
+    if pp.mean() > limits[0] or pp.mean() < limits[1]:
+        delta = dict(zip(face_df["unique_id"].tolist(), (rate * dt * pp).tolist()))
+        _add_by_uid(face_df, "prefered_perimeter", delta, component)
+        manager.append(cell_jamming, rate=rate, limits=limits, dt=dt, component=component)
     else:
         print("Jamming Complete")
 

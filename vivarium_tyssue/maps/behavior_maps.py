@@ -9,7 +9,7 @@ BEHAVIOR_MAP = {
     "grow_cells": grow_cells,
     "split_cells": split_cells,
     "contraction": contraction,
-    "update_tension": update_tension,
+    "update_parameter": update_parameter,
     "differential_adhesion": differential_adhesion,
     "cell_jamming": cell_jamming,
     "apply_gradient": apply_gradient,

@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from vivarium_tyssue.behaviors.behaviors import apply_gradient, update_tension
+from vivarium_tyssue.behaviors.behaviors import apply_gradient, update_parameter
 from vivarium_tyssue.processes.regulations import ALIGNMENT_MAP, DirectionalLineTension
 
 LO = 0.1
@@ -29,6 +29,7 @@ BASE = {
     "sharpness": 1.0,
     "coords": [],
     "record_column": "polar_alignment",
+    "component": "directional_tension",
 }
 
 
@@ -112,7 +113,7 @@ def test_zero_length_edge_takes_the_minimum_not_a_nan():
     process = make()
     assert process.edge_alignment(edges)[0] == 0.0
     tensions = process.update({"datasets": {"edge_df": edges}}, 0.1)
-    assert list(tensions["behaviors"][0]["tension_update"].values()) == [LO]
+    assert list(tensions["behaviors"][0]["parameter_update"].values()) == [LO]
 
 
 def test_three_dimensional_polarity():
@@ -129,7 +130,7 @@ def test_three_dimensional_polarity():
 def test_tension_spans_min_to_max_and_is_monotonic():
     tensions = np.array(list(
         make().update({"datasets": {"edge_df": edges_at(ANGLES)}}, 0.1)
-        ["behaviors"][0]["tension_update"].values()))
+        ["behaviors"][0]["parameter_update"].values()))
     assert tensions[0] == pytest.approx(HI)     # parallel to the polarity axis
     assert tensions[-1] == pytest.approx(LO)    # perpendicular to it
     assert np.all(np.diff(tensions) < 0)        # strictly stronger the closer to p
@@ -140,7 +141,7 @@ def test_equal_extremes_give_isotropic_tension():
     tensions = np.array(list(
         make(tension_min=0.5, tension_max=0.5)
         .update({"datasets": {"edge_df": edges_at(ANGLES)}}, 0.1)
-        ["behaviors"][0]["tension_update"].values()))
+        ["behaviors"][0]["parameter_update"].values()))
     np.testing.assert_allclose(tensions, 0.5)
 
 
@@ -159,7 +160,7 @@ def test_cos2_at_sharpness_one_is_the_classical_nematic_law():
     radians = np.radians(ANGLES)
     tensions = np.array(list(
         make().update({"datasets": {"edge_df": edges_at(ANGLES)}}, 0.1)
-        ["behaviors"][0]["tension_update"].values()))
+        ["behaviors"][0]["parameter_update"].values()))
     np.testing.assert_allclose(tensions, mean * (1 + alpha * np.cos(2 * radians)),
                                atol=1e-12)
 
@@ -168,10 +169,10 @@ def test_sharpness_narrows_the_high_tension_cone_without_moving_the_extremes():
     edges = edges_at(ANGLES)
     soft = np.array(list(make(sharpness=1.0)
                          .update({"datasets": {"edge_df": edges}}, 0.1)
-                         ["behaviors"][0]["tension_update"].values()))
+                         ["behaviors"][0]["parameter_update"].values()))
     sharp = np.array(list(make(sharpness=4.0)
                           .update({"datasets": {"edge_df": edges}}, 0.1)
-                          ["behaviors"][0]["tension_update"].values()))
+                          ["behaviors"][0]["parameter_update"].values()))
     assert sharp[0] == pytest.approx(soft[0])       # parallel: still tension_max
     assert sharp[-1] == pytest.approx(soft[-1])     # perpendicular: still tension_min
     assert np.all(sharp[1:-1] < soft[1:-1])         # everything between: lower
@@ -180,10 +181,12 @@ def test_sharpness_narrows_the_high_tension_cone_without_moving_the_extremes():
 # --------------------------------------------------------------------------
 # the behavior nodes the process emits
 # --------------------------------------------------------------------------
-def test_emits_a_tension_update_and_an_alignment_readout():
+def test_emits_a_line_tension_update_and_an_alignment_readout():
     behaviors = make().update({"datasets": {"edge_df": edges_at(ANGLES)}}, 0.1)["behaviors"]
-    assert [node["func"] for node in behaviors] == ["update_tension", "apply_gradient"]
-    assert set(behaviors[0]["tension_update"]) == set(range(len(ANGLES)))
+    assert [node["func"] for node in behaviors] == ["update_parameter", "apply_gradient"]
+    assert behaviors[0]["parameter"] == "line_tension"
+    assert behaviors[0]["dataframe"] == "edge"
+    assert set(behaviors[0]["parameter_update"]) == set(range(len(ANGLES)))
     readout = behaviors[1]["parameter_updates"]["polar_alignment"]
     assert readout["dataframe"] == "edge"
     np.testing.assert_allclose(list(readout["update"].values()),
@@ -193,7 +196,7 @@ def test_emits_a_tension_update_and_an_alignment_readout():
 def test_readout_can_be_switched_off():
     behaviors = make(record_column="").update(
         {"datasets": {"edge_df": edges_at(ANGLES)}}, 0.1)["behaviors"]
-    assert [node["func"] for node in behaviors] == ["update_tension"]
+    assert [node["func"] for node in behaviors] == ["update_parameter"]
 
 
 def test_empty_mesh_emits_nothing():
@@ -212,7 +215,7 @@ def test_behaviors_land_on_a_sheet():
 
     process = make()
     behaviors = process.update({"datasets": {"edge_df": sheet.edge_df}}, 0.1)["behaviors"]
-    update_tension(sheet, None, **{k: v for k, v in behaviors[0].items() if k != "func"})
+    update_parameter(sheet, None, **{k: v for k, v in behaviors[0].items() if k != "func"})
     apply_gradient(sheet, None, **{k: v for k, v in behaviors[1].items() if k != "func"})
 
     expected = LO + (HI - LO) * process.edge_alignment(sheet.edge_df)
