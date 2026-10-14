@@ -17,7 +17,8 @@ Sweepable parameters (``--vary name=v1,v2,...``):
   division   cycle (sim time per cell cycle), growth (multiplies the growth rate
              that doubles a cell's target area over its G1 + G2 time)
   mechanics  area_elasticity, prefered_perimeter, perimeter_elasticity,
-             line_tension, viscosity, threshold_length (T1 edge length)
+             line_tension, viscosity, threshold_length (T1 edge length),
+             p_4, p_5p (rank-4 / rank-5+ vertex detachment rates, per sim time)
   solver     dt_factor (multiplies the solver step from ``solver_dt``)
 
 ``--oat`` varies each parameter on its own around the baseline (one at a time,
@@ -66,6 +67,10 @@ BASELINE = {
     "line_tension": 0.0,
     "viscosity": 0.2,
     "threshold_length": 0.03,
+    # tyssue's default detachment rates, which sections 1-4 of SWEEPS.md used; the
+    # demo now uses a 30 min wait (sbml_cell_cycle.P_4 / P_5P, section 5).
+    "p_4": 0.1,
+    "p_5p": 0.01,
     "dt_factor": 1.0,
 }
 # Stable explicit-Euler step at the reference mechanics (K_A 1, K_P 0.5, viscosity 0.2).
@@ -96,6 +101,7 @@ def build_spec(p: dict) -> dict:
     params["edge_df"]["line_tension"] = p["line_tension"]
     params["vert_df"]["viscosity"] = p["viscosity"]
     solver["settings"]["threshold_length"] = p["threshold_length"]
+    solver["auto_reconnect"] = {"enabled": True, "p_4": p["p_4"], "p_5p": p["p_5p"]}
     solver["record_history"] = False
     dt = solver_dt(p)
     spec["Tyssue"]["interval"] = dt
@@ -103,7 +109,7 @@ def build_spec(p: dict) -> dict:
     return spec
 
 
-def run_one(p: dict, seed: int, target: int) -> dict:
+def run_one(p: dict, seed: int, target: int, chunk: float = CHUNK) -> dict:
     from process_bigraph import Composite
     from vivarium_tyssue.core import build_core
 
@@ -114,8 +120,8 @@ def run_one(p: dict, seed: int, target: int) -> dict:
     try:
         sim = Composite({"state": copy.deepcopy(build_spec(p))}, core=build_core())
         while t < tf_max - 1e-9:
-            sim.run(CHUNK)
-            t += CHUNK
+            sim.run(chunk)
+            t += chunk
             eptm = sim.state["Tyssue"]["instance"].eptm
             fd = eptm.face_df
             n = len(fd)
@@ -167,6 +173,8 @@ def main():
                    help="vary one parameter at a time around the baseline")
     p.add_argument("--seed", type=int, nargs="+", default=[1, 2, 3])
     p.add_argument("--target", type=int, default=TARGET_CELLS)
+    p.add_argument("--chunk", type=float, default=CHUNK,
+                   help="sim time between fold checks (the demo checks every 0.25)")
     p.add_argument("--workers", type=int, default=os.cpu_count() - 1)
     args = p.parse_args()
 
@@ -180,7 +188,7 @@ def main():
 
     results = []
     with ProcessPoolExecutor(max_workers=args.workers, max_tasks_per_child=1) as pool:
-        futures = [pool.submit(run_one, cfg, seed, args.target) for cfg, seed in jobs]
+        futures = [pool.submit(run_one, cfg, seed, args.target, args.chunk) for cfg, seed in jobs]
         for fut in as_completed(futures):
             r = fut.result()
             results.append(r)

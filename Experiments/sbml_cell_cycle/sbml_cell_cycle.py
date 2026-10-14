@@ -79,7 +79,7 @@ PHASE_NAMES = ["G1", "S", "M", "G2"]     # SBMLCellCycle.phase_names for PHASES
 GROWTH_PHASES, DIVISION_PHASE = ["G1", "G2"], "M"
 GROWTH_FRACTION = 0.44              # share of the cycle spent in G1 + G2
 GROWTH_FACTOR = 1.0                 # GF in every cell (full cycles need GF > ~0.072)
-MODEL_PERIOD = 23.6                 # model time units at GF = 1
+MODEL_PERIOD = 23.6                 # hours of model time at GF = 1
 CYCLE_TIME = 20.0                   # desired cycle length in sim time units
 TIME_SCALE = MODEL_PERIOD / CYCLE_TIME
 # Target area doubles over the G1 + G2 time of one cycle; each half restarts at 1.
@@ -100,7 +100,17 @@ PARAMETER_NOISE = {"vsa": 0.1, "vse": 0.1, "Vde": 0.1}
 #   * growth spread over G1 + G2 (~9 time units per cycle), not in a burst.
 DT = 0.002
 PREF_PERIMETER, PERIMETER_ELASTICITY, VISCOSITY = 3.5, 0.5, 0.02
-TARGET_CELLS = 1200    # stop here: clean on every seed tried at this viscosity
+# Rosette detachment (tyssue's reconnect): a rank-4 vertex splits at rate p_4, a
+# rank-5+ one at p_5p, per unit sim time. tyssue's defaults (0.1, 0.01) leave a
+# 4-fold vertex waiting ~12 h of model time, against minutes to an hour for real
+# junction remodelling, and 4-fold vertices pile up (~55 per 1000 cells). A 10 min
+# mean wait clears them (~1 per 1000) without changing growth or fold onset
+# (SWEEPS.md, section 5). p_5p keeps tyssue's 1:10 ratio; rank-5+ vertices hardly
+# form either way.
+ROSETTE_WAIT_HOURS = 1.0 / 6.0
+P_4 = TIME_SCALE / ROSETTE_WAIT_HOURS        # TIME_SCALE = model hours per sim unit
+P_5P = P_4 / 10.0
+TARGET_CELLS = 1200    # stop here: clean on 9/10 seeds at this viscosity (SWEEPS.md)
 FRAME_DT = 0.25        # snapshot (and fold check) interval
 TF = 80.0              # safety cap; the target is reached near t = 60
 
@@ -158,7 +168,7 @@ def solver_config(dataset_path: Path) -> dict:
         "ref_effector": "FaceAreaElasticity",
         "factory": "model_factory",       # free border: the tissue spreads
         "settings": {"threshold_length": 0.03},
-        "auto_reconnect": {"enabled": True},
+        "auto_reconnect": {"enabled": True, "p_4": P_4, "p_5p": P_5P},
         "bounds": None,
         "output_columns": {},
         "history_columns": {},

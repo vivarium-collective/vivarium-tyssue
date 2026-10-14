@@ -145,6 +145,41 @@ every frame.
 K_A = 10 works too, but it also makes cells stiffer and less deformable, whereas
 lowering η changes only the timescale.
 
+## 5. Rosette detachment rates (2026-10-09): no effect on folding
+
+tyssue's `reconnect` merges vertices joined by an edge shorter than
+`threshold_length`. It then splits a rank-4 vertex at rate `p_4` and a rank-5+
+vertex at rate `p_5p`, per unit sim time. The demo maps one sim unit to 1.18 h of
+model time, so tyssue's defaults (`p_4` 0.1, `p_5p` 0.01) leave a 4-fold vertex
+waiting ~12 h on average. Real junction remodelling takes minutes to an hour:
+rosettes in the Drosophila germband form in ~10 min, and notum cells make several
+neighbour exchanges in 1–3 h.
+
+Demo mechanics (η = 0.02, dt = 0.002), `p_5p` = `p_4`/10, target 1600 cells, 10
+seeds (the demo's 20260930 and 1–9), fold check every 0.25 as in the demo:
+
+| mean wait of a 4-fold vertex | `p_4` | folded before 1600 | clean to 1200 | median clean cells (range) | time to 1200 cells | 4-fold vertices per 1000 cells at 800 cells |
+|---|---|---|---|---|---|---|
+| ~12 h (tyssue default) | 0.10 | 3/10 | 9/10 | 1602 (1172–1612) | 59 h | 54.5 |
+| 30 min | 2.36 | 3/10 | 9/10 | 1603 (976–1611) | 58 h | 5.0 |
+| **10 min** | 7.08 | 2/10 | 9/10 | 1604 (1072–1614) | 59 h | 1.2 |
+
+- **Fold onset does not depend on the rate.** Fold counts p = 1.0 (Fisher), fold
+  sizes p = 0.4–0.8 (Mann–Whitney) against the default. At every rate about one
+  seed in ten folds before 1200 cells, the default included (seed 4 at 1181).
+- **Growth is unaffected:** 1200 cells at 58–59 h of model time for every rate.
+- **What the rate does control is the backlog of unresolved 4-fold vertices:**
+  ~55 per 1000 cells at the default, ~5 at 30 min, ~1 at 10 min. Rank-5+ vertices
+  almost never form, so `p_5p` hardly matters.
+- A first 3-seed pass, checking only every 1.0, suggested faster detachment
+  delayed folding (6/6 clean against 4/12). The 10-seed pass shows that was chance.
+
+**Adopted in the demo:** a 10 min wait (`ROSETTE_WAIT_HOURS` in
+`sbml_cell_cycle.py`, giving `p_4` = 7.08 and `p_5p` = 0.708), for the biology and
+the vertex backlog. 30 min would be as good in general. On the demo's own seed it
+folds at 983 cells, the one-in-ten case, while 10 min stays clean to 1584. The demo
+reaches 1200 cells at t = 50.5 with every 0.25-unit frame clean.
+
 ## Reproducing
 
 ```bash
@@ -153,6 +188,11 @@ python sweep_folding.py --oat --vary area_elasticity=0.5,2,5,10 --vary viscosity
 python sweep_folding.py --oat --vary dt_factor=0.5,0.25,0.1
 python sweep_folding.py --oat --vary viscosity=0.02 --vary area_elasticity=10 --target 1600
 python sweep_folding.py --vary cycle=40,60 --vary growth=0.5,1 --seed 1 2 3   # new coupling
+for rates in "0.1 0.01" "2.36 0.236" "7.08 0.708"; do
+  set -- $rates   # section 5: one row per (p_4, p_5p)
+  python sweep_folding.py --set viscosity=0.02 --set p_4=$1 --set p_5p=$2 \
+      --target 1600 --chunk 0.25 --seed 20260930 1 2 3 4 5 6 7 8 9
+done
 ```
 
 Results are printed, not saved. Each run uses one core, and the pool uses

@@ -60,11 +60,13 @@ the growth factor $GF$.
    and the loop resets.
 
 **Behaviour** (measured with this engine):
-- The period is **23.6 model time units** at GF = 1, and it barely depends on GF
+- Units (Gérard & Goldbeter 2011, Table 2): concentrations in µM ("tentatively"),
+  time in hours. The SBML file declares COPASI's mmol / mL / h defaults instead.
+- The period is **23.6 h** at GF = 1, and it barely depends on GF
   above threshold.
 - A full cycle needs **GF > 0.072**. Below that the cell sits in a stable G0 steady
   state, so GF acts as an on/off switch rather than a rate dial.
-- The decision about the next cycle is made ~3 model units before the previous
+- The decision about the next cycle is made ~3 h before the previous
   mitotic exit. A cell that loses GF after that point divides at the end of its
   current cycle, and its two daughters divide once more. Arrest therefore lags by
   one to two rounds, up to 4× the cells.
@@ -108,7 +110,7 @@ the growth factor $GF$.
   - Initial cells get random phases along the limit cycle.
   - Each cell gets its own lognormal factor (CV 0.1) on `vsa`, `vse` and `Vde`, the
     rates the period is most sensitive to. Sister cells therefore drift apart.
-- **Time.** `time_scale = 1.18` model units per sim unit, so one cycle is ~20 sim
+- **Time.** `time_scale = 1.18` h of model time per sim unit, so one cycle is ~20 sim
   time units.
 
 ## The run: a growing sheet
@@ -121,8 +123,9 @@ The flat square sheet (`test_square.hf5`, 206 cells) runs with a **free border**
 |---|---|
 | GF | 1 in every cell |
 | mechanics | viscosity 0.02 (dt 0.002), `prefered_perimeter` 3.5, `perimeter_elasticity` 0.5, area elasticity 1 |
+| rosettes | 4-fold vertices resolve after a 10 min mean wait (`p_4` 7.08, `p_5p` 0.708 per sim unit); tyssue's defaults gave ~12 h |
 | cell cycle | ≈ 20 time units (measured 20.1); grow in G1/G2 at 0.079, divide on entering M |
-| run | to 1200 cells (t = 50.25, 1000 divisions), snapshot every 0.25 |
+| run | to 1200 cells (t = 50.5, 994 divisions), snapshot every 0.25 |
 | final mesh | 0 folded, 0 invading vertices, 0 overlapping pairs (`find_intersections(strict=True)`, checked on every frame) |
 
 **Why it stays clean, and why it stops at 1200 cells.**
@@ -133,7 +136,8 @@ The flat square sheet (`test_square.hf5`, 206 cells) runs with a **free border**
   coupling, the first fold came at ~400 cells at viscosity 0.2 and at ~1500–1600 at
   0.02, so the run stops at 1200.
 - The parameter sweeps behind this are in `SWEEPS.md`. Division rate, perimeter
-  target, line tension and the T1 threshold matter far less.
+  target, line tension, the T1 threshold and the rosette detachment rate matter far
+  less. About 1 seed in 10 folds before 1200 cells at any detachment rate tried.
 - The low viscosity needs a 10× smaller time step, so the run takes ~10 minutes.
   The solver's per-step History would hold ~30,000 frames, so `run()` advances
   one 0.25-unit frame at a time and snapshots the mesh itself.
