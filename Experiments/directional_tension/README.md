@@ -113,14 +113,17 @@ The GIFs are written with Pillow, so **no ImageMagick is needed**.
 | piece | where it lives |
 |---|---|
 | `DirectionalLineTension` process | `vivarium_tyssue/processes/regulations.py` |
-| `update_tension`, `apply_gradient` behaviors | `vivarium_tyssue/behaviors/behaviors.py` |
+| `update_parameter`, `apply_gradient` behaviors | `vivarium_tyssue/behaviors/behaviors.py` |
 | process registration | `vivarium_tyssue/processes/__init__.py` |
 | tests | `tests/test_directional_tension.py` |
 
 The process regulates the `EulerSolver` **only** through the `behaviors` port, exactly
 like `StochasticLineTension` / `AnisotropicTension`; `EulerSolver` itself is untouched.
 The tensions are computed **in the process** — from `edge_df`'s `dx`/`dy` — and shipped
-as a `unique_id -> tension` map through the `update_tension` behavior.
+as a `unique_id -> delta` map (the change in the process's own share of `line_tension`,
+mirrored in the `directional_tension` column) through the `update_parameter` behavior
+(`parameter="line_tension"`, `dataframe="edge"`), which adds it in place. Other tension processes therefore stack on top of it; see
+`Experiments/tension_composition` for directional + stochastic tension together.
 
 That split is the opposite of the one `DifferentialAdhesion` makes, and deliberately so.
 There, whether a junction is heterotypic depends on the *pair of cells it separates*,

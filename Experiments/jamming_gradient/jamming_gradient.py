@@ -206,6 +206,11 @@ def build_jamming_spec(dataset_path: Path) -> dict:
 def build_gradient_spec(dataset_path: Path) -> dict:
     cfg = _flat_config(dataset_path)
     cfg["auto_reconnect"] = {"enabled": True, **GRAD_DETACH}
+    # ParameterGradient ships deltas of its share of prefered_perimeter. Seeding
+    # that share at the baseline makes the gradient own the whole value, so
+    # prefered_perimeter becomes m*x + c rather than baseline + m*x + c.
+    face = cfg["parameters"]["face_df"]
+    face["gradient_prefered_perimeter"] = face["prefered_perimeter"]
     spec = _base_spec(cfg, GRAD_DT)
     spec["Gradient"] = {
         "_type": "step",
