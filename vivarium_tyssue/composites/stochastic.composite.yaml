@@ -305,6 +305,8 @@ state:
     outputs:
       behaviors:
       - Behaviors
+      datasets:
+      - Tissue State
     interval: ${interval}
   Network Changed: false
   Behaviors: {}

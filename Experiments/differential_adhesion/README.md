@@ -18,14 +18,16 @@ single notebook
 
 Run it from the repo's **`vivarium-tyssue` conda env** (the `.venv`/`uv` setup is broken)
 with this directory as the working directory. The GIFs need ImageMagick's `magick` on
-PATH. End to end it takes about 10 minutes: two 2400-step runs (the sorting run and a
-uniform-tension control), two GIFs and the metrics.
+PATH. End to end it takes about 10 minutes: two 4000-step runs to t = 200 (the sorting run
+and a uniform-tension control), two GIFs and the metrics.
 
 Headline result: the sorting index — homotypic junctions / all junctions — rises from
-0.49 (random 50:50) to ~0.70 over 120 time units, while the control stays flat at 0.49.
-The total `A|B` interface length, which is what the energy actually penalises, falls from
-189 to ~72 (the control ends at 192). Exact numbers move by a percentage point between runs: tyssue's
-`EventManager` shuffles its queue with the stdlib RNG, which nothing seeds.
+0.49 (random 50:50) to 0.53 by t = 40 and holds at ~0.54 to t = 200, while the control
+stays flat at 0.49. The total `A|B` interface length, which is what the energy actually
+penalises, falls from 189 to ~113 (the control ends at 192). Sorting is modest because
+the surface smoother is stiff here ($K_S = 0.2$, see below). Exact numbers move by a
+percentage point between runs: tyssue's `EventManager` shuffles its queue with the stdlib
+RNG, which nothing seeds.
 
 ## What drives it
 
@@ -66,8 +68,9 @@ S = 0.71, $K_S = 0.5$ removes eversion entirely but freezes the mesh and sorting
 (S = 0.50). `dev_length` mixes out-of-plane bulge with the in-plane one-ring irregularity
 that sorting legitimately produces, so a symmetric quadratic on it cannot target one
 without the other — and re-centring the well on the sorted state's roughness makes the
-eversion *worse*, not better. The notebook has the full sweep and the reasoning. The
-default is $K_S = 0.05$; set it to 0 to recover the original run.
+eversion *worse*, not better. The notebook has the full sweep and the reasoning (the
+sweep numbers above predate the current configuration). The notebook now runs at
+$K_S = 0.2$; set it to 0 to recover the original run.
 
 ## Outputs (git-ignored)
 

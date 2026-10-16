@@ -45,15 +45,15 @@ Four discrete-event scenarios exercising the rate-based `CellDivisions` /
   `cell_type`). `settle_pending_commitments` therefore restores each such cell's
   real type from its `commit_type` column and clears the flags before the mesh is
   written; the partly grown/shrunk `prefered_area` needs no fixing, since
-  `EulerSolver` re-applies the configured face parameters on load. (Measured: 24
-  cells were mid-commitment at the `gillespie` checkpoint, 41 at the restart's.)
+  `EulerSolver` re-applies the configured face parameters on load. (Measured: 8
+  cells were mid-commitment at the `gillespie` checkpoint, 18 at the restart's.)
 
   `gillespie_restart` writes a checkpoint of its own, so the chain can be extended
-  by pointing a further run at it. That is worth doing if you need a strictly
-  stationary start: `gillespie`'s `pc` population is still climbing at `tf=72`
-  (26 → 76 → 124 → 147 over the second half), so its checkpoint sits close to but
-  not exactly on the stationary composition, and the restart spends its first ~20
-  time units relaxing `pc` 160 → ~100 before going flat for the remaining ~50.
+  by pointing a further run at it. In the current runs `gillespie` has already
+  settled by its second half: `pc` relaxes 150 → ~100 by `t` ≈ 36 and stays near
+  100 to `tf=72`. The restart opens on that composition (`pc` 99) and stays flat
+  (`pc` 96–111 over the whole run), so one checkpoint is enough for a stationary
+  start.
 
 `CellDivisions` is the renamed, rate-based successor of the old `TestRegulations`
 process; `CellDeaths` is its death counterpart. Both live in
@@ -96,8 +96,8 @@ same as a clean one and `FaceAreaElasticity` feels no restoring force.
 
 It is tempting to read this as the tube buckling under post-division crowding,
 since `VesselSurfaceElasticity` pins the sheet radially at `prefered_radius` = 2.5.
-**That is not the cause** — the same folding occurs in the flat 2-D
-`tumor_coupling` sheet, which has no radial pin. `vessel_elasticity` helps (below)
+**That is not the cause** — the same folding occurred in the flat 2-D
+sheet of the (since removed) tumor-coupling experiment, which has no radial pin. `vessel_elasticity` helps (below)
 by suppressing cell *elongation*, which is the actual precondition, not by
 addressing crowding.
 

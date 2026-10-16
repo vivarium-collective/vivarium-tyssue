@@ -149,7 +149,7 @@ def build_spec(tau: float, sigma: float, dt: float, dataset_path: Path) -> dict:
             "address": "local:StochasticLineTension",
             "config": {"tau": tau, "sigma": sigma},
             "inputs": {"datasets": ["Tissue State"]},
-            "outputs": {"behaviors": ["Behaviors"]},
+            "outputs": {"behaviors": ["Behaviors"], "datasets": ["Tissue State"]},
             "interval": dt,
         },
         "Network Changed": False,

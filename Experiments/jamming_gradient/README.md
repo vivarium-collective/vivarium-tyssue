@@ -1,10 +1,15 @@
 # Cell-jamming & parameter-gradient migration experiments
 
 Two single-cell migration scenarios on a flat epithelial square sheet, reproduced
-exactly from `Notebooks/simulation_walkthrough.ipynb` (specs 05 and 06) — same
-config, same `tf`/`dt`, **no parameter sweep**. One cell (face 96) is given an
-`ActiveMigration` drive and migrates through the tissue while stochastic
-line-tension fluctuations act on every edge.
+from `Notebooks/simulation_walkthrough.ipynb` (specs 05 and 06) — same config, same
+`tf`/`dt`, **no parameter sweep**. One cell (face 96) is given an `ActiveMigration`
+drive and migrates through the tissue while stochastic line-tension fluctuations act on
+every edge.
+
+The drive is `MIGRATION_STRENGTH` = 0.6, not the walkthrough's 0.1. `ActiveMigration`
+now splits the cell's strength between its vertices (vivatyssue `9007de9`); before, every
+vertex carried the full strength. Face 96 is a hexagon, so 0.6 gives each vertex the
+force it had before. With 0.1 the cell barely moves (final displacement 0.77).
 
 - **Jamming** — `CellJamming` fires at `t = 300` (run to `t = 400`, `dt = 0.1`),
   ramping every cell's preferred perimeter down so the tissue solidifies and the
@@ -39,8 +44,9 @@ returns tyssue's own defaults divided by `dt`:
 
 The nominal values differ only because the two scenarios integrate at different
 `dt`; the *effective* per-step rate is identical, and matches July's. On the
-jamming run this takes the final displacement from 2.630 back to **9.194**,
-against the July `run.log` figure of 9.854.
+jamming run this took the final displacement from 2.630 back to 9.194, against the
+July `run.log` figure of 9.854. The current run ends at **8.08** (8.94 at its peak,
+just after jamming at `t = 300`); the gradient run ends at **12.76**.
 
 ## Workflow — simulate, then analyse
 
@@ -83,9 +89,11 @@ outputs/
 
 Stills, analysis figures and bigraphs render at 300 dpi; GIFs at 110 dpi.
 
-The gradient figure omits the preferred perimeter at `t = 0`: `ParameterGradient` is a
-**step**, so the first recorded frame still holds the pre-gradient default (3.6) and
-would render as a spurious jump before the gradient's ~4.31.
+The gradient figure omits the preferred perimeter at `t = 0`. That used to hide a
+spurious jump: `ParameterGradient` is a **step**, and the first recorded frame held the
+pre-gradient default (3.6). The EulerSolver now records each frame after applying the
+behaviors it received, so the first frame already carries the gradient (4.38 for the
+migrating cell's starting x); the omission is harmless.
 
 ## Run
 

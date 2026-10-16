@@ -306,6 +306,8 @@ state:
     outputs:
       behaviors:
       - Behaviors
+      datasets:
+      - Tissue State
     interval: ${interval}
   Jamming:
     _type: process

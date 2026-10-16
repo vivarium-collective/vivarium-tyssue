@@ -125,7 +125,7 @@ The flat square sheet (`test_square.hf5`, 206 cells) runs with a **free border**
 | mechanics | viscosity 0.02 (dt 0.002), `prefered_perimeter` 3.5, `perimeter_elasticity` 0.5, area elasticity 1 |
 | rosettes | 4-fold vertices resolve after a 10 min mean wait (`p_4` 7.08, `p_5p` 0.708 per sim unit); tyssue's defaults gave ~12 h |
 | cell cycle | ≈ 20 time units (measured 20.1); grow in G1/G2 at 0.079, divide on entering M |
-| run | to 1200 cells (t = 50.5, 994 divisions), snapshot every 0.25 |
+| run | to 1200 cells (t = 50, 999 divisions, 206 → 1205 cells), snapshot every 0.25 |
 | final mesh | 0 folded, 0 invading vertices, 0 overlapping pairs (`find_intersections(strict=True)`, checked on every frame) |
 
 **Why it stays clean, and why it stops at 1200 cells.**
@@ -143,9 +143,9 @@ The flat square sheet (`test_square.hf5`, 206 cells) runs with a **free border**
   one 0.25-unit frame at a time and snapshots the mesh itself.
 
 **Checked in the run's snapshots:**
-- all 1000 splits happen as the mother enters M;
+- all 999 splits happen with the mother in M;
 - target area grows only in G1 and G2, and is constant in S and M;
-- division-to-division time is 20.1 on average (minimum 15.7);
+- division-to-division time is 20.1 on average (minimum 15.5, maximum 25.3; 793 complete cycles);
 - no cell divides twice in a row.
 
 **The notebook also makes two GIFs** (`outputs/figures/growth_phase.gif` and

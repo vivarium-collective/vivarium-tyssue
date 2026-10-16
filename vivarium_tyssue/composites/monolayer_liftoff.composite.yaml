@@ -18,8 +18,8 @@ requires:
   types:
   - tyssue_data
   - behaviors
-# No emitter: the study viz read runs.db (written by scripts/run_lumen_sims.py),
-# the same Path-C pattern as the tumor studies. Standalone runs stay clean.
+# No emitter: the study viz read runs.db (written by scripts/run_lumen_sims.py).
+# Standalone runs stay clean.
 emitters: []
 parameters:
   interval:

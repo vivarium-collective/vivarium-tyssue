@@ -1,6 +1,6 @@
 """Run the 3D monolayer lift-off composite and record a runs.db the viz read.
 
-Sibling of ``run_study_sims.py`` (the tumor runner), but for the pure-mechanics
+Sibling of ``run_study_sims.py`` (the 2D study runner), but for the pure-mechanics
 3D monolayer: there are no cell-fate events, so it records *morphology* scalars
 that quantify apical lift-off, plus the per-step mesh (vert/edge/face/cell df)
 the 3D / profile viz draw.

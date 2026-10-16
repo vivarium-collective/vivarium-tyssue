@@ -51,6 +51,10 @@ DATASET_NAME = "test_square.hf5"
 
 N_FACES = 206
 MIGRATING_FACE = 96          # the cell given an ActiveMigration drive
+# Total drive on the migrating cell. ActiveMigration splits it between the cell's
+# vertices (vivatyssue 9007de9); face 96 is a hexagon, so 0.6 gives each vertex
+# the 0.1 it got when every vertex carried the full strength.
+MIGRATION_STRENGTH = 0.6
 TAU, SIGMA = 0.2, 0.1        # stochastic line-tension (shared by both scenarios)
 
 # Jamming scenario (notebook spec 05)
@@ -132,7 +136,8 @@ def _flat_config(dataset_path: Path) -> dict:
                 "prefered_area": 1,
                 "perimeter_elasticity": 0.1,
                 "prefered_perimeter": 3.6,
-                "migration_strength": [0.1 if i == MIGRATING_FACE else 0.0 for i in range(N_FACES)],
+                "migration_strength": [MIGRATION_STRENGTH if i == MIGRATING_FACE else 0.0
+                                       for i in range(N_FACES)],
                 "is_alive": 1,
                 "mx": 1,
                 "mz": 0,
@@ -178,7 +183,7 @@ def _base_spec(config: dict, dt: float) -> dict:
             "address": "local:StochasticLineTension",
             "config": {"tau": TAU, "sigma": SIGMA},
             "inputs": {"datasets": ["Tissue State"]},
-            "outputs": {"behaviors": ["Behaviors"]},
+            "outputs": {"behaviors": ["Behaviors"], "datasets": ["Tissue State"]},
             "interval": dt,
         },
         "Network Changed": False,
@@ -222,7 +227,7 @@ def build_gradient_spec(dataset_path: Path) -> dict:
             "model_parameters": {"prefered_perimeter": "face"},
         },
         "inputs": {"datasets": ["Tissue State"]},
-        "outputs": {"behaviors": ["Behaviors"]},
+        "outputs": {"behaviors": ["Behaviors"], "datasets": ["Tissue State"]},
     }
     return spec
 

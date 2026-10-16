@@ -5,6 +5,7 @@ from process_bigraph import Process, Step
 
 from vivarium_tyssue.maps import *
 from vivarium_tyssue.behaviors.behaviors import DEATH_FLOOR
+from vivarium_tyssue.data_types import tissue_deltas
 
 from tyssue import config
 
@@ -32,11 +33,11 @@ class _Contribution:
 
     Parameter-setting processes ship deltas, not values (see the additive
     behaviors in ``behaviors.py``), so each one has to know what it last
-    contributed. It cannot read that back from the mesh: the solver executes a
-    behavior a step or two after the process emits it (two, with the process and
-    the solver on the same interval), so the mesh a process sees does not yet
-    hold its latest deltas. The share is therefore remembered here, as
-    the values last emitted. An element the process has not seen yet (a mesh
+    contributed. With the ``datasets`` output wired to Tissue State the store
+    holds a process's deltas from the next tick, but unwired (or without a
+    ``component`` column) the mesh a process reads does not yet hold its latest
+    deltas: the solver only executes them at the start of its next update. The
+    share is therefore remembered here, as the values last emitted. An element the process has not seen yet (a mesh
     loaded mid-run, or a row cloned by a division or vertex split) takes its share
     from the mesh's ``column``, which the behaviors keep equal to that share. With
     no such column it starts at 0.
@@ -68,14 +69,31 @@ class _Contribution:
 def _parameter_update(parameter, dataframe, deltas, component=None):
     """An ``update_parameter`` behavior node: add ``deltas`` (``{unique_id:
     delta}``) to the ``parameter`` column of the ``dataframe`` element table, and
-    to ``component``."""
+    to ``component``. ``unique=False``: equal deltas must both apply."""
     return {
         "func": "update_parameter",
         "parameter": parameter,
         "dataframe": dataframe,
         "parameter_update": deltas,
         "component": component,
+        "unique": False,
     }
+
+
+# Output ports of a parameter-setting process. ``datasets`` is optional: wired to
+# the Tissue State store, it adds the same deltas the solver receives through
+# ``behaviors`` to the store, so every reader sees the parameters the solver will
+# integrate the next interval with. Left unwired, process-bigraph drops it.
+_REGULATOR_OUTPUTS = {
+    "behaviors": "list[node]",
+    "datasets": "tyssue_data",
+}
+
+
+def _regulated(behaviors):
+    """Update for :data:`_REGULATOR_OUTPUTS`: the behaviors for the solver plus
+    the matching Tissue State deltas."""
+    return {"behaviors": behaviors, "datasets": tissue_deltas(behaviors)}
 
 
 def _poisson_event_count(rate, interval, n_eligible):
@@ -263,20 +281,18 @@ class StochasticLineTension(Process):
         }
 
     def outputs(self):
-        return {
-            "behaviors": "list[node]"
-        }
+        return dict(_REGULATOR_OUTPUTS)
 
     def update(self, inputs, interval):
         edge_df = inputs["datasets"]["edge_df"]
         if len(edge_df) == 0:
-            return {"behaviors": []}
+            return _regulated([])
         uids, x = self.share.previous(edge_df)
         decay = np.exp(-interval / self.tau)
         noise_scale = self.sigma * np.sqrt(1 - np.exp(-2 * interval / self.tau))
         new_x = decay * x + noise_scale * np.random.randn(len(x))
-        return {"behaviors": [_parameter_update(
-            "line_tension", "edge", self.share.deltas(uids, x, new_x), self.component)]}
+        return _regulated([_parameter_update(
+            "line_tension", "edge", self.share.deltas(uids, x, new_x), self.component)])
 
 
 class DifferentialAdhesion(Process):
@@ -301,11 +317,10 @@ class DifferentialAdhesion(Process):
     freshly-created heterotypic interface and stay wrong for the rest of the run.
 
     The behavior is emitted on every update, so the classification is redone from
-    the current ``srce``/``trgt``/``face`` topology every step. Note that tyssue's
-    ``EventManager.update`` shuffles its queue, so within a step this behavior runs
-    either just before or just after ``reconnect``'s T1 surgery; a junction created
-    by a T1 that lands after it therefore picks up its tension on the next step.
-    The tensions are never more than one step behind the mesh.
+    the current ``srce``/``trgt``/``face`` topology every step. The solver runs
+    received behaviors after the re-queued ones, so this runs after that step's
+    ``reconnect`` T1 surgery and a junction created by a T1 picks up its tension
+    in the same step.
     """
 
     config_schema = {
@@ -377,7 +392,7 @@ class CellJamming(Process):
 
     The ramp runs in the behavior because each step's increment is a fraction of
     the parameter as it stands, which only the solver's mesh holds (this process
-    sees it a step or two late). The behavior adds that increment in place rather
+    sees the snapshot from the start of the tick). The behavior adds that increment in place rather
     than rescaling the parameter, so it stacks with other processes driving
     ``prefered_perimeter``.
     """
@@ -454,9 +469,7 @@ class ParameterGradient(Step):
         }
 
     def outputs(self):
-        return {
-            "behaviors": "list[node]"
-        }
+        return dict(_REGULATOR_OUTPUTS)
 
     def update(self, inputs):
         behaviors = []
@@ -472,7 +485,7 @@ class ParameterGradient(Step):
                 new_parameter = self.gradient(x=positions, **self.args)
                 behaviors.append(_parameter_update(
                     parameter, df, share.deltas(uids, old, new_parameter), share.column))
-        return {"behaviors": behaviors}
+        return _regulated(behaviors)
 
 class AnisotropicTension(Step):
     """Two-level line tension by edge orientation, shipped as ``update_parameter``
@@ -496,15 +509,13 @@ class AnisotropicTension(Step):
         }
 
     def outputs(self):
-        return {
-            "behaviors": "list[node]"
-        }
+        return dict(_REGULATOR_OUTPUTS)
 
     def update(self, inputs):
         edge_df = inputs["datasets"]["edge_df"]
 
         if edge_df.empty:
-            return {"behaviors": []}
+            return _regulated([])
 
         d1 = edge_df[f"d{self.axes[1]}"].to_numpy()
         d2 = edge_df[f"d{self.axes[0]}"].to_numpy()
@@ -519,8 +530,8 @@ class AnisotropicTension(Step):
         )
         uids, old = self.share.previous(edge_df)
 
-        return {"behaviors": [_parameter_update(
-            "line_tension", "edge", self.share.deltas(uids, old, tensions), self.component)]}
+        return _regulated([_parameter_update(
+            "line_tension", "edge", self.share.deltas(uids, old, tensions), self.component)])
 
 # ---------------------------------------------------------------------------
 # Directional (planar-polarised) line tension
@@ -689,9 +700,7 @@ class DirectionalLineTension(Process):
         }
 
     def outputs(self):
-        return {
-            "behaviors": "list[node]"
-        }
+        return dict(_REGULATOR_OUTPUTS)
 
     def edge_alignment(self, edge_df):
         """``a(theta)`` for every half-edge, from the ``d<coord>`` columns.
@@ -718,7 +727,7 @@ class DirectionalLineTension(Process):
     def update(self, inputs, interval):
         edge_df = inputs["datasets"]["edge_df"]
         if len(edge_df) == 0:
-            return {"behaviors": []}
+            return _regulated([])
 
         alignment = self.edge_alignment(edge_df)
         tensions = self.tension_min + (
@@ -742,4 +751,4 @@ class DirectionalLineTension(Process):
                     },
                 },
             })
-        return {"behaviors": behaviors}
+        return _regulated(behaviors)

@@ -183,9 +183,13 @@ def _solver(config: dict, dt: float) -> dict:
 
 
 def _regulator(address: str, config: dict, dt: float) -> dict:
+    outputs = {"behaviors": ["Behaviors"]}
+    if address in ("DirectionalLineTension", "StochasticLineTension"):
+        # Their parameter deltas also go to the store, so readers see them.
+        outputs["datasets"] = ["Tissue State"]
     return {"_type": "process", "address": f"local:{address}", "config": config,
             "inputs": {"datasets": ["Tissue State"]},
-            "outputs": {"behaviors": ["Behaviors"]}, "interval": dt}
+            "outputs": outputs, "interval": dt}
 
 
 def ce_spec(run: dict, mesh: dict) -> dict:

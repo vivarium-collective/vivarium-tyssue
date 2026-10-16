@@ -523,7 +523,7 @@ def _add_by_uid(df, column, delta, component=None):
 
 
 def update_parameter(sheet, manager, parameter, dataframe, parameter_update=None,
-                     component=None):
+                     component=None, unique=False):
     """Adds ``parameter_update`` (``{unique_id: delta}``) in place to the
     ``parameter`` column of the ``dataframe`` element table (``"edge"``,
     ``"face"``, ``"vert"`` or ``"cell"``; an ``"_df"`` suffix is accepted), and to
@@ -531,6 +531,10 @@ def update_parameter(sheet, manager, parameter, dataframe, parameter_update=None
 
     This is the one behavior every parameter-setting process uses, e.g.
     ``parameter="line_tension", dataframe="edge"`` for the tension processes.
+
+    ``unique`` is read by the EventManager, not here. Deltas add, so two equal
+    ones must both apply; nodes carry ``unique=False`` to keep the manager from
+    dropping the second as a duplicate.
     """
     df = sheet.datasets[dataframe.removesuffix("_df")]
     if parameter in df.columns and df[parameter].dtype != np.float64:
@@ -558,9 +562,9 @@ def update_parameter(sheet, manager, parameter, dataframe, parameter_update=None
 # EventManager, acting on the real epithelium — rather than in the process that
 # requests it, which only ever sees the mesh from before the step.
 #
-# (EventManager.update shuffles its queue, so within a step this runs either just
-# before or just after tyssue's `reconnect`; a junction born of a T1 that lands
-# after it picks up its tension on the next step. Never more than one step stale.)
+# (The EulerSolver queues received behaviors after the re-queued ones, so this
+# runs after that step's `reconnect`; a junction born of a T1 picks up its
+# tension in the same step.)
 # ---------------------------------------------------------------------------
 
 def opposite_half_edges(sheet):
@@ -1011,7 +1015,7 @@ def _grow_committed_cells_3d(eptm, manager, geom="MonolayerGeometry"):
     div_ready = uid[div_mask & (vol > crit)]
     ext_ready = uid[ext_mask & ((vol < crit) | (prefered_v < DEATH_FLOOR))]
 
-    # Contact inhibition: a dividing cell wedged in the crowded tumor core can
+    # Contact inhibition: a dividing cell wedged in a crowded core can
     # never reach crit_vol however much its prefered_vol is inflated. Left
     # unchecked such cells accumulate as permanently-committed "dividing" cells
     # that grow every step forever — a runaway that also balloons runtime. Once a

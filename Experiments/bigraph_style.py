@@ -133,7 +133,7 @@ def plot_experiment_bigraph(
     ``vivarium_tyssue.core.build_core()`` core, which knows the tyssue types.
 
     ``show_unwired_ports`` draws the ports a process *declares* but the spec never
-    wires (e.g. ``TumorCoupling``'s per-species count outputs) as dangling arrows.
+    wires (e.g. per-species count outputs) as dangling arrows.
     Off by default: they carry no data in these runs and stretch the figure several
     times wider than the wiring it is meant to show.
     """

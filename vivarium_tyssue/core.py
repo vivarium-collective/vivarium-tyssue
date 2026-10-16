@@ -74,8 +74,8 @@ def build_core():
     except Exception as exc:  # noqa: BLE001
         print(f"vivarium_tyssue.core: visualizations not registered ({type(exc).__name__}: {exc})")
 
-    # COPASI SBML process (pbg-copasi) — needed by the tumor composite. Degrade
-    # gracefully if the COPASI/basico stack isn't installed.
+    # COPASI SBML process (pbg-copasi), for composites that run an SBML model in
+    # COPASI. Degrade gracefully if the COPASI/basico stack isn't installed.
     try:
         from viva_copasi.processes import CopasiUTCProcess
         if "CopasiUTCProcess" not in core.link_registry:
@@ -83,8 +83,8 @@ def build_core():
     except Exception as exc:  # noqa: BLE001
         print(f"vivarium_tyssue.core: CopasiUTCProcess not registered ({type(exc).__name__}: {exc})")
 
-    # Framework timeseries viz (pbg-superpowers) — plots scalar observables
-    # (tumor_births, healthy_deaths, *_count) the TumorCoupling process emits.
+    # Framework timeseries viz (pbg-superpowers) — plots scalar observable stores
+    # (e.g. per-type cell counts) recorded in a study's runs.db.
     try:
         from viva_superpowers.visualizations.timeseries_from_observables import TimeSeriesFromObservables
         if "TimeSeriesFromObservables" not in core.link_registry:

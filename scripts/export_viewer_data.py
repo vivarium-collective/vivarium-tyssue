@@ -86,10 +86,6 @@ SHOWCASE = [
      "ASCT+B cell-type proportions. Orbit to inspect real anatomy — not a "
      "generated mesh.",
      0.02, 0.2, 10),
-    ("tumor", "Tumor growth (COPASI-coupled)",
-     "Flat sheet coupled to a breast-cancer population ODE in COPASI; a central seed "
-     "divides into a growing tumour clone (1 → ~120 tumour cells) as healthy tissue is "
-     "displaced. Colour by cell type to watch the clone expand.", 0.05, 2.0, 70),
 ]
 
 

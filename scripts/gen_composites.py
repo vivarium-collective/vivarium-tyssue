@@ -205,7 +205,7 @@ def stochastic_node():
         "address": "local:StochasticLineTension",
         "config": {"tau": 0.2, "sigma": 0.1},
         "inputs": {"datasets": ["Tissue State"]},
-        "outputs": {"behaviors": ["Behaviors"]},
+        "outputs": {"behaviors": ["Behaviors"], "datasets": ["Tissue State"]},
         "interval": INTERVAL,
     }
 
@@ -265,7 +265,7 @@ write(
                 "model_parameters": {"prefered_perimeter": "face"},
             },
             "inputs": {"datasets": ["Tissue State"]},
-            "outputs": {"behaviors": ["Behaviors"]},
+            "outputs": {"behaviors": ["Behaviors"], "datasets": ["Tissue State"]},
         },
         **base_stores(),
     },
@@ -289,7 +289,7 @@ write(
             "address": "local:AnisotropicTension",
             "config": {"axes": ["x", "y"], "tension_values": [0.0, 0.2]},
             "inputs": {"datasets": ["Tissue State"]},
-            "outputs": {"behaviors": ["Behaviors"]},
+            "outputs": {"behaviors": ["Behaviors"], "datasets": ["Tissue State"]},
         },
         **base_stores(),
     },

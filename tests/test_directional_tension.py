@@ -200,7 +200,8 @@ def test_readout_can_be_switched_off():
 
 
 def test_empty_mesh_emits_nothing():
-    assert make().update({"datasets": {"edge_df": pd.DataFrame()}}, 0.1) == {"behaviors": []}
+    assert make().update({"datasets": {"edge_df": pd.DataFrame()}}, 0.1) == {
+        "behaviors": [], "datasets": {}}
 
 
 def test_behaviors_land_on_a_sheet():

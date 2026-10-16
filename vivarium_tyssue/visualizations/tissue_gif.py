@@ -54,8 +54,8 @@ def _load_frames(runs_db_path: str | None, source: str | None = None) -> list[di
     """Return [{t: float, datasets: {vert_df, edge_df, face_df, cell_df}}] for a
     single simulation in runs.db. Empty list when unavailable.
 
-    A runs.db may hold several simulations (e.g. the tumor-vs-baseline study keys
-    ``tumor__tumor`` and ``epithelium_2d__baseline`` in one db). ``source`` picks
+    A runs.db may hold several simulations (e.g. a comparison study keying
+    ``<study>__<arm>`` and ``epithelium_2d__baseline`` in one db). ``source`` picks
     which one: a simulation_id whose suffix matches ``__<source>`` (or an exact id).
     Without ``source``, the most recently written simulation is used. Loading frames
     across simulations (the old fall-through) interleaves two runs by step and must

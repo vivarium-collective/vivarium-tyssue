@@ -25,38 +25,40 @@ line_tension = adhesion_tension    + stochastic_tension      (sort)
 ```
 
 Each process remembers the share it last emitted rather than reading it back from the
-mesh. The solver executes a behavior two steps after the process emits it, so the mesh a
-process sees does not yet hold its latest deltas. A row cloned mid-run (division, vertex
-split) takes its starting share from the copied column. The shares add up to
+mesh. Both regulators here wire their `datasets` output to Tissue State, so the store
+holds their latest deltas from the next tick; unwired, the mesh a process reads lags its
+own deltas by one update, and the remembered share keeps the bookkeeping exact either
+way. A row cloned mid-run (division, vertex split) takes its starting share from the
+copied column. The shares add up to
 `line_tension` to within 4e-15 in every frame of every run.
 
 ## Results
 
 | ce run | CE index at t = 240 | completed T1s | cell aspect ratio |
 |---|---|---|---|
-| no noise | 1.96 | 30 | 2.21 |
-| σ = 0.025 | 1.96 | 197 | 1.84 |
-| σ = 0.05 | 2.04 | 411 | 1.52 |
-| σ = 0.1 | **2.25** | 686 | 1.58 |
-| noise only, σ = 0.1 | 0.98 | 652 | 1.54 |
+| no noise | 1.96 | 22 | 2.25 |
+| σ = 0.025 | 1.98 | 223 | 1.72 |
+| σ = 0.05 | 2.03 | 391 | 1.56 |
+| σ = 0.1 | **2.28** | 688 | 1.58 |
+| noise only, σ = 0.1 | 0.98 | 651 | 1.50 |
 
 | sort run | sorting index at t = 200 | A\|B interface length |
 |---|---|---|
-| no noise | 0.55 | 108 |
-| σ = 0.025 | 0.58 | 101 |
-| σ = 0.05 | 0.68 | 81 |
-| σ = 0.1 | **0.79** | 59 |
+| no noise | 0.54 | 113 |
+| σ = 0.025 | 0.59 | 98 |
+| σ = 0.05 | 0.68 | 80 |
+| σ = 0.1 | **0.77** | 64 |
 | noise only, σ = 0.1 | 0.49 | 197 |
 
 - **Noise helps both mechanisms, and does neither on its own.** The noise-only controls
   stay at CE ≈ 1 and at the random-labelling sorting index 0.49.
 - **Convergent extension changes character.** Without noise the tissue extends mostly by
-  stretching its cells (aspect ratio 2.2, 30 T1s). With noise the cells stay rounder
-  (≈ 1.55) and the tissue extends further by rearranging (≈ 700 T1s). The noise unjams the
+  stretching its cells (aspect ratio 2.25, 22 T1s). With noise the cells stay rounder
+  (≈ 1.6 at σ ≥ 0.05) and the tissue extends further by rearranging (≈ 700 T1s at σ = 0.1). The noise unjams the
   tissue, and the directional tension biases which rearrangements win.
-- **Sorting stops being trapped.** Without noise sorting stalls early (S = 0.55): the
+- **Sorting stops being trapped.** Without noise sorting stalls early (S = 0.54): the
   heterotypic interface shrinks fast and then stops changing. Noise lets junctions keep
-  remodelling, so like cells keep gathering (S = 0.79 at σ = 0.1).
+  remodelling, so like cells keep gathering (S = 0.77 at σ = 0.1).
 - With σ ≥ 0.05 about 10–25 % of junctions carry negative tension at any moment. The OU
   share is centred on 0, as in `Experiments/stochastic_tension`. Every final mesh passes
   `Sheet.validate()`.
