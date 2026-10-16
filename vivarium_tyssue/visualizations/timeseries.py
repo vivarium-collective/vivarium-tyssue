@@ -1,6 +1,6 @@
 """Workspace-local re-export of the framework TimeSeriesFromObservables chart.
 
-The tumor studies address this chart as ``local:TimeSeriesFromObservables``.
+Studies address this chart as ``local:TimeSeriesFromObservables``.
 ``vivarium_tyssue.core.build_core`` registers the framework class under that
 name at runtime, so it renders correctly — but the pre-publication report
 linter (``viva_superpowers.report_linter``) resolves ``local:`` addresses by a

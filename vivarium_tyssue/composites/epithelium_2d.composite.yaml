@@ -1,6 +1,5 @@
 name: epithelium_2d
-description: Baseline flat (square) 2D sheet epithelium — pure mechanical relaxation,
-  no tumor coupling. Control for the tumor-composite comparison study.
+description: Baseline flat (square) 2D sheet epithelium — pure mechanical relaxation.
 tags:
 - tissue
 - mechanics
@@ -18,9 +17,8 @@ parameters:
   interval:
     type: float
     default: 0.01
-    description: Emit / update interval. Solver dt = interval / substeps. 0.01 to match
-      the tumor arm in the tumor-vs-baseline comparison (reviewer 2026-06-17);
-      mechanics-only here, so the sheet just relaxes regardless of dt.
+    description: Emit / update interval. Solver dt = interval / substeps. Mechanics-only,
+      so the sheet just relaxes regardless of dt.
   substeps:
     type: int
     default: 1
@@ -57,7 +55,8 @@ state:
       factory: model_factory
       settings:
         threshold_length: 0.03
-      auto_reconnect: true
+      auto_reconnect:
+        enabled: true
       bounds: {}
       output_columns: {}
       history_columns: {}

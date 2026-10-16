@@ -5,6 +5,7 @@ from process_bigraph import Process, Step
 
 from vivarium_tyssue.maps import *
 from vivarium_tyssue.behaviors.behaviors import DEATH_FLOOR
+from vivarium_tyssue.data_types import tissue_deltas
 
 from tyssue import config
 
@@ -27,6 +28,74 @@ GRADIENT_MAP = {
     "hill": hill_gradient,
 }
 
+class _Contribution:
+    """One process's share of an additive parameter, per element ``unique_id``.
+
+    Parameter-setting processes ship deltas, not values (see the additive
+    behaviors in ``behaviors.py``), so each one has to know what it last
+    contributed. With the ``datasets`` output wired to Tissue State the store
+    holds a process's deltas from the next tick, but unwired (or without a
+    ``component`` column) the mesh a process reads does not yet hold its latest
+    deltas: the solver only executes them at the start of its next update. The
+    share is therefore remembered here, as the values last emitted. An element the process has not seen yet (a mesh
+    loaded mid-run, or a row cloned by a division or vertex split) takes its share
+    from the mesh's ``column``, which the behaviors keep equal to that share. With
+    no such column it starts at 0.
+    """
+
+    def __init__(self, column=""):
+        self.column = column
+        self.last = {}
+
+    def previous(self, df):
+        """``(unique_ids, share)`` for every row of ``df``."""
+        uids = df["unique_id"].to_numpy().tolist()
+        if self.column and self.column in df.columns:
+            seed = df[self.column].to_numpy(dtype=float).tolist()
+        else:
+            seed = [0.0] * len(uids)
+        last = self.last
+        share = np.fromiter((last.get(u, s) for u, s in zip(uids, seed)),
+                            dtype=float, count=len(uids))
+        return uids, share
+
+    def deltas(self, uids, old, new):
+        """Remembers ``new`` as the share and returns ``{unique_id: new - old}``."""
+        new = np.asarray(new, dtype=float)
+        self.last = dict(zip(uids, new.tolist()))
+        return dict(zip(uids, (new - old).tolist()))
+
+
+def _parameter_update(parameter, dataframe, deltas, component=None):
+    """An ``update_parameter`` behavior node: add ``deltas`` (``{unique_id:
+    delta}``) to the ``parameter`` column of the ``dataframe`` element table, and
+    to ``component``. ``unique=False``: equal deltas must both apply."""
+    return {
+        "func": "update_parameter",
+        "parameter": parameter,
+        "dataframe": dataframe,
+        "parameter_update": deltas,
+        "component": component,
+        "unique": False,
+    }
+
+
+# Output ports of a parameter-setting process. ``datasets`` is optional: wired to
+# the Tissue State store, it adds the same deltas the solver receives through
+# ``behaviors`` to the store, so every reader sees the parameters the solver will
+# integrate the next interval with. Left unwired, process-bigraph drops it.
+_REGULATOR_OUTPUTS = {
+    "behaviors": "list[node]",
+    "datasets": "tyssue_data",
+}
+
+
+def _regulated(behaviors):
+    """Update for :data:`_REGULATOR_OUTPUTS`: the behaviors for the solver plus
+    the matching Tissue State deltas."""
+    return {"behaviors": behaviors, "datasets": tissue_deltas(behaviors)}
+
+
 def _poisson_event_count(rate, interval, n_eligible):
     """Number of events firing in ``interval`` for a Poisson process of the given
     ``rate`` (events per unit time), capped at the number of eligible cells."""
@@ -41,7 +110,7 @@ class CellDivisions(Process):
     Formerly ``TestRegulations``, which fired divisions on a deterministic period.
     Each update draws the number of division events in the elapsed ``interval``
     from ``Poisson(rate * interval)``; that many distinct alive cells are chosen
-    uniformly at random and given the ``division`` behavior (grow the preferred
+    uniformly at random and given the ``grow_divide`` behavior (grow the preferred
     area at ``growth_rate`` until ``crit_area``, then split). When the tissue
     tracks ``cell_type`` (e.g. the crypt), the chosen cell is flagged
     ``"dividing"`` while it grows and restored to its own type on division, so it
@@ -90,7 +159,7 @@ class CellDivisions(Process):
 
         chosen = np.random.choice(eligible.index.to_numpy(), size=n_events, replace=False)
         base = {
-            "func": "division",
+            "func": "grow_divide",
             "geom": self.config["geom"],
             "crit_area": self.config["crit_area"],
             "growth_rate": self.config["growth_rate"],
@@ -177,18 +246,32 @@ class CellDeaths(Process):
         return {"behaviors": update}
 
 class StochasticLineTension(Process):
+    """Ornstein-Uhlenbeck line tension: each edge's stochastic share ``x`` follows
+
+        x(t + dt) = x(t) exp(-dt / tau) + sigma sqrt(1 - exp(-2 dt / tau)) N(0, 1)
+
+    which relaxes to 0 with correlation time ``tau`` and stationary standard
+    deviation ``sigma``. The process ships the change in ``x`` as an
+    ``update_parameter`` delta on ``line_tension``, so the noise adds to whatever tension other
+    processes (directional, adhesion) set. ``x`` is mirrored in the ``component``
+    column (``stochastic_tension``).
+    """
 
     config_schema = {
         "tau": {
             "_type": "float",
-            "default": 1.0,
+            "_default": 1.0,
         },
         "sigma": "float",
+        # edge_df column mirroring this process's share of line_tension.
+        "component": {"_type": "string", "_default": "stochastic_tension"},
     }
 
     def initialize(self, config):
         self.tau = self.config["tau"]
         self.sigma = self.config["sigma"]
+        self.component = self.config["component"]
+        self.share = _Contribution(self.component)
 
     def inputs(self):
         return {
@@ -198,27 +281,18 @@ class StochasticLineTension(Process):
         }
 
     def outputs(self):
-        return {
-            "behaviors": "list[node]"
-        }
+        return dict(_REGULATOR_OUTPUTS)
 
     def update(self, inputs, interval):
-        if len(inputs["datasets"]["edge_df"]) > 0:
-            tension = np.array(inputs["datasets"]["edge_df"]["line_tension"])
-            unique_ids = np.array(inputs["datasets"]["edge_df"]["unique_id"])
-            decay = np.exp(-interval / self.tau)
-            noise_scale = self.sigma * np.sqrt(1 - np.exp(-2 * interval / self.tau))
-            new_tension = list(decay * tension + noise_scale * np.random.randn(len(tension)))
-            tension_update = {unique_id:tension_v for unique_id, tension_v in zip(unique_ids, new_tension)}
-
-            update = [{
-                "func": "update_tension",
-                "tension_update": tension_update,
-            }]
-
-        else:
-            update = []
-        return {"behaviors": update}
+        edge_df = inputs["datasets"]["edge_df"]
+        if len(edge_df) == 0:
+            return _regulated([])
+        uids, x = self.share.previous(edge_df)
+        decay = np.exp(-interval / self.tau)
+        noise_scale = self.sigma * np.sqrt(1 - np.exp(-2 * interval / self.tau))
+        new_x = decay * x + noise_scale * np.random.randn(len(x))
+        return _regulated([_parameter_update(
+            "line_tension", "edge", self.share.deltas(uids, x, new_x), self.component)])
 
 
 class DifferentialAdhesion(Process):
@@ -230,9 +304,12 @@ class DifferentialAdhesion(Process):
     it regulates the ``EulerSolver`` purely through the ``behaviors`` port and
     never touches the mesh itself.
 
-    Where those two processes compute the new tensions in the process and ship
-    them as a ``unique_id -> tension`` map, this one ships only the two tension
+    Where those two processes compute tension deltas in the process and ship
+    them as a ``unique_id -> delta`` map, this one ships only the two tension
     VALUES and lets the behavior do the classification on the live epithelium.
+    The behavior still updates additively: it moves adhesion's own share of
+    ``line_tension`` (the ``component`` column) to the target, so tension added
+    by other processes is kept.
     That split is deliberate: which junctions are heterotypic is a property of the
     topology as it stands at the moment the tension is applied. A T1 transition
     rewires a junction so that it separates a different pair of cells, so a table
@@ -240,11 +317,10 @@ class DifferentialAdhesion(Process):
     freshly-created heterotypic interface and stay wrong for the rest of the run.
 
     The behavior is emitted on every update, so the classification is redone from
-    the current ``srce``/``trgt``/``face`` topology every step. Note that tyssue's
-    ``EventManager.update`` shuffles its queue, so within a step this behavior runs
-    either just before or just after ``reconnect``'s T1 surgery; a junction created
-    by a T1 that lands after it therefore picks up its tension on the next step.
-    The tensions are never more than one step behind the mesh.
+    the current ``srce``/``trgt``/``face`` topology every step. The solver runs
+    received behaviors after the re-queued ones, so this runs after that step's
+    ``reconnect`` T1 surgery and a junction created by a T1 picks up its tension
+    in the same step.
     """
 
     config_schema = {
@@ -254,20 +330,26 @@ class DifferentialAdhesion(Process):
         # driven by heterotypic > homotypic.
         "heterotypic_tension": "float",
         # face_df column holding the cell type.
-        "type_column": {"_type": "string", "default": "cell_type"},
+        "type_column": {"_type": "string", "_default": "cell_type"},
         # Tension on half-edges with no opposite (the free border of an open
         # sheet). Applied only when apply_boundary_tension is true; a closed
         # sheet has no such edges.
-        "boundary_tension": {"_type": "float", "default": 0.0},
-        "apply_boundary_tension": {"_type": "boolean", "default": False},
+        "boundary_tension": {"_type": "float", "_default": 0.0},
+        "apply_boundary_tension": {"_type": "boolean", "_default": False},
         # edge_df column the behavior stamps with the 0/1 heterotypic flag, so the
         # classification lands in the solver's History next to the tension. It must
         # already exist when the solver builds its History — declare it in the
         # EulerSolver ``parameters`` (edge_df) — or nothing is recorded.
-        "record_column": {"_type": "string", "default": "heterotypic"},
+        "record_column": {"_type": "string", "_default": "heterotypic"},
+        # edge_df column holding adhesion's share of line_tension. The behavior
+        # moves it to the target and adds the same delta to line_tension, so
+        # other tension processes stack on top. Seed it equal to a seeded
+        # line_tension to let adhesion own that initial value.
+        "component": {"_type": "string", "_default": "adhesion_tension"},
     }
 
     def initialize(self, config):
+        self.component = config["component"]
         self.homotypic_tension = config["homotypic_tension"]
         self.heterotypic_tension = config["heterotypic_tension"]
         self.type_column = config["type_column"]
@@ -299,18 +381,31 @@ class DifferentialAdhesion(Process):
                 "boundary_tension": self.boundary_tension,
                 "type_column": self.type_column,
                 "record_column": self.record_column,
+                "component": self.component,
             }]
         }
 
 
 class CellJamming(Process):
+    """At ``trigger_time``, starts the ``cell_jamming`` ramp of every cell's
+    ``prefered_perimeter`` (``rate`` per unit time, relative to the live value).
+
+    The ramp runs in the behavior because each step's increment is a fraction of
+    the parameter as it stands, which only the solver's mesh holds (this process
+    sees the snapshot from the start of the tick). The behavior adds that increment in place rather
+    than rescaling the parameter, so it stacks with other processes driving
+    ``prefered_perimeter``.
+    """
     config_schema = {
         "trigger_time": "float",
         "rate": "float",
         "limits": "list[float]",
+        # face_df column recording the ramp's running total. Empty: not recorded.
+        "component": {"_type": "string", "_default": ""},
     }
 
     def initialize(self, config):
+        self.component = self.config["component"] or None
         self.trigger_time = self.config["trigger_time"]
         self.rate = self.config["rate"]
         self.limits = self.config["limits"]
@@ -335,6 +430,7 @@ class CellJamming(Process):
                 "rate": self.rate,
                 "limits": self.limits,
                 "dt": interval,
+                "component": self.component,
             }]
         else:
             update = []
@@ -342,18 +438,30 @@ class CellJamming(Process):
 
 
 class ParameterGradient(Step):
-    """Creates a 1D gradient of chemical or mechanical signal"""
+    """Creates a 1D gradient of chemical or mechanical signal.
+
+    Each parameter's gradient share is shipped as an ``update_parameter`` delta,
+    so the gradient adds to whatever else drives the parameter. The share is
+    mirrored in the ``<component_prefix><parameter>`` column. Seed that column
+    equal to the parameter's initial value to make the gradient own the whole
+    value, i.e. replace it with ``gradient(x)``.
+    """
     config_schema = {
         "gradient_type": "string", #gradient function key for gradient function
         "axis": "string", #direction axis for gradient
         "args": "map[float]", #parameters for chosen gradient equation
         "model_parameters": "map[string]", #map of parameter names (keys) and dataframe the parameter is found in (values)
+        "component_prefix": {"_type": "string", "_default": "gradient_"},
     }
     def initialize(self, config):
         self.gradient = GRADIENT_MAP[config["gradient_type"]]
         self.args = config["args"]
         self.axis = config["axis"]
         self.model_parameters = config["model_parameters"]
+        self.shares = {
+            parameter: _Contribution(config["component_prefix"] + parameter)
+            for parameter in self.model_parameters
+        }
 
     def inputs(self):
         return {
@@ -361,46 +469,39 @@ class ParameterGradient(Step):
         }
 
     def outputs(self):
-        return {
-            "behaviors": "list[node]"
-        }
+        return dict(_REGULATOR_OUTPUTS)
 
     def update(self, inputs):
-        parameter_updates = {}
+        behaviors = []
         for parameter, df in self.model_parameters.items():
-            if len(inputs["datasets"][df+"_df"]) > 0:
+            frame = inputs["datasets"][df+"_df"]
+            if len(frame) > 0:
                 if df == "edge":
-                    positions = np.array((
-                            inputs["datasets"]["edge_df"][f"s{self.axis}"] +
-                            inputs["datasets"]["edge_df"][f"t{self.axis}"]
-                        )/2
-                    )
+                    positions = np.array((frame[f"s{self.axis}"] + frame[f"t{self.axis}"]) / 2)
                 else:
-                    positions = np.array(inputs["datasets"][df+"_df"][self.axis])
-                unique_ids = np.array(inputs["datasets"][df+"_df"]["unique_id"])
-
+                    positions = np.array(frame[self.axis])
+                share = self.shares[parameter]
+                uids, old = share.previous(frame)
                 new_parameter = self.gradient(x=positions, **self.args)
-                parameter_update = {unique_id:parameter for unique_id, parameter in zip(unique_ids, new_parameter)}
-                parameter_updates[parameter] = {
-                    "dataframe" : df,
-                    "update" : parameter_update,
-                }
-            update = [{
-                "func": "apply_gradient",
-                "parameter_updates": parameter_updates,
-            }]
-            return {"behaviors": update}
+                behaviors.append(_parameter_update(
+                    parameter, df, share.deltas(uids, old, new_parameter), share.column))
+        return _regulated(behaviors)
 
 class AnisotropicTension(Step):
+    """Two-level line tension by edge orientation, shipped as ``update_parameter``
+    deltas of its share of ``line_tension`` (mirrored in the ``component`` column)."""
     config_schema = {
         "axes" : "list[string]", # list of axis labels (first axis label will be the axis of higher tension)
         "tension_values": "list[float]", #low and high value of
+        "component": {"_type": "string", "_default": "anisotropic_tension"},
     }
 
     def initialize(self, config):
 
         self.axes = config["axes"]
         self.tension_values = config["tension_values"]
+        self.component = config["component"]
+        self.share = _Contribution(self.component)
 
     def inputs(self):
         return {
@@ -408,19 +509,16 @@ class AnisotropicTension(Step):
         }
 
     def outputs(self):
-        return {
-            "behaviors": "list[node]"
-        }
+        return dict(_REGULATOR_OUTPUTS)
 
     def update(self, inputs):
         edge_df = inputs["datasets"]["edge_df"]
 
         if edge_df.empty:
-            return {"behaviors": {}}
+            return _regulated([])
 
         d1 = edge_df[f"d{self.axes[1]}"].to_numpy()
         d2 = edge_df[f"d{self.axes[0]}"].to_numpy()
-        unique_ids = edge_df["unique_id"].to_numpy()
 
         angles = np.abs(np.arctan2(d1, d2))
         angles = np.minimum(angles, np.pi - angles)
@@ -430,15 +528,10 @@ class AnisotropicTension(Step):
             self.tension_values[0],
             self.tension_values[1],
         )
+        uids, old = self.share.previous(edge_df)
 
-        tension_update = dict(zip(unique_ids, tensions))
-
-        return {
-            "behaviors": [{
-                "func": "update_tension",
-                "tension_update": tension_update,
-            }]
-        }
+        return _regulated([_parameter_update(
+            "line_tension", "edge", self.share.deltas(uids, old, tensions), self.component)])
 
 # ---------------------------------------------------------------------------
 # Directional (planar-polarised) line tension
@@ -522,9 +615,10 @@ class DirectionalLineTension(Process):
     Where the work happens
     ----------------------
     Sibling of :class:`StochasticLineTension` and :class:`AnisotropicTension`, and
-    like them it computes the tensions **in the process** and ships a
-    ``unique_id -> tension`` map through the ``update_tension`` behavior; the
-    ``EulerSolver`` itself is untouched. That is the right split here (unlike
+    like them it computes the tensions **in the process** and ships the change in
+    its share as a ``unique_id -> delta`` map through the ``update_parameter``
+    behavior (on ``line_tension``), so it stacks with other tension processes (its share is mirrored in
+    the ``component`` column); the ``EulerSolver`` itself is untouched. That is the right split here (unlike
     :class:`DifferentialAdhesion`, which must classify on the live mesh): an
     edge's tension depends only on its own geometry, which the process reads
     straight out of ``edge_df``, and edges are addressed by ``unique_id``, so a
@@ -560,6 +654,8 @@ class DirectionalLineTension(Process):
         # in the EulerSolver ``parameters`` (edge_df) — or nothing is recorded.
         # Empty disables the read-out.
         "record_column": {"_type": "string", "_default": "polar_alignment"},
+        # edge_df column mirroring this process's share of line_tension.
+        "component": {"_type": "string", "_default": "directional_tension"},
     }
 
     def initialize(self, config):
@@ -593,6 +689,8 @@ class DirectionalLineTension(Process):
         self.tension_max = config["tension_max"]
         self.sharpness = config["sharpness"]
         self.record_column = config["record_column"]
+        self.component = config["component"]
+        self.share = _Contribution(self.component)
 
     def inputs(self):
         return {
@@ -602,9 +700,7 @@ class DirectionalLineTension(Process):
         }
 
     def outputs(self):
-        return {
-            "behaviors": "list[node]"
-        }
+        return dict(_REGULATOR_OUTPUTS)
 
     def edge_alignment(self, edge_df):
         """``a(theta)`` for every half-edge, from the ``d<coord>`` columns.
@@ -631,18 +727,17 @@ class DirectionalLineTension(Process):
     def update(self, inputs, interval):
         edge_df = inputs["datasets"]["edge_df"]
         if len(edge_df) == 0:
-            return {"behaviors": []}
+            return _regulated([])
 
         alignment = self.edge_alignment(edge_df)
         tensions = self.tension_min + (
             self.tension_max - self.tension_min
         ) * alignment ** self.sharpness
 
-        unique_ids = edge_df["unique_id"].to_numpy()
-        behaviors = [{
-            "func": "update_tension",
-            "tension_update": dict(zip(unique_ids, tensions)),
-        }]
+        unique_ids, old = self.share.previous(edge_df)
+        behaviors = [_parameter_update(
+            "line_tension", "edge", self.share.deltas(unique_ids, old, tensions),
+            self.component)]
         if self.record_column:
             # `apply_gradient` is the repo's generic "write this column of this
             # element dataframe, keyed by unique_id" behavior — exactly what the
@@ -656,4 +751,4 @@ class DirectionalLineTension(Process):
                     },
                 },
             })
-        return {"behaviors": behaviors}
+        return _regulated(behaviors)

@@ -48,3 +48,7 @@ Notebooks/histories/
 # Large generated Notebook artifacts — regenerate per run, never track
 Notebooks/*.hf5
 Notebooks/*.gif
+
+# Local-only experiments, kept off GitHub
+Experiments/tumor_coupling/
+Experiments/t3_incorporation/

@@ -80,8 +80,7 @@ def rust_bulk_geometry_update(eptm, srce, trgt, face, cell, pos=None):
     coords = eptm.coords
     if pos is None:
         pos = eptm.vert_df[coords].values
-    old_len = eptm.edge_df["length"].values.copy()  # stale length feeds ucoords
-    geom = compute_geometry_bulk(eptm, srce, trgt, face, cell, pos, old_len)
+    geom = compute_geometry_bulk(eptm, srce, trgt, face, cell, pos)
     materialize_geometry_bulk(eptm, geom, which=("edge", "face", "cell"))
     return geom
 
@@ -109,15 +108,18 @@ def rust_geometry_update(eptm, geom, srce, trgt, face, pos=None, full=True):
     return stash
 
 
-def compute_geometry(eptm, srce, trgt, face, pos, old_len):
+def compute_geometry(eptm, srce, trgt, face, pos, old_len=None):
     """Pure-native geometry compute via the Rust kernel — writes **no** DataFrames.
 
     Returns a ``geom`` dict of every array ``SheetGeometry.update_all`` would put
     in the edge/face frames (scoords/tcoords/dcoords/ucoords/length/centroid/
-    fcoords/rcoords/normals/sub_area/area/perimeter), bit-identical (~1e-15),
-    including tyssue's stale-length ``ucoords`` quirk — hence ``old_len`` (the
-    *previous* step's edge length) is passed explicitly rather than read from the
-    frame, so a native sub-step loop can chain steps without touching pandas.
+    fcoords/rcoords/normals/sub_area/area/perimeter), bit-identical (~1e-15).
+    ``ucoords`` is ``dcoords`` divided by the *current* length, as tyssue's
+    ``update_all`` now computes lengths before unit vectors.
+
+    ``old_len`` is unused. It used to carry the previous step's lengths, which
+    tyssue divided by before it computed lengths first; it is kept so existing
+    callers (the native sub-step loop in ``eulersolver.py``) keep working.
 
     ``pos`` is the full ``(Nv, dim)`` vertex-position array in index order;
     ``srce``/``trgt``/``face`` are positional index arrays for the topology. The
@@ -133,7 +135,7 @@ def compute_geometry(eptm, srce, trgt, face, pos, old_len):
         "scoords": pos[srce],
         "tcoords": pos[trgt],
         "dcoords": d,
-        "ucoords": d / old_len[:, None],
+        "ucoords": d / np.asarray(g["length"])[:, None],
         "length": np.asarray(g["length"]),
         "centroid": cen,
         "fcoords": cen[face],
@@ -222,13 +224,13 @@ def materialize_geometry(eptm, geom, which=("edge", "face"), full=True, geom_cls
             fd["vol"] = eptm.sum_face(ed["sub_vol"])
 
 
-def compute_geometry_bulk(eptm, srce, trgt, face, cell, pos, old_len):
+def compute_geometry_bulk(eptm, srce, trgt, face, cell, pos, old_len=None):
     """Pure-native Bulk/Monolayer geometry via the Rust kernel — writes no
     DataFrames. Returns every array ``MonolayerGeometry.update_all`` produces
     (edge s/t/d/u/f/r/c/normals/sub_area/sub_vol/length, face centroid/area/
     perimeter, cell centroid/area/vol), bit-identical (~1e-13). ``cell`` is the
-    positional cell index of each edge; ``old_len`` the previous edge length
-    (feeds the stale ``ucoords`` quirk)."""
+    positional cell index of each edge. ``old_len`` is unused, kept for existing
+    callers (see ``compute_geometry``)."""
     import tyssue_kernels as tk
 
     pos = np.ascontiguousarray(pos, dtype=np.float64)
@@ -240,7 +242,7 @@ def compute_geometry_bulk(eptm, srce, trgt, face, cell, pos, old_len):
         "scoords": pos[srce],
         "tcoords": pos[trgt],
         "dcoords": d,
-        "ucoords": d / old_len[:, None],
+        "ucoords": d / np.asarray(g["length"])[:, None],
         "length": np.asarray(g["length"]),
         "face_centroid": fcen,
         "cell_centroid": ccen,
@@ -302,8 +304,7 @@ def rust_update_geometry(eptm, srce, trgt, face, pos=None, full=True, geom_cls=N
     coords = eptm.coords
     if pos is None:
         pos = eptm.vert_df[coords].values
-    old_len = eptm.edge_df["length"].values.copy()  # stale length feeds ucoords
-    geom = compute_geometry(eptm, srce, trgt, face, pos, old_len)
+    geom = compute_geometry(eptm, srce, trgt, face, pos)
     materialize_geometry(eptm, geom, which=("edge", "face"), full=full,
                          geom_cls=geom_cls)
     return geom
@@ -313,8 +314,8 @@ def rust_sheet_gradient(eptm, is_bound, with_vessel=False, topo=None, geom=None)
     """Return ``model.compute_gradient(eptm)`` for the standard sheet model as a
     ``(Nv, 3)`` ndarray in ``vert_df`` order, computed by the Rust kernel.
 
-    Consumes tyssue's geometry columns as-is (so it reproduces the stale-length
-    ``ucoords`` exactly). ``is_bound`` selects the boundary-vertex clamp that
+    Consumes tyssue's geometry columns as-is (so it reproduces ``ucoords``
+    exactly). ``is_bound`` selects the boundary-vertex clamp that
     distinguishes ``model_factory_bound`` from ``model_factory``. ``with_vessel``
     adds the VesselSurfaceElasticity vertex term (a cheap radial numpy term).
 

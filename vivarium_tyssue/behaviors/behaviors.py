@@ -107,9 +107,11 @@ def divide_cell(sheet, geom, radius=None, cell_uid=None, cell_idx=None):
 DEATH_FLOOR = 0.5
 
 # commit_state: 0 = not committed, 1 = dividing, 2 = extruding.
+# commit_perim0: a dividing cell's prefered_perimeter when it committed (0 = its
+# perimeter target is not scaled with its growing area target).
 _COMMIT_DEFAULTS = {"commit_state": 0.0, "commit_rate": 0.0, "commit_crit": 0.0,
                     "commit_dt": 0.0, "commit_floor": DEATH_FLOOR,
-                    "commit_contract": 0.0}
+                    "commit_contract": 0.0, "commit_perim0": 0.0}
 _GROWER_NAME = "_grow_committed_cells"
 
 
@@ -140,6 +142,8 @@ def _clear_commit(sheet, idx, restore_type=None):
     fd.loc[idx, "commit_rate"] = 0.0
     fd.loc[idx, "commit_crit"] = 0.0
     fd.loc[idx, "commit_dt"] = 0.0
+    if "commit_perim0" in fd.columns:
+        fd.loc[idx, "commit_perim0"] = 0.0
     fd.loc[idx, "commit_type"] = ""
 
 
@@ -152,6 +156,11 @@ def _do_division(sheet, geometry, cell_uid):
     cell_id = int(cell_id)
     target_type = sheet.face_df.loc[cell_id, "commit_type"]
     sheet.face_df.loc[cell_id, "prefered_area"] = 1.0
+    # Both halves start from the perimeter target the mother had before growing.
+    if "commit_perim0" in sheet.face_df.columns:
+        perim0 = sheet.face_df.loc[cell_id, "commit_perim0"]
+        if perim0 > 0:
+            sheet.face_df.loc[cell_id, "prefered_perimeter"] = perim0
     daughter = cell_division(sheet, cell_id, geometry)
     # Before reset_index, while the clones are still the appended tail: the mother
     # keeps cell_uid, the daughter face and the new verts/edges get fresh ids.
@@ -218,9 +227,21 @@ def _grow_committed_cells(sheet, manager, geom="SheetGeometry"):
     prefered = fd["prefered_area"].to_numpy(dtype=float).copy()
     rate = fd["commit_rate"].to_numpy(dtype=float)
     dt = fd["commit_dt"].to_numpy(dtype=float)
-    prefered[div_mask] *= (1.0 + dt[div_mask] * rate[div_mask])
+    growth = 1.0 + dt[div_mask] * rate[div_mask]
+    prefered[div_mask] *= growth
     prefered[ext_mask] *= (1.0 - dt[ext_mask] * rate[ext_mask])
     fd["prefered_area"] = prefered
+
+    # A growing cell's target perimeter follows its target area geometrically,
+    # P_0 ∝ sqrt(A_0): doubling P_0 quadruples A_0, so the cell grows at its own
+    # target shape instead of being held to its pre-growth perimeter.
+    if "prefered_perimeter" in fd.columns and "commit_perim0" in fd.columns:
+        scaled = fd["commit_perim0"].to_numpy(dtype=float)[div_mask] > 0.0
+        if scaled.any():
+            perim = fd["prefered_perimeter"].to_numpy(dtype=float).copy()
+            idx = np.flatnonzero(div_mask)[scaled]
+            perim[idx] *= np.sqrt(growth[scaled])
+            fd["prefered_perimeter"] = perim
 
     # Apoptotic constriction (opt-in per commitment): contract the dying cell's target
     # perimeter at the same rate. A cell still holding its full prefered_perimeter
@@ -258,8 +279,9 @@ def _grow_committed_cells(sheet, manager, geom="SheetGeometry"):
         _ensure_grower(sheet, manager, geom)
 
 
-def division(
-        sheet, manager, geom= "SheetGeometry", cell_uid=0, cell_type=None, crit_area=2.0, growth_rate=0.1, dt=1.
+def grow_divide(
+        sheet, manager, geom= "SheetGeometry", cell_uid=0, cell_type=None, crit_area=2.0, growth_rate=0.1, dt=1.,
+        scale_perimeter=True,
 ):
     """Commit a cell to division.
 
@@ -283,6 +305,11 @@ def division(
     growth_rate: float
         increase in the prefered area per unit time
         A_0(t + dt) = A0(t) * (1 + growth_rate * dt)
+    scale_perimeter: bool
+        If True (default) and the sheet has a ``prefered_perimeter`` column, the
+        cell's target perimeter grows with its target area as
+        P_0(t) = P_0(commit) * sqrt(A_0(t) / A_0(commit)), and both halves get
+        P_0(commit) back on division.
     """
     # The cell may have been extruded between when the coupling queued this
     # division and when the manager runs it — its unique_id is then gone.
@@ -300,7 +327,91 @@ def division(
     fd.loc[cell_id, "commit_rate"] = growth_rate
     fd.loc[cell_id, "commit_crit"] = crit_area
     fd.loc[cell_id, "commit_dt"] = dt
+    # Record the pre-growth perimeter target once: a cell re-committed while
+    # already growing keeps its original base.
+    if (scale_perimeter and "prefered_perimeter" in fd.columns
+            and fd.loc[cell_id, "commit_perim0"] <= 0.0):
+        fd.loc[cell_id, "commit_perim0"] = fd.loc[cell_id, "prefered_perimeter"]
     _ensure_grower(sheet, manager, geom)
+
+
+# ---------------------------------------------------------------------------
+# Growth and division as separate behaviors
+#
+# ``grow_divide`` couples the two: commit, grow, split on reaching crit_area.
+# A process that decides *when* each happens -- e.g. a cell-cycle model that
+# grows cells in G1/G2 and divides them on entering M -- emits these instead.
+# Both are batched over unique_ids, so one call per step covers every cell.
+# ---------------------------------------------------------------------------
+
+def grow_cells(sheet, manager, cell_uids=(), growth_rate=0.1, dt=1.0,
+               scale_perimeter=True):
+    """Grow the target shape of the listed cells for one step.
+
+    A_0 <- A_0 * (1 + growth_rate * dt). With ``scale_perimeter`` (and a
+    ``prefered_perimeter`` column) P_0 <- P_0 * sqrt(1 + growth_rate * dt), so the
+    target shape is kept: doubling P_0 quadruples A_0.
+
+    Parameters
+    ----------
+    cell_uids : iterable of int
+        unique_ids of the cells to grow this step
+    growth_rate : float
+        relative growth of ``prefered_area`` per unit time
+    dt : float
+        the step the growth covers
+    """
+    fd = sheet.face_df
+    mask = fd["unique_id"].isin(list(cell_uids)).to_numpy()
+    if not mask.any():
+        return
+    factor = 1.0 + growth_rate * dt
+    fd.loc[mask, "prefered_area"] *= factor
+    if scale_perimeter and "prefered_perimeter" in fd.columns:
+        fd.loc[mask, "prefered_perimeter"] *= np.sqrt(factor)
+
+
+def split_cells(sheet, manager, geom="SheetGeometry", cell_uids=(), prefered_area=1.0):
+    """Divide each listed cell now, whatever its size.
+
+    Before the split the cell's target area is reset to ``prefered_area`` and its
+    ``prefered_perimeter`` scaled by sqrt(prefered_area / A_0), undoing growth made
+    with ``grow_cells(scale_perimeter=True)``. tyssue's ``cell_division`` copies the
+    mother's face row, so both halves start from those targets. The mother keeps
+    its unique_id; the daughter gets a fresh one and records the mother's in a
+    ``mother_uid`` column (-1 for cells not born this way), so a process can hand
+    the daughter its mother's internal state rather than the copied row.
+
+    Parameters
+    ----------
+    cell_uids : iterable of int
+        unique_ids of the cells to divide
+    prefered_area : float
+        target area of each half
+    """
+    geometry = GEOMETRY_MAP[geom] if isinstance(geom, str) else geom
+    for cell_uid in cell_uids:
+        # Resolve by unique_id each time: every split reindexes face_df.
+        cell_id = face_index_for(sheet, int(cell_uid))
+        if cell_id is None:
+            continue
+        cell_id = int(cell_id)
+        fd = sheet.face_df
+        if "prefered_perimeter" in fd.columns:
+            fd.loc[cell_id, "prefered_perimeter"] *= np.sqrt(
+                prefered_area / fd.loc[cell_id, "prefered_area"])
+        fd.loc[cell_id, "prefered_area"] = prefered_area
+        daughter = cell_division(sheet, cell_id, geometry)
+        fd = sheet.face_df
+        if "mother_uid" not in fd.columns:
+            fd["mother_uid"] = -1
+        fd.loc[daughter, "mother_uid"] = int(cell_uid)
+        # Before reset_index, while the clones are still the appended tail.
+        refresh_unique_ids(sheet)
+        sheet.reset_index(order=True)
+        geometry.update_all(sheet)
+        sheet.network_changed = True
+
 
 def _drop_isolated_verts(sheet):
     """Drop vertices that no edge references (isolated after a face removal).
@@ -376,14 +487,59 @@ def apoptosis_extrusion(
     fd.loc[cell_id, "commit_contract"] = 1.0 if contract_perimeter else 0.0
     _ensure_grower(sheet, manager, geom)
 
-def update_tension(sheet, manager, tension_update=None):
-    if sheet.edge_df["line_tension"].dtype == "int64":
-        sheet.edge_df["line_tension"] = sheet.edge_df["line_tension"].astype(float)
-    if tension_update:
-        sheet.edge_df.loc[
-            sheet.edge_df["unique_id"].isin(tension_update),
-            "line_tension"
-        ] = sheet.edge_df["unique_id"].map(tension_update)
+# ---------------------------------------------------------------------------
+# Additive parameter updates.
+#
+# A regulating process ships a DELTA per element (``unique_id -> increment``),
+# never a new value, and the behaviors below add it in place. Several processes
+# can then drive the same parameter (e.g. directional + stochastic line tension):
+# each one owns a share of it and moves only that share. Each process may also
+# mirror its share in its own ``component`` column. The column is added to by the
+# same delta, so it always holds exactly what that process has contributed. A
+# row cloned by a topology change (division, vertex split) copies the column
+# along with the parameter, which is how the process learns the share an element
+# it has never seen already carries.
+# ---------------------------------------------------------------------------
+
+def _add_by_uid(df, column, delta, component=None):
+    """Adds ``delta`` (``{unique_id: increment}``) in place to ``df[column]`` and,
+    if given, to ``df[component]``. Rows whose uid is not in ``delta`` are left
+    alone; missing columns are created at 0."""
+    if not delta or len(df) == 0:
+        return
+    inc = df["unique_id"].map(delta)
+    hit = inc.notna().to_numpy()
+    if not hit.any():
+        return
+    inc = inc[hit].astype(float)
+    for col in (column, component):
+        if not col:
+            continue
+        if col not in df.columns:
+            df[col] = 0.0
+        elif df[col].dtype != np.float64:
+            df[col] = df[col].astype(float)
+        df.loc[hit, col] += inc
+
+
+def update_parameter(sheet, manager, parameter, dataframe, parameter_update=None,
+                     component=None, unique=False):
+    """Adds ``parameter_update`` (``{unique_id: delta}``) in place to the
+    ``parameter`` column of the ``dataframe`` element table (``"edge"``,
+    ``"face"``, ``"vert"`` or ``"cell"``; an ``"_df"`` suffix is accepted), and to
+    the sending process's ``component`` column if it names one.
+
+    This is the one behavior every parameter-setting process uses, e.g.
+    ``parameter="line_tension", dataframe="edge"`` for the tension processes.
+
+    ``unique`` is read by the EventManager, not here. Deltas add, so two equal
+    ones must both apply; nodes carry ``unique=False`` to keep the manager from
+    dropping the second as a duplicate.
+    """
+    df = sheet.datasets[dataframe.removesuffix("_df")]
+    if parameter in df.columns and df[parameter].dtype != np.float64:
+        df[parameter] = df[parameter].astype(float)
+    _add_by_uid(df, parameter, parameter_update, component)
 
 # ---------------------------------------------------------------------------
 # Differential adhesion — tension set by the *identity* of the two cells an edge
@@ -406,9 +562,9 @@ def update_tension(sheet, manager, tension_update=None):
 # EventManager, acting on the real epithelium — rather than in the process that
 # requests it, which only ever sees the mesh from before the step.
 #
-# (EventManager.update shuffles its queue, so within a step this runs either just
-# before or just after tyssue's `reconnect`; a junction born of a T1 that lands
-# after it picks up its tension on the next step. Never more than one step stale.)
+# (The EulerSolver queues received behaviors after the re-queued ones, so this
+# runs after that step's `reconnect`; a junction born of a T1 picks up its
+# tension in the same step.)
 # ---------------------------------------------------------------------------
 
 def opposite_half_edges(sheet):
@@ -462,8 +618,16 @@ def differential_adhesion(
         boundary_tension=None,
         type_column="cell_type",
         record_column="heterotypic",
+        component="adhesion_tension",
 ):
-    """Set every junction's ``line_tension`` from the identity of the cells it separates.
+    """Set every junction's adhesion share of ``line_tension`` from the identity of
+    the cells it separates.
+
+    The share lives in the ``component`` column. Each call moves it to the target
+    and adds the same delta to ``line_tension``, so tension other processes have
+    added (e.g. stochastic line tension) is kept. Without the column the share
+    starts at 0; to make adhesion own a ``line_tension`` seeded at the homotypic
+    value, seed ``component`` at that value too.
 
     Parameters
     ----------
@@ -486,6 +650,8 @@ def differential_adhesion(
         alongside the tension (the column must already exist at solver start-up —
         declare it in the EulerSolver ``parameters`` — because tyssue's History
         fixes its column list when it is built).
+    component : str
+        the ``edge_df`` column holding adhesion's share of ``line_tension``.
     """
     edge_df = sheet.edge_df
     if len(edge_df) == 0 or type_column not in sheet.face_df.columns:
@@ -499,15 +665,29 @@ def differential_adhesion(
     if boundary_tension is not None:
         tension = np.where(opposite < 0, float(boundary_tension), tension)
 
-    edge_df["line_tension"] = tension
+    if component not in edge_df.columns:
+        edge_df[component] = 0.0
+    elif edge_df[component].dtype != np.float64:
+        edge_df[component] = edge_df[component].astype(float)
+    delta = tension - edge_df[component].to_numpy()
+    edge_df["line_tension"] += delta
+    edge_df[component] = tension
     if record_column and record_column in edge_df.columns:
         edge_df[record_column] = hetero.astype(float)
 
 
-def cell_jamming(sheet, manager, rate, limits, dt):
-    if (sheet.face_df["prefered_perimeter"].mean()) > limits[0] or (sheet.face_df["prefered_perimeter"].mean() < limits[1]):
-        sheet.face_df["prefered_perimeter"] *= (1 + rate * dt)
-        manager.append(cell_jamming, rate=rate, limits=limits, dt=dt)
+def cell_jamming(sheet, manager, rate, limits, dt, component=None):
+    """Ramps every cell's ``prefered_perimeter`` by ``rate * dt`` of its current
+    value per step, re-queuing itself until the mean leaves ``limits``. The ramp
+    is an increment added in place (see :func:`_add_by_uid`), so it stacks with
+    other processes driving the same parameter; ``component`` optionally records
+    its running total."""
+    face_df = sheet.face_df
+    pp = face_df["prefered_perimeter"]
+    if pp.mean() > limits[0] or pp.mean() < limits[1]:
+        delta = dict(zip(face_df["unique_id"].tolist(), (rate * dt * pp).tolist()))
+        _add_by_uid(face_df, "prefered_perimeter", delta, component)
+        manager.append(cell_jamming, rate=rate, limits=limits, dt=dt, component=component)
     else:
         print("Jamming Complete")
 
@@ -623,7 +803,7 @@ def division_3d(
         crit_vol=2.0, growth_rate=0.1, orientation="vertical", dt=1.0,
 ):
     """Commit a 3D cell to division (monolayer / bulk analogue of
-    :func:`division`).
+    :func:`grow_divide`).
 
     Records the cell's own growth parameters into its ``commit_*`` columns on
     ``cell_df``, flags it ``"dividing"``, and hands off to the batched grower
@@ -835,7 +1015,7 @@ def _grow_committed_cells_3d(eptm, manager, geom="MonolayerGeometry"):
     div_ready = uid[div_mask & (vol > crit)]
     ext_ready = uid[ext_mask & ((vol < crit) | (prefered_v < DEATH_FLOOR))]
 
-    # Contact inhibition: a dividing cell wedged in the crowded tumor core can
+    # Contact inhibition: a dividing cell wedged in a crowded core can
     # never reach crit_vol however much its prefered_vol is inflated. Left
     # unchecked such cells accumulate as permanently-committed "dividing" cells
     # that grow every step forever — a runaway that also balloons runtime. Once a

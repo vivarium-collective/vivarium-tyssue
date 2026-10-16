@@ -277,11 +277,6 @@ The old *module* names still import — they are deprecation shims that warn and
 slated for removal — so a stale `from pbg_superpowers…` looks fine until it suddenly
 is not. Don't add new ones.
 
-One straggler, inherited from `main`: `scripts/fetch_tumor_biomodel.py` still does
-`from pbg_biomodels.run_biomodels import load_biomodel` while the `fetch` extra
-installs `viva-biomodels`. Nothing in CI runs it and the model it fetches is committed
-at `workspace/datasets/BIOMD0000000903.xml`, so it is latent rather than urgent.
-
 ### 6.2 Plain `pip install -e .` (no `--no-deps`) — will not resolve
 
 pip ignores `[tool.uv.sources]`, so it falls back to PyPI for the bare names and gets

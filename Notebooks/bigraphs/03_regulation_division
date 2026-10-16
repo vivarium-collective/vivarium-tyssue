@@ -2,21 +2,23 @@ digraph bigraph {
 	dpi=100 overlap=false rankdir=TB splines=true
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
-	"('Behaviors',)" [label=<Behaviors>]
-	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('global_time',)" [label=<global_time>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
-	"('Network Changed',)" [label=<Network<BR/>Changed>]
+	"('Behaviors',)" [label=<Behaviors>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('Tissue State',)" [label=<Tissue<BR/>State>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('Network Changed',)" [label=<Network<BR/>Changed>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
-	"('Tissue State', 'face_df')" [label=<face_df>]
+	"('Network Changed',)" [label=<Network<BR/>Changed>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('Tissue State', 'edge_df')" [label=<edge_df>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('Tissue State', 'vert_df')" [label=<vert_df>]
+	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
+	"('Tissue State', 'face_df')" [label=<face_df>]
+	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
+	"('results',)" [label=<results>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('global_time',)" [label=<global_time>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
@@ -29,25 +31,27 @@ digraph bigraph {
 	"('Tissue State', 'face_df')" [label=<face_df>]
 	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
 	"('Tissue State', 'cell_df')" [label=<cell_df>]
+	node [constraint=false fontsize="12pt" margin=0.005000000000000001 penwidth=2 shape=circle]
+	"('results',)" [label=<results>]
 	node [constraint=false fontsize="12pt" margin=0.05 penwidth=2 shape=box]
 	"('Tyssue',)" [label=<Tyssue>]
 	"('Regulation',)" [label=<Regulation>]
 	"('emitter',)" [label=<emitter>]
 	edge [style=filled]
-	"('Tissue State',)" -> "('Tissue State', 'face_df')" [arrowhead=none constraint=true penwidth=2]
-	edge [style=filled]
 	"('Tissue State',)" -> "('Tissue State', 'edge_df')" [arrowhead=none constraint=true penwidth=2]
 	edge [style=filled]
 	"('Tissue State',)" -> "('Tissue State', 'vert_df')" [arrowhead=none constraint=true penwidth=2]
 	edge [style=filled]
+	"('Tissue State',)" -> "('Tissue State', 'face_df')" [arrowhead=none constraint=true penwidth=2]
+	edge [style=filled]
 	"('Tissue State',)" -> "('Tissue State', 'cell_df')" [arrowhead=none constraint=true penwidth=2]
 	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
 	subgraph "('Tyssue',)" {
-		"('Behaviors',)" -> "('Tyssue',)" [label=<behaviors> constraint=true fontsize="10pt" labelloc=t]
+		"('global_time',)" -> "('Tyssue',)" [label=<global_time> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
 	subgraph "('Tyssue',)" {
-		"('global_time',)" -> "('Tyssue',)" [label=<global_time> constraint=true fontsize="10pt" labelloc=t]
+		"('Behaviors',)" -> "('Tyssue',)" [label=<behaviors> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
 	subgraph "('Regulation',)" {
@@ -56,10 +60,6 @@ digraph bigraph {
 	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
 	subgraph "('Regulation',)" {
 		"('global_time',)" -> "('Regulation',)" [label=<global_time> constraint=true fontsize="10pt" labelloc=t]
-	}
-	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
-	subgraph "('emitter',)" {
-		"('Tissue State', 'face_df')" -> "('emitter',)" [label=<face_df> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
 	subgraph "('emitter',)" {
@@ -75,11 +75,15 @@ digraph bigraph {
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
 	subgraph "('emitter',)" {
+		"('Tissue State', 'face_df')" -> "('emitter',)" [label=<face_df> constraint=true fontsize="10pt" labelloc=t]
+	}
+	edge [arrowhead=normal arrowsize=1.0 dir=forward penwidth=1 style=dashed]
+	subgraph "('emitter',)" {
 		"('global_time',)" -> "('emitter',)" [label=<global_time> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
 	subgraph "('Tyssue',)" {
-		"('Behaviors',)" -> "('Tyssue',)" [label=<behaviors_update> constraint=true fontsize="10pt" labelloc=t]
+		"('Tissue State',)" -> "('Tyssue',)" [label=<datasets> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
 	subgraph "('Tyssue',)" {
@@ -87,10 +91,14 @@ digraph bigraph {
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
 	subgraph "('Tyssue',)" {
-		"('Tissue State',)" -> "('Tyssue',)" [label=<datasets> constraint=true fontsize="10pt" labelloc=t]
+		"('Behaviors',)" -> "('Tyssue',)" [label=<behaviors_update> constraint=true fontsize="10pt" labelloc=t]
 	}
 	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
 	subgraph "('Regulation',)" {
 		"('Behaviors',)" -> "('Regulation',)" [label=<behaviors> constraint=true fontsize="10pt" labelloc=t]
+	}
+	edge [arrowhead=normal arrowsize=1.0 dir=back penwidth=1 style=dashed]
+	subgraph "('emitter',)" {
+		"('results',)" -> "('emitter',)" [label=<results> constraint=true fontsize="10pt" labelloc=t]
 	}
 }

@@ -51,6 +51,10 @@ DATASET_NAME = "test_square.hf5"
 
 N_FACES = 206
 MIGRATING_FACE = 96          # the cell given an ActiveMigration drive
+# Total drive on the migrating cell. ActiveMigration splits it between the cell's
+# vertices (vivatyssue 9007de9); face 96 is a hexagon, so 0.6 gives each vertex
+# the 0.1 it got when every vertex carried the full strength.
+MIGRATION_STRENGTH = 0.6
 TAU, SIGMA = 0.2, 0.1        # stochastic line-tension (shared by both scenarios)
 
 # Jamming scenario (notebook spec 05)
@@ -60,8 +64,27 @@ JAM_RATE, JAM_LIMITS = -0.05, [3.0, 4.2]
 JAM_PREF_PERIM = 3.8
 
 # Gradient scenario (notebook spec 06). Notebook runs to t=300; we extend by 100.
-GRAD_TF, GRAD_DT = 400.0, 0.05
+GRAD_TF, GRAD_DT = 600.0, 0.05
 GRAD_ARGS = {"m": -0.1, "c": 4.6}   # prefered_perimeter = m*x + c
+
+
+def _july_detach_rates(dt: float) -> dict:
+    """tyssue's default rosette detachment rates restored to their pre-August
+    *effective* value for a run at solver interval ``dt``.
+
+    ``detach_vertices`` reads ``p_4``/``p_5p`` off ``sheet.settings`` and scales
+    both by ``settings["dt"]``, so they are rates per unit time. EulerSolver now
+    sets that ``dt`` to the solver interval; before commit 2dcb8c9 nothing set it
+    and tyssue defaulted to 1.0, so detachments effectively fired ``1 / dt`` times
+    more often. Dividing tyssue's own defaults by ``dt`` reproduces the effective
+    per-step rate the July runs had -- the rate the pre-August displacement
+    figures were measured against.
+    """
+    return {"p_4": 0.1 / dt, "p_5p": 1e-2 / dt}
+
+
+JAM_DETACH = _july_detach_rates(JAM_DT)
+GRAD_DETACH = _july_detach_rates(GRAD_DT)
 
 COORDS = ["x", "y"]
 # One seed per scenario, applied immediately before that run, so either scenario
@@ -113,7 +136,8 @@ def _flat_config(dataset_path: Path) -> dict:
                 "prefered_area": 1,
                 "perimeter_elasticity": 0.1,
                 "prefered_perimeter": 3.6,
-                "migration_strength": [0.1 if i == MIGRATING_FACE else 0.0 for i in range(N_FACES)],
+                "migration_strength": [MIGRATION_STRENGTH if i == MIGRATING_FACE else 0.0
+                                       for i in range(N_FACES)],
                 "is_alive": 1,
                 "mx": 1,
                 "mz": 0,
@@ -128,7 +152,7 @@ def _flat_config(dataset_path: Path) -> dict:
         "ref_effector": "FaceAreaElasticity",
         "factory": "model_factory_bound",
         "settings": {"threshold_length": 0.03},
-        "auto_reconnect": True,
+        "auto_reconnect": {"enabled": True},
         "bounds": None,
         "output_columns": {},
         "history_columns": {},
@@ -159,7 +183,7 @@ def _base_spec(config: dict, dt: float) -> dict:
             "address": "local:StochasticLineTension",
             "config": {"tau": TAU, "sigma": SIGMA},
             "inputs": {"datasets": ["Tissue State"]},
-            "outputs": {"behaviors": ["Behaviors"]},
+            "outputs": {"behaviors": ["Behaviors"], "datasets": ["Tissue State"]},
             "interval": dt,
         },
         "Network Changed": False,
@@ -171,6 +195,7 @@ def _base_spec(config: dict, dt: float) -> dict:
 def build_jamming_spec(dataset_path: Path) -> dict:
     cfg = _flat_config(dataset_path)
     cfg["parameters"]["face_df"]["prefered_perimeter"] = JAM_PREF_PERIM
+    cfg["auto_reconnect"] = {"enabled": True, **JAM_DETACH}
     spec = _base_spec(cfg, JAM_DT)
     spec["Jamming"] = {
         "_type": "process",
@@ -185,6 +210,12 @@ def build_jamming_spec(dataset_path: Path) -> dict:
 
 def build_gradient_spec(dataset_path: Path) -> dict:
     cfg = _flat_config(dataset_path)
+    cfg["auto_reconnect"] = {"enabled": True, **GRAD_DETACH}
+    # ParameterGradient ships deltas of its share of prefered_perimeter. Seeding
+    # that share at the baseline makes the gradient own the whole value, so
+    # prefered_perimeter becomes m*x + c rather than baseline + m*x + c.
+    face = cfg["parameters"]["face_df"]
+    face["gradient_prefered_perimeter"] = face["prefered_perimeter"]
     spec = _base_spec(cfg, GRAD_DT)
     spec["Gradient"] = {
         "_type": "step",
@@ -196,7 +227,7 @@ def build_gradient_spec(dataset_path: Path) -> dict:
             "model_parameters": {"prefered_perimeter": "face"},
         },
         "inputs": {"datasets": ["Tissue State"]},
-        "outputs": {"behaviors": ["Behaviors"]},
+        "outputs": {"behaviors": ["Behaviors"], "datasets": ["Tissue State"]},
     }
     return spec
 

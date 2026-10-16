@@ -113,14 +113,17 @@ The GIFs are written with Pillow, so **no ImageMagick is needed**.
 | piece | where it lives |
 |---|---|
 | `DirectionalLineTension` process | `vivarium_tyssue/processes/regulations.py` |
-| `update_tension`, `apply_gradient` behaviors | `vivarium_tyssue/behaviors/behaviors.py` |
+| `update_parameter`, `apply_gradient` behaviors | `vivarium_tyssue/behaviors/behaviors.py` |
 | process registration | `vivarium_tyssue/processes/__init__.py` |
 | tests | `tests/test_directional_tension.py` |
 
 The process regulates the `EulerSolver` **only** through the `behaviors` port, exactly
 like `StochasticLineTension` / `AnisotropicTension`; `EulerSolver` itself is untouched.
 The tensions are computed **in the process** — from `edge_df`'s `dx`/`dy` — and shipped
-as a `unique_id -> tension` map through the `update_tension` behavior.
+as a `unique_id -> delta` map (the change in the process's own share of `line_tension`,
+mirrored in the `directional_tension` column) through the `update_parameter` behavior
+(`parameter="line_tension"`, `dataframe="edge"`), which adds it in place. Other tension processes therefore stack on top of it; see
+`Experiments/tension_composition` for directional + stochastic tension together.
 
 That split is the opposite of the one `DifferentialAdhesion` makes, and deliberately so.
 There, whether a junction is heterotypic depends on the *pair of cells it separates*,
@@ -183,13 +186,13 @@ Over $t = 0 \to 240$ (2400 steps), at $\Lambda_{\max} = 0.15$:
 
 | | `px` | `pxy` | `control` |
 |---|---|---|---|
-| CE index | **1.96** | **1.82** | 0.95 |
-| $L_{\parallel}$ | $\times 0.66$ | $\times 0.71$ | $\times 0.98$ |
+| CE index | **1.96** | **1.84** | 0.95 |
+| $L_{\parallel}$ | $\times 0.66$ | $\times 0.70$ | $\times 0.98$ |
 | $L_{\perp}$ | $\times 1.30$ | $\times 1.29$ | $\times 0.93$ |
-| completed T1s | 22 | **247** | **0** |
-| cell aspect change $C$ | $\times 1.90$ | $\times 1.25$ | $\times 0.95$ |
-| rearrangement share $R$ | $0.04$ | $\mathbf{0.63}$ | — |
-| total area | $228 \to 203$ | $228 \to 201$ | $228 \to 215$ |
+| completed T1s | 22 | **265** | **0** |
+| cell aspect change $C$ | $\times 1.87$ | $\times 1.24$ | $\times 0.93$ |
+| rearrangement share $R$ | $0.07$ | $\mathbf{0.65}$ | — |
+| total area | $226 \to 202$ | $226 \to 201$ | $226 \to 215$ |
 | cells lost | 0 | 0 | 0 |
 
 Convergent extension about the polarity axis, rotating with the polarity vector, and an
@@ -198,10 +201,10 @@ rather than glossing:
 
 * **How much of it is rearrangement depends on the polarity direction**, not just on the
   tension law — the most interesting result here. Along $(1,0)$ the deformation is
-  essentially affine: $R \approx 0.04$, only 22 T1s, and the cells stretch by as much as the
+  essentially affine: $R \approx 0.07$, only 22 T1s, and the cells stretch by as much as the
   tissue does. Along $(1,1)$, nearly two thirds of the tissue's shape change is carried by
-  cells changing neighbours — $R \approx 0.63$, 247 T1s, and the tissue reaches
-  $\mathrm{CE} = 1.82$ while its cells elongate by only $\times 1.25$. That is convergent
+  cells changing neighbours — $R \approx 0.65$, 265 T1s, and the tissue reaches
+  $\mathrm{CE} = 1.84$ while its cells elongate by only $\times 1.24$. That is convergent
   extension by intercalation, the textbook mechanism.
 
   The cause is the lattice. The hexagonal tiling has its junctions in essentially three
@@ -212,7 +215,7 @@ rather than glossing:
   $\theta = 15°, 45°, 75°$ — none free — so junctions do collapse and the tissue rearranges.
   Raising $\Lambda_{\min}$ off zero is the knob that removes the free family.
 
-* **The sheet shrinks somewhat** ($228 \to \sim 203$ in total area, against 215 for the
+* **The sheet shrinks somewhat** ($226 \to \sim 202$ in total area, against 215 for the
   control): line tension has no opposing term at short junction lengths, so the sheet
   settles smaller than its rest area. The loss **saturates** (most of it by $t \approx 40$),
   no cell ends below 0.92 of the sheet's rest area, and the polygon distribution is

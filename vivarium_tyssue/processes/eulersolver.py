@@ -86,7 +86,15 @@ class EulerSolver(Process):
         "effectors": "list[string]",            # keys into EFFECTORS_MAP
         "ref_effector": "string",               # key into EFFECTORS_MAP
         "factory": "string",                    # key into FACTORY_MAP
-        "auto_reconnect": "boolean",            # auto-perform reconnections
+        "auto_reconnect": "map",                # {enabled, p_4, p_5p}: enable T1/T3
+                                                # reconnections and optionally set the
+                                                # rosette detachment rates. p_4 (rank-4
+                                                # vertices) and p_5p (rank 5+) are
+                                                # probabilities *per unit time* -- tyssue
+                                                # multiplies them by settings["dt"].
+                                                # Omit them for tyssue's own defaults
+                                                # (p_4=0.1, p_5p=1e-2). A bare boolean is
+                                                # still accepted as {"enabled": <bool>}.
         "check_intersections": "boolean",       # default False; detect folded/overlapping
                                                 # faces each step (report only, never
                                                 # repairs) -- see _init_intersections
@@ -141,9 +149,23 @@ class EulerSolver(Process):
                         df[parameter] = value
 
         manager = EventManager()
-        if self.config["auto_reconnect"]:
+        reconnect_cfg = self.config["auto_reconnect"]
+        # Back-compat: `auto_reconnect: true` means {"enabled": True}.
+        if isinstance(reconnect_cfg, bool):
+            reconnect_cfg = {"enabled": reconnect_cfg}
+        if reconnect_cfg.get("enabled", False):
+            # tyssue's detach_vertices reads p_4/p_5p off sheet.settings and scales
+            # both by settings["dt"], so these are rates per unit time rather than
+            # per step. `reconnect` merges whatever kwargs it gets into
+            # sheet.settings and re-appends itself with them, so passing them once
+            # here carries through the run. Unset -> tyssue's defaults.
+            detach_rates = {
+                key: float(reconnect_cfg[key])
+                for key in ("p_4", "p_5p")
+                if reconnect_cfg.get(key) is not None
+            }
             if "reconnect" not in [n[0].__name__ for n in manager.next]:
-                manager.append(reconnect)
+                manager.append(reconnect, **detach_rates)
 
         self.manager = manager
         # After reconnect, so a step's topology surgery is already applied when the
@@ -372,12 +394,18 @@ class EulerSolver(Process):
                     df[col] = df[col].astype(object)
 
     def output_dfs(self):
+        """Snapshot copies of the epithelium frames for the Tissue State store.
+
+        Copies, not the live frames: the store must change only when
+        process-bigraph applies this update at the end of the tick, so every
+        process in a tick reads the same state whatever its order, and writing
+        parameter deltas to the store never touches the solver's mesh."""
         output_columns = self.config.get("output_columns", {})
         output_dfs = {}
         if not output_columns:
             for df_name in ["vert_df", "edge_df", "face_df", "cell_df"]:
                 if getattr(self.eptm, df_name) is not None:
-                    output_dfs[df_name] = getattr(self.eptm, df_name)
+                    output_dfs[df_name] = getattr(self.eptm, df_name).copy()
                 else:
                     output_dfs[df_name] = {}
         else:
@@ -390,10 +418,12 @@ class EulerSolver(Process):
                             cols.append("unique_id")
                         df = getattr(self.eptm, df_name)
                         if cols:
-                            df = df[cols]
-                        output_dfs[df_name] = df
+                            # A listed column may not exist yet, e.g. a
+                            # regulator's component, created by its first delta.
+                            df = df[[c for c in cols if c in df.columns]]
+                        output_dfs[df_name] = df.copy()
                     else:
-                        output_dfs[df_name] = getattr(self.eptm, df_name)
+                        output_dfs[df_name] = getattr(self.eptm, df_name).copy()
                 else:
                     output_dfs[df_name] = {}
         return output_dfs
@@ -609,6 +639,54 @@ class EulerSolver(Process):
             "behaviors_update": "list",
         }
 
+    def _queue_behaviors(self, nodes):
+        """Queue received behaviour nodes on the EventManager's current deque, so
+        they run in this update's ``execute``.
+
+        ``update_parameter`` nodes go to the front, ahead of the behaviours that
+        re-queued themselves last update (reconnect, growers): parameter changes
+        land before any topology change, so daughters inherit them. Everything
+        else follows in arrival order."""
+        params, others = [], []
+        for node in nodes:
+            kwargs = dict(node)
+            name = kwargs.pop("func")
+            func = self.maps["BEHAVIOR_MAP"][name]
+            if "geom" in inspect.signature(func).parameters:
+                kwargs["geom"] = self.maps["GEOMETRY_MAP"][kwargs["geom"]]
+            if name == "update_parameter":
+                self._check_output_columns(kwargs)
+                kwargs.setdefault("unique", False)  # deltas add: never de-duplicate
+                params.append((func, kwargs))
+            else:
+                others.append((func, kwargs))
+        self.manager.extend_current(params, front=True)
+        self.manager.extend_current(others)
+
+    def _check_output_columns(self, kwargs):
+        """Raise if ``output_columns`` keeps a parameter update out of Tissue State.
+
+        Regulators add their parameter deltas to the store as well as sending
+        them here; a column the solver does not output would exist in the store
+        for one tick and then vanish with the next snapshot, so readers would
+        never see the parameter the solver integrates with."""
+        restricted = self.config.get("output_columns") or {}
+        if not restricted:
+            return
+        df_name = kwargs["dataframe"].removesuffix("_df") + "_df"
+        if df_name not in restricted:
+            return  # unlisted dataframes are output whole
+        listed = restricted[df_name] or []
+        for column in (kwargs.get("parameter"), kwargs.get("component")):
+            if column and column not in listed:
+                raise ValueError(
+                    f"EulerSolver output_columns[{df_name!r}] leaves out "
+                    f"{column!r}, which an update_parameter behavior changes, so "
+                    "Tissue State would not hold the value the solver uses. Add "
+                    f"{column!r} to output_columns[{df_name!r}], or remove "
+                    f"{df_name!r} from output_columns to output every column."
+                )
+
     def update(self, inputs, interval):
         log.debug("EulerSolver step t=%s", inputs["global_time"])
 
@@ -633,18 +711,47 @@ class EulerSolver(Process):
         # another process, so a value fixed once at startup can be wrong.
         self.eptm.settings["dt"] = interval
 
+        # One tick, on the mesh at t_k = global_time:
+        #   1. run the behaviours: parameter deltas received this tick first, then
+        #      the self-re-queued ones (reconnect, growers), then the received
+        #      topology events;
+        #   2. record History at t_k -- positions, topology and the parameters in
+        #      force over [t_k, t_k+1] all agree;
+        #   3. integrate [t_k, t_k+1] and output a snapshot of the mesh at t_k+1.
+        # So a regulator that read the snapshot S_k and emitted in tick k has its
+        # behaviours applied at the start of tick k+1, before that integration.
         behavior_update = []
         if len(inputs["behaviors"]) > 0:
-            for kwargs in inputs["behaviors"]:
-                func = self.maps["BEHAVIOR_MAP"][kwargs["func"]]
-                del kwargs["func"]
-                arg_names = [name for name, param in inspect.signature(func).parameters.items()]
-                if "geom" in arg_names:
-                    kwargs["geom"] = self.maps["GEOMETRY_MAP"][kwargs["geom"]]
-                    self.manager.append(func, **kwargs)
-                else:
-                    self.manager.append(func, **kwargs)
+            self._queue_behaviors(inputs["behaviors"])
             behavior_update = {"_remove": "all"}
+
+        if self.manager is not None:
+            # Behaviours may read full edge geometry that the lean hot loop left
+            # native. The manager is repopulated from inputs each update, so no
+            # behaviours in → nothing to execute → keep the lean fast path.
+            if inputs["behaviors"] and self._geom_lean:
+                self.to_dataframes(full=True)
+            self.manager.execute(self.eptm)
+            # Every topology-changing path sets network_changed. Parameter-only
+            # behaviors don't move vertices, so the geometry is still current
+            # and an update_all would be pure waste (~half of update_all cost).
+            if self.eptm.network_changed:
+                # update_all rebuilds geometry AND the boundary/opposite index for
+                # the new mesh; drop the cached arrays so set_pos rebuilds them.
+                self.geom.update_all(self.eptm)
+                self._topo = None
+                self._geom_stash = None  # stale after a topology change / update_all
+                self._geom_lean = False  # update_all rewrote all geometry columns
+            self.manager.update()
+
+        # Only behaviors re-introduce StringDtype columns mid-run (init already
+        # coerced), so plain integration steps skip the all-column scan.
+        if inputs["behaviors"] or self.eptm.network_changed:
+            self._coerce_string_columns()
+
+        self.record(inputs["global_time"])
+        if self._check_intersections:
+            self._record_intersections(inputs["global_time"])
 
         if self._native_substeps and self._substeps > 1:
             # Many native Euler steps per update; DataFrames materialized once.
@@ -661,40 +768,12 @@ class EulerSolver(Process):
             pos = pos + delta
             self.set_pos(pos)
 
-        if self.manager is not None:
-            # Behaviours may read full edge geometry that the lean hot loop left
-            # native. The manager is repopulated from inputs each update, so no
-            # behaviours in → nothing to execute → keep the lean fast path.
-            if inputs["behaviors"] and self._geom_lean:
-                self.to_dataframes(full=True)
-            self.manager.execute(self.eptm)
-            # Every topology-changing path sets network_changed. Parameter-only
-            # behaviors don't move vertices, so set_pos's geometry is still current
-            # and a second update_all would be pure waste (~half of update_all cost).
-            if self.eptm.network_changed:
-                # update_all rebuilds geometry AND the boundary/opposite index for
-                # the new mesh; drop the cached arrays so set_pos rebuilds them.
-                self.geom.update_all(self.eptm)
-                self._topo = None
-                self._geom_stash = None  # stale after a topology change / update_all
-                self._geom_lean = False  # update_all rewrote all geometry columns
-            self.manager.update()
-            if self._check_intersections:
-                self._record_intersections(inputs["global_time"])
-
         if self.eptm.network_changed:
             network_changed = True
         else:
             network_changed = False
 
         self.eptm.network_changed = False
-
-        # Only behaviors re-introduce StringDtype columns mid-run (init already
-        # coerced), so plain integration steps skip the all-column scan.
-        if inputs["behaviors"] or network_changed:
-            self._coerce_string_columns()
-
-        self.record(inputs["global_time"])
 
         dfs = self.output_dfs()
 

@@ -68,8 +68,7 @@ tested, local change. See **`ADDING_A_KERNEL.md`**.
 
 **Gradient-kernel scope:** `sheet_gradient` fuses the three standard sheet
 effectors and the two `groupby.sum()` reductions into one pass, consuming
-tyssue's geometry columns as-is (so it reproduces even the stale-length
-`ucoords` quirk). It matches both `model_factory` and `model_factory_bound` to
+tyssue's geometry columns as-is (including `ucoords`). It matches both `model_factory` and `model_factory_bound` to
 ~1e-15 — the caller supplies the boundary mask (bound factory zeros boundary
 vertices; plain does not). Models with other effectors (e.g. base_solver's
 `VesselSurfaceElasticity`) fall back to Python. The ~2.4× measured is limited by
@@ -78,9 +77,9 @@ and the pure kernel is far faster.
 
 **Geometry-kernel scope:** `update_geometry` implements the `SheetGeometry`
 formula, which `VesselGeometry` inherits unchanged (both match to ~1e-15). It
-excludes `update_ucoords` (divides by the *stale* previous-step length —
-stateful) and `update_vol` (geometry-specific vertex heights); those stay in
-Python. `MonolayerGeometry`/`BulkGeometry` redefine centroid/area/normals and
+excludes `update_ucoords` (`dcoords / length`, a trivial division done in
+Python from the kernel's outputs) and `update_vol` (geometry-specific vertex
+heights); those stay in Python. `MonolayerGeometry`/`BulkGeometry` redefine centroid/area/normals and
 need their own kernel — the equivalence test excludes them on purpose.
 
 `srce`/`trgt`/`index` are **positional** vertex indices (0..Nv-1), remapped from

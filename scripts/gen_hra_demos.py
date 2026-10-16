@@ -87,7 +87,7 @@ def composite_doc(name, description, eptm_rel, tissue_type="Sheet", interval=0.0
                     "ref_effector": "FaceAreaElasticity",
                     "factory": "model_factory",
                     "settings": {"threshold_length": 0.03},
-                    "auto_reconnect": False,  # keep topology static: stable + small viewer files
+                    "auto_reconnect": {"enabled": False},  # keep topology static: stable + small viewer files
                     "bounds": {}, "output_columns": {}, "history_columns": {}, "maps": {},
                     "backend": "rust", "substeps": "${substeps}",
                     "max_displacement": max_displacement,

@@ -28,7 +28,7 @@ dependencies = [
     # [tool.uv.sources] — stock PyPI tyssue 1.1.0 crashes on real topology ops
     # (cell_division/remove_face) under the pandas-3.0/numpy-2.x that the COPASI
     # stack forces (read-only array in get_opposite). The fork patches that, so
-    # the tumor composite can run topology_ops=true (real divisions/extrusions).
+    # real divisions/extrusions work.
     "pandas",
     "numpy",
     "scikit-image",
@@ -50,14 +50,15 @@ dependencies = [
     # runtime.default_emitter and vivarium_tyssue.core). The [parquet] extra pulls
     # polars/pyarrow/duckdb/fsspec. Not on PyPI; reference the repo directly.
     "viva-emitters[parquet] @ git+https://github.com/vivarium-collective/viva-emitters.git",
-    # COPASI process (CopasiUTCProcess) wrapping basico/COPASI — runs the cached SBML
-    # tumor model. Not on PyPI — resolved via [tool.uv.sources] + override-dependencies
-    # below. viva-biomodels (the BioModels *fetcher*) is NOT a runtime dep: it pulls
+    # COPASI process (CopasiUTCProcess) wrapping basico/COPASI — runs SBML models.
+    # Not on PyPI — resolved via [tool.uv.sources] + override-dependencies below.
+    # viva-biomodels (the BioModels *fetcher*) is NOT a runtime dep: it pulls
     # viva-tellurium -> tellurium -> libroadrunner, which has no linux/arm64 wheel and
-    # breaks the multi-arch Docker build. The model is already cached at
-    # workspace/datasets/BIOMD0000000903.xml, so fetching is a one-off — see the
-    # `fetch` extra below.
+    # breaks the multi-arch Docker build — see the `fetch` extra below.
     "viva-copasi",
+    # SBML parser for vivarium_tyssue.sbml (per-cell subcellular models compiled to
+    # a vectorised numpy RHS — SBMLCellCycle). Has linux/arm64 wheels.
+    "python-libsbml",
 ]
 
 [project.optional-dependencies]
@@ -69,10 +70,9 @@ sim = ["tyssue"]
 # Optional viewer stack for the faithful 3D crypt animation (tyssue.draw.create_gif_3d
 # uses ipyvolume). Without it, TissueCryptGif3D falls back to a matplotlib 3D mesh.
 viz3d = ["ipyvolume"]
-# One-off model fetching (scripts/fetch_tumor_biomodel.py). Pulls the tellurium /
-# libroadrunner SBML stack (no linux/arm64 wheel), so it is opt-in and kept out of
-# the default install + Docker image. The fetched model is committed, so this is
-# rarely needed.
+# One-off BioModels fetching (viva-biomodels). Pulls the tellurium / libroadrunner
+# SBML stack (no linux/arm64 wheel), so it is opt-in and kept out of the default
+# install + Docker image.
 fetch = ["viva-biomodels @ git+https://github.com/vivarium-collective/viva-biomodels.git"]
 # Human Reference Atlas initializers (vivarium_tyssue.hra). trimesh loads the
 # reference-organ GLB meshes; fast-simplification decimates them. The 2D FTU
@@ -114,7 +114,7 @@ override-dependencies = [
 [tool.uv.sources]
 # The pandas-3-compatible tyssue fork (adds VesselGeometry/model_factory_* and
 # patches get_opposite so cell_division/remove_face work under read-only pandas-3
-# arrays). Required for the tumor composite's topology_ops=true path.
+# arrays). Required for real topology ops (divisions/extrusions).
 # Pinned to the `intersections` branch of the fork. That is the ONLY branch that
 # ships tyssue.collisions.intersections, which tests/test_composites.py
 # (test_intersection_check_arms_the_behaviour) and EulerSolver's check_intersections

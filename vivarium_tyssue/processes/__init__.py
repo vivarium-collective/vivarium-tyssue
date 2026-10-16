@@ -1,7 +1,7 @@
 from vivarium_tyssue.processes.eulersolver import EulerSolver
 from vivarium_tyssue.processes.regulations import *
 from vivarium_tyssue.processes.gillespie import *
-from vivarium_tyssue.processes.tumor_coupling import TumorCoupling
+from vivarium_tyssue.processes.cell_cycle import SBMLCellCycle
 
 def register_processes(core):
     core.register_link("EulerSolver", EulerSolver)
@@ -14,5 +14,5 @@ def register_processes(core):
     core.register_link("DirectionalLineTension", DirectionalLineTension)
     core.register_link("DifferentialAdhesion", DifferentialAdhesion)
     core.register_link("Gillespie", Gillespie)
-    core.register_link("TumorCoupling", TumorCoupling)
+    core.register_link("SBMLCellCycle", SBMLCellCycle)
     return core
