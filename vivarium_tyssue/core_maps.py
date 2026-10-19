@@ -30,3 +30,14 @@ _WANTED = [
     "BulkGeometry", "RNRGeometry", "MonolayerGeometry", "ClosedMonolayerGeometry",
 ]
 GEOMETRY_MAP = {name: _ns[name] for name in _WANTED if name in _ns}
+
+# viva-lumenoid coupling-hierarchy geometries that stock tyssue doesn't ship:
+# the height-resolving 2D cross-section and the closed 3D lumenoid (lumen
+# pressure + basal BM-shell coupling surface). Added defensively so core_maps
+# still imports cleanly if the tyssue geometry stack is unavailable.
+try:
+    from vivarium_tyssue.geometries import CrossSectionGeometry, LumenoidGeometry
+    GEOMETRY_MAP["CrossSectionGeometry"] = CrossSectionGeometry
+    GEOMETRY_MAP["LumenoidGeometry"] = LumenoidGeometry
+except Exception:  # noqa: BLE001 — tyssue geometry stack absent; stay importable
+    pass

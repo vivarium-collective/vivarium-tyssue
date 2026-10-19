@@ -1,0 +1,89 @@
+name: lumenoid
+description: >-
+  Closed 3D lumenoid (coupling-hierarchy level 4): a small closed epithelial
+  monolayer enclosing a lumen, relaxed under the standard 3D monolayer mechanics
+  using the new LumenoidGeometry. On top of the enclosed lumen volume it tracks a
+  Laplace-type lumen PRESSURE (settings['lumen_pressure']) and exposes the outward
+  basal surface as the basement-membrane (BM) coupling shell
+  (settings['bm_surface_area'] + LumenoidGeometry.basal_shell) — the surface the
+  collagen BM couples to in the viva-lumenoid campaign. Pure mechanics, no BM
+  coupling wired yet.
+tags:
+- tissue
+- 3d
+- monolayer
+- lumenoid
+- geometry
+- viva-lumenoid
+requires:
+  processes:
+  - EulerSolver
+  types:
+  - tyssue_data
+  - behaviors
+emitters: []
+parameters:
+  interval:
+    type: float
+    default: 0.01
+    description: Emit / solver step (dt). One step relaxes the lumenoid geometry.
+state:
+  Tyssue:
+    _type: process
+    address: local:EulerSolver
+    config:
+      name: Lumenoid
+      eptm: workspace/datasets/lumenoid.hf5
+      tissue_type: Monolayer
+      parameters:
+        cell_df:
+          vol_elasticity: 1.0
+          prefered_vol: 1.0
+          is_alive: 1.0
+        face_df:
+          area_elasticity: 1.0
+          prefered_area: 1.0
+          contractility: 0.05
+          is_alive: 1.0
+        edge_df:
+          line_tension: 0.0
+          is_active: 1.0
+        vert_df:
+          viscosity: 1.0
+          is_alive: 1.0
+      geom: LumenoidGeometry
+      effectors:
+      - CellVolumeElasticity
+      - FaceAreaElasticity
+      - FaceContractility
+      - LineTension
+      ref_effector: FaceAreaElasticity
+      factory: model_factory
+      settings:
+        threshold_length: 0.03
+        # Lumen pressure law P = lumen_elasticity * (V0 - V); V0 seeds from the
+        # first observed volume, so the lumen starts at mechanical rest.
+        lumen_side: "basal"
+        lumen_elasticity: 1.0
+      # Keep topology fixed (observe pure shape change).
+      auto_reconnect: false
+      max_displacement: 0.2
+      bounds: {}
+      output_columns: {}
+      maps: {}
+      backend: python
+    inputs:
+      behaviors:
+      - Behaviors
+      global_time:
+      - global_time
+    outputs:
+      datasets:
+      - Datasets
+      network_changed:
+      - Network Changed
+      behaviors_update:
+      - Behaviors
+    interval: ${interval}
+  Network Changed: false
+  Behaviors: {}

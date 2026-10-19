@@ -1,0 +1,77 @@
+name: cross_section
+description: >-
+  Height-resolving 2D epithelial cross-section (coupling-hierarchy level 2): a
+  12-cell annular ring relaxed under the standard 2D mechanics, using the new
+  CrossSectionGeometry so each cell's apico-basal HEIGHT (face_df['height']) is an
+  explicit degree of freedom and the basal vertices are tracked against a
+  substrate (basal adhesion). This is the cheap level at which a basement-membrane
+  / basal perturbation produces a direct height response in the viva-lumenoid
+  campaign. Pure mechanics, no coupling.
+tags:
+- tissue
+- cross-section
+- geometry
+- viva-lumenoid
+requires:
+  processes:
+  - EulerSolver
+  types:
+  - tyssue_data
+  - behaviors
+emitters: []
+parameters:
+  interval:
+    type: float
+    default: 0.01
+    description: Emit / solver step (dt). One step relaxes the ring geometry.
+state:
+  Tyssue:
+    _type: process
+    address: local:EulerSolver
+    config:
+      name: Cross Section
+      eptm: workspace/datasets/cross_section.hf5
+      tissue_type: Sheet
+      parameters:
+        face_df:
+          area_elasticity: 1.0
+          prefered_area: 1.0
+          perimeter_elasticity: 0.1
+          prefered_perimeter: 3.6
+          is_alive: 1.0
+        edge_df:
+          line_tension: 0.0
+          is_active: 1.0
+        vert_df:
+          viscosity: 1.0
+          is_alive: 1.0
+      geom: CrossSectionGeometry
+      effectors:
+      - LineTension
+      - FaceAreaElasticity
+      - PerimeterElasticity
+      ref_effector: FaceAreaElasticity
+      factory: model_factory
+      settings:
+        threshold_length: 0.03
+        height_axis: "y"
+      auto_reconnect: false
+      bounds: {}
+      output_columns: {}
+      maps: {}
+      backend: python
+    inputs:
+      behaviors:
+      - Behaviors
+      global_time:
+      - global_time
+    outputs:
+      datasets:
+      - Datasets
+      network_changed:
+      - Network Changed
+      behaviors_update:
+      - Behaviors
+    interval: ${interval}
+  Network Changed: false
+  Behaviors: {}
