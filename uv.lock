@@ -1761,6 +1761,19 @@ wheels = [
 ]
 
 [[package]]
+name = "meshio"
+version = "5.3.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "rich" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/20/1e/caa4f15c020de3e3486b4133ca689236bd3863a3d6dd0f58e97ce86a296a/meshio-5.3.5.tar.gz", hash = "sha256:f21f01abd9f29ba06ea119304b3d39e610421cfe93b9dd23362834919f87586d", size = 490922, upload-time = "2024-01-31T15:09:41.731Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/89/5f/39cbadc320cd78f4834b0a9f7a2fa3c980dca942bf193f315837eacb8870/meshio-5.3.5-py3-none-any.whl", hash = "sha256:0736c6e34ecc768f62f2cde5d8233a3529512a9399b25c68ea2ca0d5900cdc10", size = 166162, upload-time = "2024-01-31T15:09:36.691Z" },
+]
+
+[[package]]
 name = "mpmath"
 version = "1.3.0"
 source = { registry = "https://pypi.org/simple" }
@@ -3726,8 +3739,20 @@ wheels = [
 
 [[package]]
 name = "tyssue"
-version = "0.1.dev972+g7b5dedcce"
-source = { git = "https://github.com/vivarium-collective/vivatyssue.git?rev=1717a8eb93f7db67f061d317cb05d017996ae78e#1717a8eb93f7db67f061d317cb05d017996ae78e" }
+version = "0.1.dev989+g29671f103"
+source = { git = "https://github.com/vivarium-collective/vivatyssue.git?rev=29671f1030bb90d4ef58b091811e46d3e278b64a#29671f1030bb90d4ef58b091811e46d3e278b64a" }
+dependencies = [
+    { name = "ipywidgets" },
+    { name = "matplotlib" },
+    { name = "meshio" },
+    { name = "networkx" },
+    { name = "numpy" },
+    { name = "pandas" },
+    { name = "quantities" },
+    { name = "scikit-image" },
+    { name = "scipy" },
+    { name = "tables" },
+]
 
 [[package]]
 name = "tzdata"
@@ -3974,7 +3999,7 @@ requires-dist = [
     { name = "scikit-image" },
     { name = "tables" },
     { name = "trimesh", marker = "extra == 'hra'" },
-    { name = "tyssue", marker = "extra == 'sim'", git = "https://github.com/vivarium-collective/vivatyssue.git?rev=1717a8eb93f7db67f061d317cb05d017996ae78e" },
+    { name = "tyssue", marker = "extra == 'sim'", git = "https://github.com/vivarium-collective/vivatyssue.git?rev=29671f1030bb90d4ef58b091811e46d3e278b64a" },
     { name = "vispy" },
     { name = "viva-biomodels", marker = "extra == 'fetch'", git = "https://github.com/vivarium-collective/viva-biomodels.git" },
     { name = "viva-copasi", git = "https://github.com/vivarium-collective/viva-copasi.git?rev=6ab8c7b93b87116015bd721e0306a3cc6c50c060" },

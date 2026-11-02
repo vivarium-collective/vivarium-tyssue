@@ -115,12 +115,14 @@ override-dependencies = [
 # The pandas-3-compatible tyssue fork (adds VesselGeometry/model_factory_* and
 # patches get_opposite so cell_division/remove_face work under read-only pandas-3
 # arrays). Required for real topology ops (divisions/extrusions).
-# Pinned to the `intersections` branch of the fork. That is the ONLY branch that
-# ships tyssue.collisions.intersections, which tests/test_composites.py
-# (test_intersection_check_arms_the_behaviour) and EulerSolver's check_intersections
-# import by name — the fork's default branch resolves without it and that test fails.
-# The branch also drops the CGAL dependency and makes History self-sufficient.
-tyssue = { git = "https://github.com/vivarium-collective/vivatyssue.git", rev = "1717a8eb93f7db67f061d317cb05d017996ae78e" }
+# Pinned to a commit on the fork's `main`, which now contains the former `intersections`
+# branch (0 commits ahead of main): it ships tyssue.collisions.intersections, which
+# tests/test_composites.py (test_intersection_check_arms_the_behaviour) and EulerSolver's
+# check_intersections import by name, drops the CGAL dependency, makes History
+# self-sufficient, and has EventManager.extend_current (EulerSolver calls it). Its
+# .gitmodules uses an https URL for the docs submodule, so installers without an ssh
+# client (compose-api's lock, sandboxed builds) can clone it.
+tyssue = { git = "https://github.com/vivarium-collective/vivatyssue.git", rev = "29671f1030bb90d4ef58b091811e46d3e278b64a" }
 vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git" }
 viva-tellurium = { git = "https://github.com/vivarium-collective/viva-tellurium.git" }
 viva-simbio = { git = "https://github.com/vivarium-collective/viva-simbio.git" }
