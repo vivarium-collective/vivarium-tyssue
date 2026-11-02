@@ -49,7 +49,7 @@ dependencies = [
     # ParquetEmitter — the workspace's default emitter (see workspace.yaml
     # runtime.default_emitter and vivarium_tyssue.core). The [parquet] extra pulls
     # polars/pyarrow/duckdb/fsspec. Not on PyPI; reference the repo directly.
-    "viva-emitters[parquet] @ git+https://github.com/vivarium-collective/viva-emitters.git",
+    "viva-emitters[parquet] @ git+https://github.com/vivarium-collective/viva-emitters.git@591133cb831463fd4bf333f7d01a729f1cbe2745",
     # COPASI process (CopasiUTCProcess) wrapping basico/COPASI — runs SBML models.
     # Not on PyPI — resolved via [tool.uv.sources] + override-dependencies below.
     # viva-biomodels (the BioModels *fetcher*) is NOT a runtime dep: it pulls
@@ -96,7 +96,7 @@ override-dependencies = [
     "vivarium-workbench @ git+https://github.com/vivarium-collective/vivarium-dashboard.git",
     "viva-tellurium @ git+https://github.com/vivarium-collective/viva-tellurium.git",
     "viva-simbio @ git+https://github.com/vivarium-collective/viva-simbio.git",
-    "viva-copasi @ git+https://github.com/vivarium-collective/viva-copasi.git",
+    "viva-copasi @ git+https://github.com/vivarium-collective/viva-copasi.git@6ab8c7b93b87116015bd721e0306a3cc6c50c060",
     # viva-simbio and viva-tellurium reference viva-superpowers with branch = "main"
     # (→ git+https://…@main), while the root uses the default-branch ref
     # (git+https://…, no branch). Uv treats these as conflicting URLs; override
@@ -105,7 +105,7 @@ override-dependencies = [
     # Same conflict for viva-emitters: viva-superpowers (>=0.14.0) pins it with
     # branch = "main" (→ git+https://…@main), while the root requests the
     # unqualified ref. Pin both to the unqualified ref so they share one URL.
-    "viva-emitters[parquet] @ git+https://github.com/vivarium-collective/viva-emitters.git",
+    "viva-emitters[parquet] @ git+https://github.com/vivarium-collective/viva-emitters.git@591133cb831463fd4bf333f7d01a729f1cbe2745",
 ]
 
 # [tool.uv.sources] supplies the git URL for vivarium-workbench (not on PyPI).
@@ -124,7 +124,7 @@ tyssue = { git = "https://github.com/vivarium-collective/vivatyssue.git", rev = 
 vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git" }
 viva-tellurium = { git = "https://github.com/vivarium-collective/viva-tellurium.git" }
 viva-simbio = { git = "https://github.com/vivarium-collective/viva-simbio.git" }
-viva-copasi = { git = "https://github.com/vivarium-collective/viva-copasi.git" }
+viva-copasi = { git = "https://github.com/vivarium-collective/viva-copasi.git", rev = "6ab8c7b93b87116015bd721e0306a3cc6c50c060" }
 viva-superpowers = { git = "https://github.com/vivarium-collective/viva-superpowers.git" }
 
 # Allow the PEP 508 direct git URL for vivarium-workbench (not on PyPI).

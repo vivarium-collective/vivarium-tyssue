@@ -18,8 +18,8 @@ resolution-markers = [
 
 [manifest]
 overrides = [
-    { name = "viva-copasi", git = "https://github.com/vivarium-collective/viva-copasi.git" },
-    { name = "viva-emitters", extras = ["parquet"], git = "https://github.com/vivarium-collective/viva-emitters.git" },
+    { name = "viva-copasi", git = "https://github.com/vivarium-collective/viva-copasi.git?rev=6ab8c7b93b87116015bd721e0306a3cc6c50c060" },
+    { name = "viva-emitters", extras = ["parquet"], git = "https://github.com/vivarium-collective/viva-emitters.git?rev=591133cb831463fd4bf333f7d01a729f1cbe2745" },
     { name = "viva-simbio", git = "https://github.com/vivarium-collective/viva-simbio.git" },
     { name = "viva-superpowers", git = "https://github.com/vivarium-collective/viva-superpowers.git" },
     { name = "viva-tellurium", git = "https://github.com/vivarium-collective/viva-tellurium.git" },
@@ -3834,7 +3834,7 @@ dependencies = [
 [[package]]
 name = "viva-copasi"
 version = "0.1.0"
-source = { git = "https://github.com/vivarium-collective/viva-copasi.git#6ab8c7b93b87116015bd721e0306a3cc6c50c060" }
+source = { git = "https://github.com/vivarium-collective/viva-copasi.git?rev=6ab8c7b93b87116015bd721e0306a3cc6c50c060#6ab8c7b93b87116015bd721e0306a3cc6c50c060" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "copasi-basico" },
@@ -3847,7 +3847,7 @@ dependencies = [
 [[package]]
 name = "viva-emitters"
 version = "0.3.0"
-source = { git = "https://github.com/vivarium-collective/viva-emitters.git#591133cb831463fd4bf333f7d01a729f1cbe2745" }
+source = { git = "https://github.com/vivarium-collective/viva-emitters.git?rev=591133cb831463fd4bf333f7d01a729f1cbe2745#591133cb831463fd4bf333f7d01a729f1cbe2745" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "numpy" },
@@ -3977,8 +3977,8 @@ requires-dist = [
     { name = "tyssue", marker = "extra == 'sim'", git = "https://github.com/vivarium-collective/vivatyssue.git?rev=7b5dedcceffb96680841044f4cbde7b268f8b81f" },
     { name = "vispy" },
     { name = "viva-biomodels", marker = "extra == 'fetch'", git = "https://github.com/vivarium-collective/viva-biomodels.git" },
-    { name = "viva-copasi", git = "https://github.com/vivarium-collective/viva-copasi.git" },
-    { name = "viva-emitters", extras = ["parquet"], git = "https://github.com/vivarium-collective/viva-emitters.git" },
+    { name = "viva-copasi", git = "https://github.com/vivarium-collective/viva-copasi.git?rev=6ab8c7b93b87116015bd721e0306a3cc6c50c060" },
+    { name = "viva-emitters", extras = ["parquet"], git = "https://github.com/vivarium-collective/viva-emitters.git?rev=591133cb831463fd4bf333f7d01a729f1cbe2745" },
     { name = "viva-superpowers", git = "https://github.com/vivarium-collective/viva-superpowers.git" },
     { name = "vivarium-workbench", git = "https://github.com/vivarium-collective/vivarium-dashboard.git" },
 ]
