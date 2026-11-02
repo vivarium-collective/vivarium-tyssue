@@ -120,7 +120,7 @@ override-dependencies = [
 # (test_intersection_check_arms_the_behaviour) and EulerSolver's check_intersections
 # import by name — the fork's default branch resolves without it and that test fails.
 # The branch also drops the CGAL dependency and makes History self-sufficient.
-tyssue = { git = "https://github.com/vivarium-collective/vivatyssue.git", rev = "7b5dedcceffb96680841044f4cbde7b268f8b81f" }
+tyssue = { git = "https://github.com/vivarium-collective/vivatyssue.git", rev = "1717a8eb93f7db67f061d317cb05d017996ae78e" }
 vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-dashboard.git" }
 viva-tellurium = { git = "https://github.com/vivarium-collective/viva-tellurium.git" }
 viva-simbio = { git = "https://github.com/vivarium-collective/viva-simbio.git" }

@@ -3727,7 +3727,7 @@ wheels = [
 [[package]]
 name = "tyssue"
 version = "0.1.dev972+g7b5dedcce"
-source = { git = "https://github.com/vivarium-collective/vivatyssue.git?rev=7b5dedcceffb96680841044f4cbde7b268f8b81f#7b5dedcceffb96680841044f4cbde7b268f8b81f" }
+source = { git = "https://github.com/vivarium-collective/vivatyssue.git?rev=1717a8eb93f7db67f061d317cb05d017996ae78e#1717a8eb93f7db67f061d317cb05d017996ae78e" }
 
 [[package]]
 name = "tzdata"
@@ -3974,7 +3974,7 @@ requires-dist = [
     { name = "scikit-image" },
     { name = "tables" },
     { name = "trimesh", marker = "extra == 'hra'" },
-    { name = "tyssue", marker = "extra == 'sim'", git = "https://github.com/vivarium-collective/vivatyssue.git?rev=7b5dedcceffb96680841044f4cbde7b268f8b81f" },
+    { name = "tyssue", marker = "extra == 'sim'", git = "https://github.com/vivarium-collective/vivatyssue.git?rev=1717a8eb93f7db67f061d317cb05d017996ae78e" },
     { name = "vispy" },
     { name = "viva-biomodels", marker = "extra == 'fetch'", git = "https://github.com/vivarium-collective/viva-biomodels.git" },
     { name = "viva-copasi", git = "https://github.com/vivarium-collective/viva-copasi.git?rev=6ab8c7b93b87116015bd721e0306a3cc6c50c060" },
