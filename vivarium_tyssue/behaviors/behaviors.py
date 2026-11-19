@@ -683,18 +683,29 @@ def differential_adhesion(
 
 def cell_jamming(sheet, manager, rate, limits, dt, component=None):
     """Ramps every cell's ``prefered_perimeter`` by ``rate * dt`` of its current
-    value per step, re-queuing itself until the mean leaves ``limits``. The ramp
-    is an increment added in place (see :func:`_add_by_uid`), so it stacks with
-    other processes driving the same parameter; ``component`` optionally records
-    its running total."""
+    value per step, re-queuing itself while the mean is inside ``limits``. The
+    step that would carry the mean past a limit is shortened to land on it, and
+    the ramp stops there. The ramp is an increment added in place (see
+    :func:`_add_by_uid`), so it stacks with other processes driving the same
+    parameter; ``component`` optionally records its running total."""
     face_df = sheet.face_df
     pp = face_df["prefered_perimeter"]
-    if pp.mean() > limits[0] or pp.mean() < limits[1]:
-        delta = dict(zip(face_df["unique_id"].tolist(), (rate * dt * pp).tolist()))
-        _add_by_uid(face_df, "prefered_perimeter", delta, component)
-        manager.append(cell_jamming, rate=rate, limits=limits, dt=dt, component=component)
-    else:
+    lo, hi = limits
+    mean = pp.mean()
+    if not lo < mean < hi:
         print("Jamming Complete")
+        return
+    factor = rate * dt
+    end = mean * (1 + factor)
+    last = not lo < end < hi
+    if last:
+        factor = min(max(end, lo), hi) / mean - 1
+    delta = dict(zip(face_df["unique_id"].tolist(), (factor * pp).tolist()))
+    _add_by_uid(face_df, "prefered_perimeter", delta, component)
+    if last:
+        print("Jamming Complete")
+    else:
+        manager.append(cell_jamming, rate=rate, limits=limits, dt=dt, component=component)
 
 def apply_gradient(sheet, manager, parameter_updates=None):
     """
