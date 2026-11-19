@@ -61,6 +61,8 @@ Time
 """
 from __future__ import annotations
 
+import operator
+import re
 import warnings
 
 import numpy as np
@@ -69,6 +71,14 @@ from process_bigraph import Process
 
 from vivarium_tyssue.processes.regulations import GRADIENT_MAP
 from vivarium_tyssue.sbml import VectorizedSBML
+
+# One phase-rule condition: a state variable, a comparison, a number. Rules are
+# parsed against this, never evaluated as Python, so a rule can only compare.
+_CONDITION = re.compile(
+    r"\s*([A-Za-z_]\w*)\s*(<=|>=|==|!=|<|>)\s*"
+    r"([-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?)\s*")
+_COMPARISONS = {"<": operator.lt, "<=": operator.le, ">": operator.gt,
+                ">=": operator.ge, "==": operator.eq, "!=": operator.ne}
 
 
 class SBMLCellCycle(Process):
@@ -92,13 +102,24 @@ class SBMLCellCycle(Process):
         # comparison of a state variable with a number. No match -> default_phase.
         "phases": {"_type": "list[string]", "_default": []},
         "default_phase": {"_type": "string", "_default": "G1"},
-        # Phases in which cells grow (grow_cells), and the phase whose entry
-        # divides a cell (split_cells).
-        "growth_phases": {"_type": "list[string]", "_default": ["G1", "G2"]},
+        # Phases in which cells grow (grow_cells; empty -> G1 and G2), and the
+        # phase whose entry divides a cell (split_cells). The default is applied in
+        # initialize: a non-empty list "_default" is concatenated with the
+        # configured list, not replaced by it.
+        "growth_phases": {"_type": "list[string]", "_default": []},
         "division_phase": {"_type": "string", "_default": "M"},
         "growth_rate": {"_type": "float", "_default": 0.1},   # per unit sim time
         "scale_perimeter": {"_type": "boolean", "_default": True},
         "birth_area": {"_type": "float", "_default": 1.0},    # target area of each half
+        # Cells whose prefered_area has reached this stop growing (0: no cap). A
+        # guard against a cell stuck in a growth phase, e.g. the skeleton model's
+        # runaway cyclin E state, which never leaves S.
+        "max_prefered_area": {"_type": "float", "_default": 0.0},
+        # A cell that divided less than this long ago (sim time) is not divided
+        # again (0: no limit). A guard against a phase rule whose variable grazes
+        # its threshold: the cell, and its daughter with the same state, would
+        # flip out of the division phase and back in and split again at once.
+        "min_division_interval": {"_type": "float", "_default": 0.0},
         # Cell types that neither grow nor divide (the model still runs), e.g. a
         # fixed frame of cells anchoring a pinned border.
         "no_division_types": {"_type": "list[string]", "_default": []},
@@ -138,7 +159,7 @@ class SBMLCellCycle(Process):
         self.phase_names, self._phase_rules = self._compile_phases(
             config.get("phases") or [], config.get("default_phase", "G1"))
         division_phase = config.get("division_phase", "M")
-        growth_phases = config.get("growth_phases", ["G1", "G2"])
+        growth_phases = list(config.get("growth_phases") or ["G1", "G2"])
         for name in [division_phase, *growth_phases]:
             if name not in self.phase_names:
                 raise ValueError(f"phase {name!r} is not one of {self.phase_names}")
@@ -147,6 +168,8 @@ class SBMLCellCycle(Process):
         self.growth_rate = float(config.get("growth_rate", 0.1))
         self.scale_perimeter = bool(config.get("scale_perimeter", True))
         self.birth_area = float(config.get("birth_area", 1.0))
+        self.max_prefered_area = float(config.get("max_prefered_area") or 0.0)
+        self.min_division_interval = float(config.get("min_division_interval") or 0.0)
         self.geom = config.get("geom") or "SheetGeometry"
 
         self.initial_mode = config["initial_state"]
@@ -170,6 +193,8 @@ class SBMLCellCycle(Process):
         self._warned_orphans = False
         self.n_divisions = 0
         self.n_skipped = 0
+        self.n_refractory = 0
+        self._start_time = None
 
     def inputs(self):
         return {
@@ -182,9 +207,9 @@ class SBMLCellCycle(Process):
 
     # ------------------------------------------------------------------ phases
     def _compile_phases(self, rules, default):
-        """``"NAME: cond & cond"`` rules -> (phase names, [(code, compiled), ...]).
-        Each condition is parenthesised before joining, so ``a > 1 & b < 2`` means
-        ``(a > 1) & (b < 2)`` rather than Python's ``a > (1 & b) < 2``."""
+        """``"NAME: cond & cond"`` rules -> (phase names, [(code, conditions), ...]),
+        each condition a ``(state row, comparison, number)`` triple. Only
+        ``variable <op> number`` conditions joined by ``&`` are accepted."""
         names, compiled = [default], []
         for rule in rules:
             name, sep, expr = rule.partition(":")
@@ -193,14 +218,21 @@ class SBMLCellCycle(Process):
                 raise ValueError(f"phase rule {rule!r} is not 'NAME: condition'")
             if name in names:
                 raise ValueError(f"phase {name!r} is defined twice")
-            conds = [c.strip() for c in expr.split("&")]
-            code = compile(" & ".join(f"({c})" for c in conds), f"<phase {name}>", "eval")
-            unknown = set(code.co_names) - set(self.model.state_ids)
+            conds = []
+            for cond in expr.split("&"):
+                match = _CONDITION.fullmatch(cond)
+                if match is None:
+                    raise ValueError(f"phase {name!r}: condition {cond.strip()!r} is not "
+                                     f"'variable <op> number' (<, <=, >, >=, ==, !=)")
+                conds.append(match.groups())
+            unknown = {var for var, _, _ in conds} - set(self.model.state_ids)
             if unknown:
                 raise KeyError(f"phase {name!r} uses {sorted(unknown)}, which are not "
                                f"state variables of the SBML model")
             names.append(name)
-            compiled.append((len(names) - 1, code))
+            compiled.append((len(names) - 1, [
+                (self.model.index(var), _COMPARISONS[op], float(value))
+                for var, op, value in conds]))
         return names, compiled
 
     def classify(self, Y):
@@ -208,12 +240,12 @@ class SBMLCellCycle(Process):
         Y = np.asarray(Y, dtype=float)
         if Y.ndim == 1:
             Y = Y[:, None]
-        env = {sid: Y[i] for i, sid in enumerate(self.model.state_ids)}
         phase = np.zeros(Y.shape[1], dtype=np.int64)
         undecided = np.ones(Y.shape[1], dtype=bool)
-        for code, expr in self._phase_rules:
-            hit = undecided & np.broadcast_to(eval(expr, {"__builtins__": {}}, env),
-                                              undecided.shape)
+        for code, conditions in self._phase_rules:
+            hit = undecided.copy()
+            for row, compare, value in conditions:
+                hit &= compare(Y[row], value)
             phase[hit] = code
             undecided &= ~hit
         return phase
@@ -385,6 +417,8 @@ class SBMLCellCycle(Process):
         if "is_alive" in faces.columns:
             faces = faces[faces["is_alive"] > 0]
         time = float(inputs.get("global_time", 0.0) or 0.0)
+        if self._start_time is None:
+            self._start_time = time
 
         self._sync(faces, time)
         P = self._params(faces, self.factors)
@@ -392,6 +426,12 @@ class SBMLCellCycle(Process):
 
         phase = self.classify(self.Y)
         entered = (phase == self.division_code) & (self.phase != self.division_code)
+        if self.min_division_interval > 0:
+            # Founding cells carry the start time as last_division; they never divided.
+            recent = ((self.last_division > self._start_time)
+                      & (time - self.last_division < self.min_division_interval))
+            self.n_refractory += int((entered & recent).sum())
+            entered &= ~recent
         growing = np.isin(phase, self.growth_codes)
         self.phase = phase
 
@@ -401,6 +441,8 @@ class SBMLCellCycle(Process):
             blocked = np.zeros(len(faces), dtype=bool)
         divide = entered & ~blocked
         growing &= ~blocked
+        if self.max_prefered_area > 0 and "prefered_area" in faces.columns:
+            growing &= faces["prefered_area"].to_numpy(dtype=float) < self.max_prefered_area
         self.n_skipped += int((entered & blocked).sum())
         self.n_divisions += int(divide.sum())
         self.last_division[divide] = time + interval

@@ -30,8 +30,8 @@ scripts/gen_composites.py   regenerates composites/ from the canonical configs
 | `regulation`   | TestRegulations (periodic division)   | cylinder · VesselGeometry | ✗ needs fork |
 | `stochastic`   | StochasticLineTension                 | square · SheetGeometry · `model_factory_bound` | ✗ needs fork |
 | `jamming`      | StochasticLineTension + CellJamming   | square · SheetGeometry · `model_factory_bound` | ✗ needs fork |
-| `gradient`     | StochasticLineTension + ParameterGradient (step) | square · SheetGeometry · `model_factory_bound` | ✗ needs fork |
-| `anisotropic`  | AnisotropicTension (step)             | square · SheetGeometry · `model_factory` | ✅ **runs** |
+| `gradient`     | StochasticLineTension + ParameterGradient (process) | square · SheetGeometry · `model_factory_bound` | ✗ needs fork |
+| `anisotropic`  | AnisotropicTension (process)          | square · SheetGeometry · `model_factory` | ✅ **runs** |
 | `gillespie`    | Gillespie (crypt cell-type dynamics)  | crypt cylinder · VesselGeometry | ✗ needs fork |
 
 Each composite exposes an `interval` parameter (`${interval}`); the dashboard

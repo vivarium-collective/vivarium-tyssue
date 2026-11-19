@@ -1,7 +1,7 @@
 import math
 import numpy as np
 
-from process_bigraph import Process, Step
+from process_bigraph import Process
 
 from vivarium_tyssue.maps import *
 from vivarium_tyssue.behaviors.behaviors import DEATH_FLOOR
@@ -64,6 +64,17 @@ class _Contribution:
         new = np.asarray(new, dtype=float)
         self.last = dict(zip(uids, new.tolist()))
         return dict(zip(uids, (new - old).tolist()))
+
+
+def junction_index(edge_df):
+    """Junction label (0..n-1) per half-edge row: rows joining the same two
+    vertices, in either direction, share a label. Labels follow the sorted
+    vertex pair, so they are stable for a given topology."""
+    srce = edge_df["srce"].to_numpy()
+    trgt = edge_df["trgt"].to_numpy()
+    pairs = np.stack([np.minimum(srce, trgt), np.maximum(srce, trgt)], axis=1)
+    _, junction = np.unique(pairs, axis=0, return_inverse=True)
+    return junction.reshape(-1)
 
 
 def _parameter_update(parameter, dataframe, deltas, component=None):
@@ -246,7 +257,7 @@ class CellDeaths(Process):
         return {"behaviors": update}
 
 class StochasticLineTension(Process):
-    """Ornstein-Uhlenbeck line tension: each edge's stochastic share ``x`` follows
+    """Ornstein-Uhlenbeck line tension: each junction's stochastic share ``x`` follows
 
         x(t + dt) = x(t) exp(-dt / tau) + sigma sqrt(1 - exp(-2 dt / tau)) N(0, 1)
 
@@ -255,6 +266,13 @@ class StochasticLineTension(Process):
     ``update_parameter`` delta on ``line_tension``, so the noise adds to whatever tension other
     processes (directional, adhesion) set. ``x`` is mirrored in the ``component``
     column (``stochastic_tension``).
+
+    One ``x`` is drawn per junction, not per half-edge: every half-edge joining
+    the same two vertices (an edge and its opposite) carries the same share, as in
+    the vertex-model literature (e.g. Yamamoto et al., PRR 2, 043326). Independent
+    draws per half-edge would give a junction, which ``LineTension`` weights ½ per
+    half-edge, a standard deviation of only ``sigma / sqrt(2)``. Junctions are
+    found from ``srce``/``trgt``, so the solver must output both columns.
     """
 
     config_schema = {
@@ -287,10 +305,21 @@ class StochasticLineTension(Process):
         edge_df = inputs["datasets"]["edge_df"]
         if len(edge_df) == 0:
             return _regulated([])
+        if not {"srce", "trgt"} <= set(edge_df.columns):
+            raise ValueError(
+                "StochasticLineTension pairs half-edges into junctions by srce/trgt; "
+                "add both to the EulerSolver output_columns['edge_df']."
+            )
         uids, x = self.share.previous(edge_df)
+        junction = junction_index(edge_df)
+        n_junctions = junction.max() + 1
+        # A junction's halves agree once synced; the mean also re-syncs any that
+        # don't (e.g. rows seeded from a per-half-edge share).
+        x_junction = (np.bincount(junction, weights=x, minlength=n_junctions)
+                      / np.bincount(junction, minlength=n_junctions))
         decay = np.exp(-interval / self.tau)
         noise_scale = self.sigma * np.sqrt(1 - np.exp(-2 * interval / self.tau))
-        new_x = decay * x + noise_scale * np.random.randn(len(x))
+        new_x = (decay * x_junction + noise_scale * np.random.randn(n_junctions))[junction]
         return _regulated([_parameter_update(
             "line_tension", "edge", self.share.deltas(uids, x, new_x), self.component)])
 
@@ -437,7 +466,7 @@ class CellJamming(Process):
         return {"behaviors": update}
 
 
-class ParameterGradient(Step):
+class ParameterGradient(Process):
     """Creates a 1D gradient of chemical or mechanical signal.
 
     Each parameter's gradient share is shipped as an ``update_parameter`` delta,
@@ -471,7 +500,7 @@ class ParameterGradient(Step):
     def outputs(self):
         return dict(_REGULATOR_OUTPUTS)
 
-    def update(self, inputs):
+    def update(self, inputs, interval):
         behaviors = []
         for parameter, df in self.model_parameters.items():
             frame = inputs["datasets"][df+"_df"]
@@ -487,7 +516,7 @@ class ParameterGradient(Step):
                     parameter, df, share.deltas(uids, old, new_parameter), share.column))
         return _regulated(behaviors)
 
-class AnisotropicTension(Step):
+class AnisotropicTension(Process):
     """Two-level line tension by edge orientation, shipped as ``update_parameter``
     deltas of its share of ``line_tension`` (mirrored in the ``component`` column)."""
     config_schema = {
@@ -511,7 +540,7 @@ class AnisotropicTension(Step):
     def outputs(self):
         return dict(_REGULATOR_OUTPUTS)
 
-    def update(self, inputs):
+    def update(self, inputs, interval):
         edge_df = inputs["datasets"]["edge_df"]
 
         if edge_df.empty:

@@ -26,6 +26,7 @@ from vivarium_tyssue.processes.regulations import (
     DirectionalLineTension,
     ParameterGradient,
     StochasticLineTension,
+    junction_index,
 )
 
 HOMO, HET = 0.1, 0.9
@@ -178,14 +179,41 @@ def test_ou_share_is_exact_whatever_the_solver_lag(lag):
     np.random.seed(7)
     decay = np.exp(-dt / tau)
     scale = sigma * np.sqrt(1 - np.exp(-2 * dt / tau))
-    x = np.zeros(sheet.Ne)
+    junction = junction_index(sheet.edge_df)
+    x_junction = np.zeros(junction.max() + 1)
     for n in range(steps):
-        x = decay * x + scale * np.random.randn(sheet.Ne)
+        x_junction = decay * x_junction + scale * np.random.randn(len(x_junction))
+        x = x_junction[junction]
         np.testing.assert_allclose(shares[n], x, atol=1e-12)
     while pending:
         _apply(sheet, pending.popleft())
     np.testing.assert_allclose(sheet.edge_df["line_tension"], x, atol=1e-12)
     np.testing.assert_allclose(sheet.edge_df["stochastic_tension"], x, atol=1e-12)
+
+
+def test_opposite_half_edges_share_one_stochastic_tension():
+    """One OU draw per junction: an edge and its opposite always carry the same
+    share, so the junction's tension has the full ``sigma``, not sigma/sqrt(2)."""
+    sheet = _sheet()
+    sheet.get_opposite()
+    process = _stochastic()
+    np.random.seed(11)
+    for _ in range(5):
+        _apply(sheet, process.update({"datasets": {"edge_df": sheet.edge_df.copy()}}, 0.1)["behaviors"][0])
+    edge = sheet.edge_df
+    paired = edge[edge["opposite"] >= 0]
+    assert len(paired) > 0
+    np.testing.assert_array_equal(
+        paired["stochastic_tension"].to_numpy(),
+        edge.loc[paired["opposite"], "stochastic_tension"].to_numpy(),
+    )
+    assert edge["stochastic_tension"].nunique() == junction_index(edge).max() + 1
+
+
+def test_stochastic_tension_needs_srce_and_trgt():
+    sheet = _sheet()
+    with pytest.raises(ValueError, match="srce/trgt"):
+        _stochastic().update({"datasets": {"edge_df": sheet.edge_df[["unique_id", "line_tension"]]}}, 0.1)
 
 
 def test_two_tension_processes_compose_through_a_lagging_solver():
@@ -237,12 +265,12 @@ def test_gradient_seeded_with_the_baseline_replaces_it_and_stacks_with_jamming()
                     args={"m": -0.1, "c": 4.6},
                     model_parameters={"prefered_perimeter": "face"},
                     component_prefix="gradient_")
-    _apply(sheet, process.update({"datasets": {"face_df": sheet.face_df}})["behaviors"][0])
+    _apply(sheet, process.update({"datasets": {"face_df": sheet.face_df}}, 0.1)["behaviors"][0])
     target = 4.6 - 0.1 * sheet.face_df["x"].to_numpy()
     np.testing.assert_allclose(sheet.face_df["prefered_perimeter"], target)
 
     sheet.face_df["prefered_perimeter"] += 0.2               # another process's increment
-    _apply(sheet, process.update({"datasets": {"face_df": sheet.face_df}})["behaviors"][0])
+    _apply(sheet, process.update({"datasets": {"face_df": sheet.face_df}}, 0.1)["behaviors"][0])
     np.testing.assert_allclose(sheet.face_df["prefered_perimeter"], target + 0.2)
 
 
@@ -253,7 +281,7 @@ def test_gradient_ships_one_update_parameter_node_per_parameter():
                     args={"m": 1.0, "c": 0.0},
                     model_parameters={"prefered_area": "face", "line_tension": "edge"},
                     component_prefix="gradient_")
-    nodes = process.update({"datasets": {"face_df": sheet.face_df, "edge_df": sheet.edge_df}})
+    nodes = process.update({"datasets": {"face_df": sheet.face_df, "edge_df": sheet.edge_df}}, 0.1)
     nodes = nodes["behaviors"]
     assert [(n["func"], n["parameter"], n["dataframe"], n["component"]) for n in nodes] == [
         ("update_parameter", "prefered_area", "face", "gradient_prefered_area"),

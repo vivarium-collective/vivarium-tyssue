@@ -269,7 +269,7 @@ def get_test_gradient_spec(interval=0.1, config=None, tau=1.0, sigma=1.0):
     else:
         spec = get_test_stochastic_spec(interval=interval, config=config, tau=tau, sigma=sigma)
     spec["Gradient"] = {
-        "_type": "step",
+        "_type": "process",
         "address": "local:ParameterGradient",
         "config": {
             "gradient_type": "linear",
@@ -289,6 +289,7 @@ def get_test_gradient_spec(interval=0.1, config=None, tau=1.0, sigma=1.0):
             "behaviors": ["Behaviors"],
             "datasets": ["Tissue State"],
         },
+        "interval": interval,
     }
     return spec
 
@@ -322,7 +323,7 @@ def get_test_anisotropic_spec(interval=0.1, config=None):
         spec = get_test_spec(interval=interval, config=config)
 
     spec["Anisotropic"] = {
-        "_type": "step",
+        "_type": "process",
         "address": "local:AnisotropicTension",
         "config": {
             "axes": ["x", "y"],
@@ -335,6 +336,7 @@ def get_test_anisotropic_spec(interval=0.1, config=None):
             "behaviors": ["Behaviors"],
             "datasets": ["Tissue State"],
         },
+        "interval": interval,
     }
     return spec
 
