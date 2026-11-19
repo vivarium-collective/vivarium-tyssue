@@ -44,7 +44,8 @@ state:
       tissue_type: Sheet
       parameters:
         # Mechanics aligned to Tasnif's original crypt cylinder model
-        # (Notebooks/cylindermodel.ipynb, cell 16), which ran stably to tf=300:
+        # (Notebooks/cylindermodel.ipynb, cell 16 -- removed 2026-11-19, in git at
+        # 8c5065a), which ran stably to tf=300:
         #   area_elasticity=1, prefered_area=1, perimeter_elasticity=1,
         #   prefered_perimeter=3.5, viscosity=5, surface/vessel_elasticity=5,
         #   threshold_length=0.1. The earlier soft values (viscosity 0.2,

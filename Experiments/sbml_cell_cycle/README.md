@@ -125,7 +125,7 @@ The flat square sheet (`test_square.hf5`, 206 cells) runs with a **free border**
 | mechanics | viscosity 0.02 (dt 0.002), `prefered_perimeter` 3.5, `perimeter_elasticity` 0.5, area elasticity 1 |
 | rosettes | 4-fold vertices resolve after a 10 min mean wait (`p_4` 7.08, `p_5p` 0.708 per sim unit); tyssue's defaults gave ~12 h |
 | cell cycle | ≈ 20 time units (measured 20.1); grow in G1/G2 at 0.079, divide on entering M |
-| run | to 1200 cells (t = 50, 999 divisions, 206 → 1205 cells), snapshot every 0.25 |
+| run | to 1200 cells (t = 50.5, 1000 divisions, 206 → 1206 cells), snapshot every 0.25 |
 | final mesh | 0 folded, 0 invading vertices, 0 overlapping pairs (`find_intersections(strict=True)`, checked on every frame) |
 
 **Why it stays clean, and why it stops at 1200 cells.**
@@ -143,18 +143,73 @@ The flat square sheet (`test_square.hf5`, 206 cells) runs with a **free border**
   one 0.25-unit frame at a time and snapshots the mesh itself.
 
 **Checked in the run's snapshots:**
-- all 999 splits happen with the mother in M;
+- all 1000 splits happen with the mother in M;
 - target area grows only in G1 and G2, and is constant in S and M;
-- division-to-division time is 20.1 on average (minimum 15.5, maximum 25.3; 793 complete cycles);
+- division-to-division time is 20.1 on average (minimum 15.6, maximum 26.4; 806 complete cycles);
 - no cell divides twice in a row.
 
 **The notebook also makes two GIFs** (`outputs/figures/growth_phase.gif` and
 `growth_cyclinB.gif`).
 - The axes are fixed to the union of all frames' extents, so the growing tissue
-  stays in view.
+  stays in view. The snapshot figures instead zoom each panel to its own tissue, with
+  a common 5-unit scale bar, so the small early sheet isn't lost in empty space.
 - `growth_phase.gif` colours cells by their phase (G1 / S / G2 / M), read from each
   cell's own cyclins. `growth_cyclinB.gif` colours them by cyclin B.
 - Cells that divided within the last time unit have a magenta outline.
+
+## Second run: growth, then replicative senescence
+
+`python sbml_cell_cycle.py senescence [--seed N]` starts from the same sheet and
+mechanics. Each division lowers the lineage's sensitivity to growth factor, so the
+tissue grows for a few cycles and then stops for good.
+
+- **Replicative age.**
+  - `split_cells` increments a `generation` column on the mother before the split,
+    so both halves carry it.
+  - The process maps it to the model's input: GF = 0.05^generation
+    (`input_columns: {GF: generation}`, `input_functions: {GF: exponential}`).
+- **Arrest comes from the model.** Only generation 0 is above the GF > 0.072
+  threshold. The commitment lag carries lineages through two or three divisions,
+  and the G1/S switch then holds them in G0. Generation never decreases, so the
+  arrest is irreversible.
+- **Extra phase rule:** `G0: cyclin_D_Cdk4_6 < 0.04`, checked after S, M and G2.
+  G0 cells never divide.
+- **Growth in S and G2,** at ln 2 / (0.56 × cycle). In a committed last cycle,
+  cyclin D has already collapsed, so G1 reads as G0. With G1 + G2 growth those
+  cells divided undergrown and the sheet folded at ~540 cells.
+- **Senescent enlargement.**
+  - G0 cells keep growing until `max_prefered_area` = 2 (twice the birth area).
+  - Arrested cells left at their size sat packed at area 0.75–0.85, and late
+    divisions among them folded 4 of 5 seeds.
+  - The cap also stops the rare runaway-cyclin E cell (stuck in S) from inflating.
+- **`min_division_interval` = 10 (half a cycle).**
+  - At GF = 0.05, cyclin A peaks right at the M rule's 2.0. Without the guard, a
+    just-split cell and its daughter flipped M → G2 → M and split again within
+    0.5–2.5 time units (3–5% of divisions).
+
+| seed | final cells | fold | 95% of growth by | G0 at t = 120 | mean area | final generations 2 / 3 / 4 |
+|---|---|---|---|---|---|---|
+| 20260930 | 1058 | 5.14 | 65.5 | 99.7% | 1.80 | 57 / 41 / 2% |
+| 2 | 1032 | 5.01 | 63.75 | 99.7% | 1.79 | 59 / 40 / 1% |
+| 3 | 1062 | 5.16 | 65.25 | 99.8% | 1.80 | 56 / 43 / 2% |
+| 4 | 1066 | 5.17 | 64.75 | 100% | 1.80 | 55 / 43 / 2% |
+| 5 | 1038 | 5.04 | 64.25 | 99.7% | 1.81 | 59 / 39 / 2% |
+
+- All five reach t = 120 with every 0.25 frame clean (`find_intersections(strict=True)`).
+- The shortest division-to-division time is 17.1.
+- **The tissue grows in two steps.**
+  - It tracks the GF = 1 run to ~800 cells at t ≈ 40.
+  - It then pauses, and grows in a last wave (the generation-2 cells' committed
+    cycle) to a plateau by t ≈ 70.
+- Each seed still has 7–14 divisions after t = 70 (~1%). The arrested cells' cyclins
+  decay as a damped oscillation, and a few rebounds cross the M threshold once more.
+- Mean cell area rises from ~1.2 to 1.8 as G0 cells enlarge.
+- The notebook (Section 5) adds:
+  - time series (cell number, phases, generations, d ln N/dt, mean and tissue area);
+  - snapshots;
+  - two GIFs (`senescence_phase.gif` and `senescence_generation.gif`);
+  - a lineage trace;
+  - the final-generation distribution.
 
 ## Running
 
@@ -162,9 +217,12 @@ The flat square sheet (`test_square.hf5`, 206 cells) runs with a **free border**
 conda activate vivarium-tyssue
 cd Experiments/sbml_cell_cycle
 python sbml_cell_cycle.py
+for s in 20260930 2 3 4 5; do python sbml_cell_cycle.py senescence --seed $s; done
 jupyter nbconvert --to notebook --execute --inplace sbml_cell_cycle_analysis.ipynb
 ```
 
+- The senescence runs write `outputs/senescence/` (default seed) and
+  `outputs/senescence_seed<N>/`, with the same files as the growth run.
 - `outputs/growth/history.hf5` holds vert/edge/face snapshots every 0.25 time
   units, including every cell's `cc_*` state.
 - `python sweep_folding.py ...` reruns the folding sweeps; see `SWEEPS.md`.

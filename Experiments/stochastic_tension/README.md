@@ -1,11 +1,14 @@
 # Stochastic line-tension experiments
 
 A 5 × 5 `tau` × `sigma` parameter sweep of the stochastic line-tension scenario: a flat
-epithelial square sheet whose per-edge line tension fluctuates via an
-Ornstein–Uhlenbeck process (`StochasticLineTension` + `EulerSolver`).
+epithelial square sheet whose per-junction line tension fluctuates via an
+Ornstein–Uhlenbeck process (`StochasticLineTension` + `EulerSolver`). Every grid cell
+is run **3 times** with independent seeds (75 runs); the figures show the mean over
+the repeats, with the sample standard deviation.
 
-`tau` is the OU relaxation timescale and `sigma` the noise amplitude. The analysis
-quantifies two outcomes across the sweep:
+`tau` is the OU relaxation timescale and `sigma` the noise amplitude — the stationary
+standard deviation of each junction's tension (both half-edges of a junction share one
+value). The analysis quantifies two outcomes across the sweep:
 
 - **Degree of stochastic vertex movement** — RMS per-step vertex displacement
   (and total path length per vertex), matched by `unique_id` across frames.
@@ -13,22 +16,21 @@ quantifies two outcomes across the sweep:
   from the face-adjacency set (keyed by face `unique_id`) as **completed events**: a
   junction that vanishes only scores once the pair of cells that flanked it becomes
   adjacent. A four-fold vertex that splits back into the original junction exchanged
-  nothing and is counted as *reverted* instead (`t1_reverted` / `t1_unresolved` in
-  `metrics.csv`).
+  nothing and is counted as *reverted* instead (`t1_reverted` / `t1_unresolved` in `runs.csv` and `metrics.csv`).
 
-Because both metrics are per-recorded-frame, the archived `History` keeps the
-**full** resolution (every solver step) so the notebook reproduces them exactly.
+Both metrics are computed on **every solver step** inside the simulation script, while
+the run's `History` is still in memory. The History itself is then discarded — only
+summarised data is written to disk.
 
 ## Workflow — simulate, then analyse
 
-Simulation and analysis are split so you can **re-analyse without re-simulating**:
-
-1. **`stochastic_tension.py`** runs every `(tau, sigma)` cell and archives its
-   `History` to `outputs/<tau..._sigma...>/history.hf5` (compressed HDF5). No
-   figures or metrics.
-2. **`stochastic_tension_analysis.ipynb`** reopens those archives
-   (`HistoryHdf5.from_archive`) and produces the colour-coded videos, still frames,
-   the per-run metrics (`metrics.csv`) and the sweep summary figures.
+1. **`stochastic_tension.py`** runs every `(tau, sigma, repeat)` in its own worker
+   process (`N_WORKERS` at a time, one run per process, so memory is released after
+   every run) and writes the run's summarised data (below), plus `outputs/runs.csv`
+   collecting every run's summary.
+2. **`stochastic_tension_analysis.ipynb`** averages the repeats and produces the
+   colour-coded videos, still frames, `metrics.csv` and the sweep summary figures. It
+   never re-simulates.
 
 ## Run
 
@@ -38,7 +40,7 @@ Use the repo's `vivarium-tyssue` conda env (the `.venv`/`uv` are broken):
 conda activate vivarium-tyssue
 cd Experiments/stochastic_tension
 
-python stochastic_tension.py                     # 1) simulate -> outputs/*/history.hf5
+python stochastic_tension.py                     # 1) simulate -> outputs/*/rep*/
 jupyter lab stochastic_tension_analysis.ipynb    # 2) analyse & visualise (Run All)
 ```
 
@@ -46,28 +48,34 @@ The notebook requires ImageMagick (`magick`) on PATH for GIF rendering.
 
 ## Outputs (git-ignored)
 
-`history.hf5` is written by `stochastic_tension.py`; everything else by
-`stochastic_tension_analysis.ipynb`.
-
 ```
 data/test_square.hf5          # input mesh, copied from workspace/datasets on first run
 outputs/
+  runs.csv                    # one row per run (all scalar metrics, seed, status)
   tau0.10_sigma0.05/          # one dir per sweep cell
-    history.hf5               #   <- simulation (archived full-resolution History)
-    stochastic.gif            #   edges coloured by live line_tension
-    still_t*.png              #   4 still frames across the run
-  metrics.csv                 # one row per (tau, sigma)
+    rep0/ rep1/ rep2/         #   one dir per repeat, written by the script:
+      summary.json            #     scalar metrics, seed, status, runtime
+      timeseries.csv          #     per step: RMS vertex step, junction-tension sd
+      t1_events.csv           #     completed T1s (break/join time, cell uids)
+      movie.hf5               #     rep0 only: 60 frames, positions/topology/tension
+      junction_tension.hf5    #     rep0 only: every junction's tension, every step
+    stochastic.gif            #   (notebook) rep0, edges coloured by line_tension
+    still_t*.png              #   (notebook) 4 still frames across rep0
+  metrics.csv                 # (notebook) mean + sd per (tau, sigma)
   summary/
-    heatmaps.png              # movement + T1 heatmaps, side by side
-    metric_vs_sigma.png
+    heatmaps.png              # movement + T1 heatmaps (mean ± sd), side by side
+    metric_vs_sigma.png       # mean ± sd, repeats as faint dots
+    junction_trace_vs_tau.png    # one random junction, tau = 0.1/0.5/2 at sigma = 0.1
+    junction_trace_vs_sigma.png  #   sigma = 0.05/0.2/0.8 at tau = 0.2 (same junction)
   bigraphs/
     stochastic_tension_bigraph.png   # the composite wiring, shared by every sweep
                                      #   cell (processes peach/pink, stores light blue)
 ```
 
-Stills, summary figures and the bigraph render at 300 dpi; GIFs at 110 dpi.
+The whole sweep's data is ~55 MB (mostly the 25 movie and junction-tension archives). Stills, summary
+figures and the bigraph render at 300 dpi; GIFs at 110 dpi.
 
 Nothing under `data/` or `outputs/` is tracked by git (see `.gitignore`) — the
 sweep is fully regenerated by re-running the script + notebook. Tune the grid,
-`TF`, `DT` and the archive frame cap via the constants at the top of
-`stochastic_tension.py`; metrics and plot styling live in the analysis notebook.
+`N_REPEATS`, `TF`, `DT`, `N_WORKERS` and the movie frame count via the constants at the
+top of `stochastic_tension.py`; plot styling lives in the analysis notebook.

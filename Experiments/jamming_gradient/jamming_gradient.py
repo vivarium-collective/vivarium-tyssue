@@ -9,9 +9,19 @@ line-tension fluctuations act on every edge.
   * **Jamming** — the ``CellJamming`` process fires at ``t = 300`` (run to
     ``t = 400``, ``dt = 0.1``), ramping every cell's preferred perimeter down so
     the tissue solidifies and arrests the migrating cell.
-  * **Gradient** — the ``ParameterGradient`` step imposes a linear
-    ``prefered_perimeter`` gradient along x (run to ``t = 400``, ``dt = 0.05``), so
-    the migrating cell moves through a stiffness gradient.
+  * **Gradient** — the ``ParameterGradient`` process imposes a linear
+    ``prefered_perimeter`` gradient along x (run to ``t = 600``, ``dt = 0.05``), so
+    the migrating cell moves through a stiffness gradient. The tissue starts with
+    the gradient already in place (``prefered_perimeter = m*x + c`` per cell at
+    ``t = 0``); the step then keeps it tied to each cell's current x.
+
+Before either run the input mesh is **relaxed** under the scenario's initial
+parameters: tyssue's quasistatic solver (``QSSolver``) minimises the energy of the
+conservative forces only (line tension, area and perimeter elasticity; no
+``ActiveMigration``, no line-tension noise) with the same bound model as the run, so
+the boundary stays fixed and the topology is unchanged. Each scenario starts from its
+own relaxed mesh (``data/relaxed_<scenario>.hf5``), not from a state relaxed under
+other parameters.
 
 This script **only runs the simulations and archives each scenario's
 full-resolution ``History`` to a compressed HDF5 file**
@@ -33,6 +43,9 @@ Run from the repo's ``vivarium-tyssue`` conda env:
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
+import os
 import shutil
 import sys
 from pathlib import Path
@@ -94,8 +107,11 @@ COORDS = ["x", "y"]
 SEEDS = {"jamming": 20260811, "gradient": 20260714}
 
 # Colour range the analysis notebook uses for the prefered-perimeter colour map;
-# defined here so both scenarios share one source of truth.
+# defined here so both scenarios share one source of truth. The gradient spans
+# m*x + c over the sheet (about 2.9 to 4.5), wider than the jamming range, so it
+# gets its own range rather than saturating at both ends.
 PP_RANGE = (3.0, 4.2)
+GRAD_PP_RANGE = (2.8, 4.6)
 
 # Archive the FULL-resolution history (every solver step) so the notebook can
 # reproduce the exact migrating-cell trace / circularity. Compression keeps the size
@@ -119,6 +135,131 @@ def ensure_dataset() -> Path:
         shutil.copy(src, dst)
         print(f"copied {src} -> {dst}")
     return dst
+
+
+# ---------------------------------------------------------------------------
+# Initial relaxation (quasistatic, conservative forces only)
+# ---------------------------------------------------------------------------
+# The conservative part of the run's model: the effectors with an energy. The
+# ActiveMigration drive is non-conservative and the OU line-tension noise has zero
+# mean, so neither takes part.
+RELAX_EFFECTORS = ["LineTension", "FaceAreaElasticity", "PerimeterElasticity"]
+RELAX_REF_EFFECTOR = "FaceAreaElasticity"
+RELAX_FACTORY = "model_factory_bound"   # same as the run: boundary vertices fixed
+# Gradient scenario: P0 = m*x + c depends on where the cells end up, so relax, reset
+# P0 at the new positions, and repeat until P0 moves less than this.
+RELAX_P0_TOL = 1e-6
+RELAX_MAX_ROUNDS = 50
+# Tighter than tyssue's defaults (ftol 1e-6, gtol 1e-3), which leave a residual
+# interior force of ~1e-3.
+RELAX_MINIMIZE = {"options": {"ftol": 1e-12, "gtol": 1e-8, "maxiter": 20000}}
+
+
+def _apply_parameters(sheet, parameters: dict):
+    """Set ``parameters`` on ``sheet`` the way ``EulerSolver.initialize`` does:
+    scalars broadcast to every row, lists assigned row by row."""
+    for df_name, params in parameters.items():
+        df = getattr(sheet, df_name)
+        for key, value in params.items():
+            df[key] = value
+
+
+def _relax_key(dataset_path: Path, parameters: dict, gradient_args) -> str:
+    # Everything the relaxed mesh depends on; a change to any of it forces a redo.
+    # The mesh by content: opening it with tyssue touches its mtime.
+    mesh_hash = hashlib.sha256(Path(dataset_path).read_bytes()).hexdigest()
+    blob = json.dumps({
+        "mesh": mesh_hash, "minimize": RELAX_MINIMIZE,
+        "parameters": parameters, "gradient_args": gradient_args,
+        "effectors": RELAX_EFFECTORS, "ref": RELAX_REF_EFFECTOR,
+        "factory": RELAX_FACTORY, "tol": RELAX_P0_TOL,
+    }, sort_keys=True, default=float)
+    return hashlib.sha256(blob.encode()).hexdigest()
+
+
+def relax_mesh(dataset_path: Path, parameters: dict, out_path: Path,
+               gradient_args: dict | None = None) -> dict:
+    """Relax ``dataset_path`` under ``parameters`` with tyssue's ``QSSolver``
+    (conservative forces only, boundary fixed, no topology changes) and save the
+    result to ``out_path``. With ``gradient_args`` the face ``prefered_perimeter`` is
+    ``m*x + c`` at the current positions, iterated to a fixed point. Returns a summary."""
+    sys.path.insert(0, str(REPO))
+    from tyssue import Sheet
+    from tyssue.geometry.sheet_geometry import SheetGeometry
+    from tyssue.io.hdf5 import load_datasets, save_datasets
+    from tyssue.solvers.quasistatic import QSSolver
+    from vivarium_tyssue.maps.effectors_maps import EFFECTORS_MAP
+    from vivarium_tyssue.maps.factory_maps import FACTORY_MAP
+
+    sheet = Sheet("relax", load_datasets(str(dataset_path)))
+    SheetGeometry.update_all(sheet)
+    _apply_parameters(sheet, parameters)
+    model = FACTORY_MAP[RELAX_FACTORY](
+        [EFFECTORS_MAP[e] for e in RELAX_EFFECTORS], EFFECTORS_MAP[RELAX_REF_EFFECTOR])
+    solver = QSSolver()                    # no T1/T2: topology stays as in the mesh
+
+    def set_gradient_p0():
+        x = sheet.face_df["x"].to_numpy(dtype=float)
+        p0 = gradient_args["m"] * x + gradient_args["c"]
+        change = float(np.abs(p0 - sheet.face_df["prefered_perimeter"].to_numpy(float)).max())
+        sheet.face_df["prefered_perimeter"] = p0
+        return change
+
+    pos0 = sheet.vert_df[["x", "y"]].to_numpy(dtype=float).copy()
+    if gradient_args is not None:
+        set_gradient_p0()
+        SheetGeometry.update_all(sheet)
+    energy0 = float(model.compute_energy(sheet))
+    rounds, p0_change = 0, 0.0
+    for rounds in range(1, RELAX_MAX_ROUNDS + 1):
+        res = solver.find_energy_min(sheet, SheetGeometry, model, **copy.deepcopy(RELAX_MINIMIZE))
+        if not res.success:
+            raise RuntimeError(f"quasistatic relaxation failed: {res.message}")
+        if gradient_args is None:
+            break
+        p0_change = set_gradient_p0()
+        SheetGeometry.update_all(sheet)
+        if p0_change < RELAX_P0_TOL:
+            break
+    else:
+        raise RuntimeError(f"P0 did not settle in {RELAX_MAX_ROUNDS} rounds "
+                           f"(last change {p0_change:.2e})")
+
+    shift = np.hypot(*(sheet.vert_df[["x", "y"]].to_numpy(dtype=float) - pos0).T)
+    boundary = sheet.vert_df["boundary"].to_numpy() == 1
+    grad = model.compute_gradient(sheet)[["gx", "gy"]].to_numpy()
+    summary = {
+        "rounds": rounds, "p0_change": p0_change,
+        "energy_before": energy0, "energy_after": float(model.compute_energy(sheet)),
+        "max_grad_interior": float(np.abs(grad[~boundary]).max()),
+        "max_vertex_shift": float(shift.max()),
+        "max_boundary_shift": float(shift[boundary].max()),
+    }
+    tmp = out_path.with_suffix(".tmp.hf5")
+    if tmp.exists():
+        tmp.unlink()
+    save_datasets(str(tmp), sheet)
+    os.replace(tmp, out_path)              # atomic: parallel readers never see half a file
+    return summary
+
+
+def relaxed_mesh(scenario: str, dataset_path: Path, parameters: dict,
+                 gradient_args: dict | None = None) -> Path:
+    """Path of ``scenario``'s relaxed starting mesh, relaxing it first if it is
+    missing or was made from different inputs (mesh, parameters, gradient)."""
+    out = DATA_DIR / f"relaxed_{scenario}.hf5"
+    meta_path = DATA_DIR / f"relaxed_{scenario}.json"
+    key = _relax_key(dataset_path, parameters, gradient_args)
+    if out.exists() and meta_path.exists():
+        if json.loads(meta_path.read_text()).get("key") == key:
+            return out
+    summary = relax_mesh(dataset_path, parameters, out, gradient_args)
+    meta_path.write_text(json.dumps({"key": key, **summary}, indent=1))
+    print(f"[{scenario}] relaxed starting mesh -> {out.name}: "
+          f"E {summary['energy_before']:.4g} -> {summary['energy_after']:.4g}, "
+          f"max vertex shift {summary['max_vertex_shift']:.3g}, "
+          f"{summary['rounds']} round(s)", flush=True)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -193,8 +334,10 @@ def _base_spec(config: dict, dt: float) -> dict:
 
 
 def build_jamming_spec(dataset_path: Path) -> dict:
+    """Jamming spec, started from ``dataset_path`` relaxed under its own parameters."""
     cfg = _flat_config(dataset_path)
     cfg["parameters"]["face_df"]["prefered_perimeter"] = JAM_PREF_PERIM
+    cfg["eptm"] = str(relaxed_mesh("jamming", dataset_path, cfg["parameters"]))
     cfg["auto_reconnect"] = {"enabled": True, **JAM_DETACH}
     spec = _base_spec(cfg, JAM_DT)
     spec["Jamming"] = {
@@ -208,17 +351,45 @@ def build_jamming_spec(dataset_path: Path) -> dict:
     return spec
 
 
+def initial_face_x(dataset_path: Path) -> np.ndarray:
+    """Each face's centroid x in the input mesh, in face order -- the positions
+    EulerSolver sees at t = 0 (it runs the same ``SheetGeometry.update_all``)."""
+    sys.path.insert(0, str(REPO))
+    from tyssue import Sheet
+    from tyssue.geometry.sheet_geometry import SheetGeometry
+    from tyssue.io.hdf5 import load_datasets
+    sheet = Sheet("initial", load_datasets(str(dataset_path)))
+    SheetGeometry.update_all(sheet)
+    return sheet.face_df["x"].to_numpy(dtype=float)
+
+
+def initial_gradient(dataset_path: Path) -> list[float]:
+    """``prefered_perimeter = m*x + c`` per face at t = 0 (same formula as the
+    ParameterGradient process's ``linear`` gradient)."""
+    x = initial_face_x(dataset_path)
+    return (GRAD_ARGS["m"] * x + GRAD_ARGS["c"]).tolist()
+
+
 def build_gradient_spec(dataset_path: Path) -> dict:
+    """Gradient spec, started from ``dataset_path`` relaxed under the gradient (P0 =
+    m*x + c at the relaxed positions)."""
     cfg = _flat_config(dataset_path)
+    relaxed = relaxed_mesh("gradient", dataset_path, cfg["parameters"], GRAD_ARGS)
+    cfg["eptm"] = str(relaxed)
     cfg["auto_reconnect"] = {"enabled": True, **GRAD_DETACH}
-    # ParameterGradient ships deltas of its share of prefered_perimeter. Seeding
-    # that share at the baseline makes the gradient own the whole value, so
-    # prefered_perimeter becomes m*x + c rather than baseline + m*x + c.
+    # Start with the gradient in place: each cell's prefered_perimeter is m*x + c
+    # from t = 0, not the uniform baseline that the first ParameterGradient update
+    # would otherwise overwrite. ParameterGradient ships deltas of its share of
+    # prefered_perimeter; seeding that share (the gradient_ column) at the same
+    # values makes the gradient own the whole value -- m*x + c, not baseline +
+    # m*x + c -- and makes its first delta zero.
     face = cfg["parameters"]["face_df"]
-    face["gradient_prefered_perimeter"] = face["prefered_perimeter"]
+    p0 = initial_gradient(relaxed)
+    face["prefered_perimeter"] = p0
+    face["gradient_prefered_perimeter"] = list(p0)
     spec = _base_spec(cfg, GRAD_DT)
     spec["Gradient"] = {
-        "_type": "step",
+        "_type": "process",
         "address": "local:ParameterGradient",
         "config": {
             "gradient_type": "linear",
@@ -228,6 +399,7 @@ def build_gradient_spec(dataset_path: Path) -> dict:
         },
         "inputs": {"datasets": ["Tissue State"]},
         "outputs": {"behaviors": ["Behaviors"], "datasets": ["Tissue State"]},
+        "interval": GRAD_DT,
     }
     return spec
 
@@ -290,7 +462,7 @@ def save_history(history, path: Path, keep_frames: int | None = ARCHIVE_FRAMES):
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
-def main():
+def main(scenarios=("jamming", "gradient")):
     sys.path.insert(0, str(REPO))
     from vivarium_tyssue.core import build_core
 
@@ -298,7 +470,16 @@ def main():
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     core = build_core()
 
-    # ---- Jamming -------------------------------------------------------
+    if "jamming" in scenarios:
+        _run_jamming(core, dataset)
+    if "gradient" in scenarios:
+        _run_gradient(core, dataset)
+
+    print(f"\ndone — archives under {OUT_DIR}")
+    print("Run jamming_gradient_analysis.ipynb to visualise and analyse the runs.")
+
+
+def _run_jamming(core, dataset):
     jam_dir = OUT_DIR / "jamming"
     jam_dir.mkdir(parents=True, exist_ok=True)
     print(f"[jamming] running tf={JAM_TF} dt={JAM_DT} (python backend) ...", flush=True)
@@ -307,7 +488,8 @@ def main():
     save_history(hist_j, jam_dir / "history.hf5")
     print(f"[jamming] archived {len(list(hist_j.time_stamps))} frames -> {jam_dir / 'history.hf5'}", flush=True)
 
-    # ---- Gradient ------------------------------------------------------
+
+def _run_gradient(core, dataset):
     grad_dir = OUT_DIR / "gradient"
     grad_dir.mkdir(parents=True, exist_ok=True)
     print(f"[gradient] running tf={GRAD_TF} dt={GRAD_DT} (python backend) ...", flush=True)
@@ -316,9 +498,8 @@ def main():
     save_history(hist_g, grad_dir / "history.hf5")
     print(f"[gradient] archived {len(list(hist_g.time_stamps))} frames -> {grad_dir / 'history.hf5'}", flush=True)
 
-    print(f"\ndone — archives under {OUT_DIR}")
-    print("Run jamming_gradient_analysis.ipynb to visualise and analyse the runs.")
-
 
 if __name__ == "__main__":
-    main()
+    # `python jamming_gradient.py` runs both; name scenarios to run only those,
+    # e.g. `python jamming_gradient.py gradient`.
+    main(tuple(sys.argv[1:]) or ("jamming", "gradient"))

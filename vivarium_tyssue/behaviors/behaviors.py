@@ -380,7 +380,10 @@ def split_cells(sheet, manager, geom="SheetGeometry", cell_uids=(), prefered_are
     mother's face row, so both halves start from those targets. The mother keeps
     its unique_id; the daughter gets a fresh one and records the mother's in a
     ``mother_uid`` column (-1 for cells not born this way), so a process can hand
-    the daughter its mother's internal state rather than the copied row.
+    the daughter its mother's internal state rather than the copied row. A
+    ``generation`` column, when the face table has one, is incremented on the
+    mother before the split, so both halves carry the number of divisions in their
+    ancestry (e.g. as a replicative-age input to a cell-cycle model).
 
     Parameters
     ----------
@@ -401,6 +404,8 @@ def split_cells(sheet, manager, geom="SheetGeometry", cell_uids=(), prefered_are
             fd.loc[cell_id, "prefered_perimeter"] *= np.sqrt(
                 prefered_area / fd.loc[cell_id, "prefered_area"])
         fd.loc[cell_id, "prefered_area"] = prefered_area
+        if "generation" in fd.columns:
+            fd.loc[cell_id, "generation"] += 1
         daughter = cell_division(sheet, cell_id, geometry)
         fd = sheet.face_df
         if "mother_uid" not in fd.columns:

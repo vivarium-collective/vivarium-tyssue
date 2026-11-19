@@ -11,9 +11,16 @@ Demonstrates two things:
     A cell grows in G1 and G2, holds its size in S and M, and divides on entering
     M; daughters inherit their mother's state.
 
-One scenario, **growth**: the flat square sheet (``test_square.hf5``, 206 cells)
-with a free border (``model_factory``), growth factor GF = 1 in every cell, grown
-from 206 to ``TARGET_CELLS`` cells.
+Two scenarios on the flat square sheet (``test_square.hf5``, 206 cells) with a
+free border (``model_factory``):
+
+  * **growth**: growth factor GF = 1 in every cell, grown from 206 to
+    ``TARGET_CELLS`` cells.
+  * **senescence**: replicative aging. Each division lowers a lineage's mitogen
+    sensitivity, GF = ``SENESCENCE_DECAY`` ** generation, read per cell from the
+    ``generation`` face column that ``split_cells`` increments. The model's G1/S
+    switch turns that decline into permanent arrest (G0), so the tissue grows for
+    a few cycles and then stops at a fixed size.
 
 A freely growing vertex sheet eventually folds: faces pass through each other,
 since the model has no anti-self-intersection term. How large it gets first is set
@@ -33,7 +40,9 @@ single-cell behaviour, figures and GIFs are in ``sbml_cell_cycle_analysis.ipynb`
 Run from the repo's ``vivarium-tyssue`` conda env:
 
     cd Experiments/sbml_cell_cycle
-    python sbml_cell_cycle.py
+    python sbml_cell_cycle.py                         # growth
+    python sbml_cell_cycle.py senescence              # -> outputs/senescence/
+    python sbml_cell_cycle.py senescence --seed 2     # -> outputs/senescence_seed2/
 """
 from __future__ import annotations
 
@@ -45,6 +54,7 @@ for _var in ("OMP_NUM_THREADS", "OPENBLAS_NUM_THREADS", "MKL_NUM_THREADS",
              "VECLIB_MAXIMUM_THREADS"):
     os.environ.setdefault(_var, "1")
 
+import argparse  # noqa: E402
 import copy  # noqa: E402
 import random  # noqa: E402
 import shutil  # noqa: E402
@@ -114,6 +124,55 @@ TARGET_CELLS = 1200    # stop here: clean on 9/10 seeds at this viscosity (SWEEP
 FRAME_DT = 0.25        # snapshot (and fold check) interval
 TF = 80.0              # safety cap; the target is reached near t = 60
 
+# Senescence scenario: replicative aging. Every division multiplies a cell's
+# mitogen sensitivity by SENESCENCE_DECAY, GF = SENESCENCE_DECAY ** generation.
+# Full cycles need GF > ~0.072, so a generation-1 cell is already below threshold;
+# the commitment lag (decision ~3 h before mitotic exit) still lets most lineages
+# finish 2-3 divisions in all, i.e. ~5x the initial cells (mechanics-free check).
+SENESCENCE_DECAY = 0.05
+# Cyclin D/Cdk4-6 tracks GF within hours (0.185 at GF = 1, ~0.03 at GF = 0.05,
+# -> 0 below), while E2F and the other cyclins of an arrested cell damp out over
+# 60-80 h. So G0 is read from cyclin D alone, after the S/M/G2 rules: a cell
+# finishing a committed cycle is still labelled S, G2 or M. G0 cells never divide.
+G0_RULE = "G0: cyclin_D_Cdk4_6 < 0.04"
+# Growth in S and G2, not G1 and G2. Cyclin D falls within hours of each division,
+# so in a lineage's last (committed) cycle G1 already reads as G0. With G1 growth
+# such a cell skipped it, divided undergrown and left half-size daughters; the
+# sheet packed to mean area ~0.88 and folded at ~540 cells. S and G2 are read from
+# cyclins E and B, independent of the mitogen arm, so every dividing cell has
+# doubled its target. S + G2 is 56% of the GF = 1 cycle (13.2 of 23.6 h). A
+# committed cell whose G1 reads as G0 grows there too and reaches the cap sooner.
+# G0 cells grow too, up to SENESCENCE_MAX_AREA: senescent cells enlarge and
+# flatten. Without it the arrested cells sit packed at area ~0.75-0.85 and the late
+# divisions among them fold the sheet (4 of 5 seeds, at 445-1033 cells; every fold
+# was a just-divided pair against small G0 neighbours).
+SENESCENCE_GROWTH_PHASES = ["S", "G2", "G0"]
+SENESCENCE_GROWTH_RATE = np.log(2.0) / (0.56 * CYCLE_TIME)
+# Growth stops at twice the birth area. With the per-cell noise on vse and Vde, a
+# few cells (~0.1-0.3% here; ~3% of the GF = 1 run) fall into the skeleton model's
+# runaway state: cyclin E synthesis outruns its saturating degradation, E2F stays
+# on, and the cell never leaves S. S is a growth phase here, so without a cap such
+# a cell inflated to 13x its target and folded a plateaued sheet (seed 2).
+SENESCENCE_MAX_AREA = 2.0 * BIRTH_AREA
+# At GF = 0.05 the cycle's amplitude drops and cyclin A peaks right at the M
+# rule's 2.0. A cell that has just split, and its daughter with the same state,
+# then flips M -> G2 -> M and splits again 0.5-2.5 later: 3-5% of divisions, all
+# spurious (the GF = 1 run's shortest cycle is 15.5). No real cycle is this short.
+SENESCENCE_MIN_DIVISION_INTERVAL = 0.5 * CYCLE_TIME
+SCENARIOS = {
+    "growth": {"phases": PHASES, "growth_phases": GROWTH_PHASES,
+               "growth_rate": GROWTH_RATE, "target": TARGET_CELLS, "tf": TF},
+    # Run on well past the last division to show the plateau; the cap only guards
+    # against a runaway (the free sheet folds near ~1500 cells).
+    "senescence": {"phases": PHASES + [G0_RULE], "growth_phases": SENESCENCE_GROWTH_PHASES,
+                   "growth_rate": SENESCENCE_GROWTH_RATE, "target": 1500, "tf": 120.0},
+}
+
+
+def phase_names(scenario: str = SCENARIO) -> list:
+    """SBMLCellCycle.phase_names for a scenario: the default phase, then the rules'."""
+    return ["G1"] + [r.split(":")[0].strip() for r in SCENARIOS[scenario]["phases"]]
+
 # A cell counts as cycling if it divided within this long (sim time).
 CYCLING_WINDOW = 1.5 * CYCLE_TIME
 
@@ -141,7 +200,7 @@ def state_columns():
     return [f"cc_{s}" for s in ids] + ["cc_phase", "cc_last_division"]
 
 
-def solver_config(dataset_path: Path) -> dict:
+def solver_config(dataset_path: Path, scenario: str = SCENARIO) -> dict:
     face_params = {
         "area_elasticity": 1.0,
         "prefered_area": 1.0,
@@ -154,6 +213,8 @@ def solver_config(dataset_path: Path) -> dict:
     # Declared so the History records every cell's model state (and daughters
     # inherit it through the copied face row).
     face_params.update({col: 0.0 for col in state_columns()})
+    if scenario == "senescence":
+        face_params["generation"] = 0.0   # incremented on both halves by split_cells
     return {
         "name": "Growing Flat Square",
         "eptm": str(dataset_path),
@@ -180,28 +241,38 @@ def solver_config(dataset_path: Path) -> dict:
     }
 
 
-def cell_cycle_config() -> dict:
-    return {
+def cell_cycle_config(scenario: str = SCENARIO) -> dict:
+    config = {
         "model_source": str(MODEL_SBML),
         "time_scale": TIME_SCALE,
         "parameters": {"GF": GROWTH_FACTOR},
-        "phases": PHASES,
-        "growth_phases": GROWTH_PHASES,
+        "phases": SCENARIOS[scenario]["phases"],
+        "growth_phases": SCENARIOS[scenario]["growth_phases"],
         "division_phase": DIVISION_PHASE,
-        "growth_rate": GROWTH_RATE,
+        "growth_rate": SCENARIOS[scenario]["growth_rate"],
         "birth_area": BIRTH_AREA,
         "parameter_noise": PARAMETER_NOISE,
         "geom": "SheetGeometry",
         "initial_state": "limit_cycle",
     }
+    if scenario == "senescence":
+        # GF = SENESCENCE_DECAY ** generation  (exponential_gradient: a**x + c).
+        config.update({
+            "input_columns": {"GF": "generation"},
+            "input_functions": {"GF": "exponential"},
+            "input_args": {"GF": {"a": SENESCENCE_DECAY, "c": 0.0}},
+            "max_prefered_area": SENESCENCE_MAX_AREA,
+            "min_division_interval": SENESCENCE_MIN_DIVISION_INTERVAL,
+        })
+    return config
 
 
-def build_spec(dataset_path: Path) -> dict:
+def build_spec(dataset_path: Path, scenario: str = SCENARIO) -> dict:
     return {
         "Tyssue": {
             "_type": "process",
             "address": "local:EulerSolver",
-            "config": solver_config(dataset_path),
+            "config": solver_config(dataset_path, scenario),
             "inputs": {"behaviors": ["Behaviors"], "global_time": ["global_time"]},
             "outputs": {
                 "datasets": ["Tissue State"],
@@ -213,7 +284,7 @@ def build_spec(dataset_path: Path) -> dict:
         "Cell Cycle": {
             "_type": "process",
             "address": "local:SBMLCellCycle",
-            "config": cell_cycle_config(),
+            "config": cell_cycle_config(scenario),
             "inputs": {"global_time": ["global_time"], "datasets": ["Tissue State"]},
             "outputs": {"behaviors": ["Behaviors"]},
             "interval": DT,
@@ -304,10 +375,11 @@ def save_history(datasets: dict, path: Path) -> int:
     return len(datasets["face"]["time"].unique())
 
 
-def summarise(datasets: dict) -> pd.DataFrame:
-    """Per recorded time: cells, divisions so far, cycling cells, area, strain and
-    the tissue's area."""
+def summarise(datasets: dict, scenario: str = SCENARIO) -> pd.DataFrame:
+    """Per recorded time: cells, divisions so far, cycling cells, cells per phase,
+    area, strain, the tissue's area and (senescence) the generation reached."""
     faces = datasets["face"]
+    names = phase_names(scenario)
     rows = []
     n0 = None
     for t, fd in faces.groupby("time"):
@@ -316,39 +388,56 @@ def summarise(datasets: dict) -> pd.DataFrame:
         n = len(fd)
         n0 = n if n0 is None else n0
         cycling = (t - fd["cc_last_division"]) < CYCLING_WINDOW
-        rows.append({
+        row = {
             "time": t, "n_cells": n, "n_cycling": int(cycling.sum()),
             "cycling_fraction": float(cycling.mean()),
             "n_growing": int(fd["cc_phase"].isin(
-                [PHASE_NAMES.index(p) for p in GROWTH_PHASES]).sum()),
+                [names.index(p) for p in SCENARIOS[scenario]["growth_phases"]]).sum()),
             "divisions": n - n0,
             "mean_area": float(fd["area"].mean()),
             "mean_strain": float((fd["area"] / fd["prefered_area"]).mean()),
             "tissue_area": float(fd["area"].sum()),
-        })
+        }
+        row.update({f"n_{p}": int((fd["cc_phase"] == i).sum()) for i, p in enumerate(names)})
+        if "generation" in fd.columns:
+            row["mean_generation"] = float(fd["generation"].mean())
+            row["max_generation"] = int(fd["generation"].max())
+        rows.append(row)
     return pd.DataFrame(rows)
+
+
+def output_dir(scenario: str = SCENARIO, seed: int = SEED) -> Path:
+    """outputs/<scenario> for the default seed, outputs/<scenario>_seed<N> otherwise."""
+    return OUT_DIR / (scenario if seed == SEED else f"{scenario}_seed{seed}")
 
 
 def main():
     sys.path.insert(0, str(REPO))
     from vivarium_tyssue.core import build_core
 
-    out = OUT_DIR / SCENARIO
+    parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
+    parser.add_argument("scenario", nargs="?", default=SCENARIO, choices=sorted(SCENARIOS))
+    parser.add_argument("--seed", type=int, default=SEED)
+    args = parser.parse_args()
+    scenario, cfg = args.scenario, SCENARIOS[args.scenario]
+
+    out = output_dir(scenario, args.seed)
     out.mkdir(parents=True, exist_ok=True)
     core = build_core()
-    seed_all()
-    print(f"[{SCENARIO}] target {TARGET_CELLS} cells, viscosity {VISCOSITY}, dt {DT}, "
-          f"time_scale={TIME_SCALE:.3f}", flush=True)
-    datasets, proc, eptm, outcome = run(core, build_spec(ensure_dataset()))
+    seed_all(args.seed)
+    print(f"[{scenario}] seed {args.seed}, target {cfg['target']} cells, tf {cfg['tf']}, "
+          f"viscosity {VISCOSITY}, dt {DT}, time_scale={TIME_SCALE:.3f}", flush=True)
+    datasets, proc, eptm, outcome = run(core, build_spec(ensure_dataset(), scenario),
+                                        target=cfg["target"], tf=cfg["tf"])
     n_frames = save_history(datasets, out / "history.hf5")
-    summary = summarise(datasets)
+    summary = summarise(datasets, scenario)
     summary.to_csv(out / "summary.csv", index=False)
 
     report = eptm.find_intersections(strict=True)
     last = summary.iloc[-1]
-    print(f"[{SCENARIO}] stopped ({outcome}) at t={last['time']:g}; {n_frames} frames -> "
+    print(f"[{scenario}] stopped ({outcome}) at t={last['time']:g}; {n_frames} frames -> "
           f"{out / 'history.hf5'}; divisions emitted {proc.n_divisions} "
-          f"(skipped {proc.n_skipped}); cells {int(summary.iloc[0]['n_cells'])} -> "
+          f"(skipped {proc.n_skipped}, refractory {proc.n_refractory}); cells {int(summary.iloc[0]['n_cells'])} -> "
           f"{int(last['n_cells'])}; final mesh: {len(report.folded)} folded, "
           f"{len(report.contained)} invading vertices, {len(report.overlaps)} "
           f"overlapping pairs", flush=True)

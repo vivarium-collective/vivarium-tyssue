@@ -241,14 +241,14 @@ write(
     },
 )
 
-# --- 5. gradient (stochastic + parameter gradient step) ----------------------
+# --- 5. gradient (stochastic + parameter gradient process) ----------------------
 gradient_flat = flat_config()
 # run_test_gradient tweaks: migration source at face 96, suppress my.
 gradient_flat["parameters"]["face_df"]["migration_strength"] = [0.1 if i == 96 else 0.0 for i in range(206)]
 gradient_flat["parameters"]["face_df"]["my"] = 0.0
 write(
     "gradient",
-    description="Flat sheet with stochastic line tension and a ParameterGradient step that imposes a "
+    description="Flat sheet with stochastic line tension and a ParameterGradient process that imposes a "
     "linear spatial gradient of preferred perimeter along x.",
     tags=["tissue", "mechanics"],
     processes=["EulerSolver", "StochasticLineTension", "ParameterGradient"],
@@ -256,7 +256,7 @@ write(
         "Tyssue": tyssue_node(gradient_flat),
         "Stochastic": stochastic_node(),
         "Gradient": {
-            "_type": "step",
+            "_type": "process",
             "address": "local:ParameterGradient",
             "config": {
                 "gradient_type": "linear",
@@ -266,30 +266,32 @@ write(
             },
             "inputs": {"datasets": ["Tissue State"]},
             "outputs": {"behaviors": ["Behaviors"], "datasets": ["Tissue State"]},
+            "interval": INTERVAL,
         },
         **base_stores(),
     },
 )
 
-# --- 6. anisotropic tension step ---------------------------------------------
+# --- 6. anisotropic tension process ---------------------------------------------
 aniso_flat = flat_config()
 # run_test_anisotropic overrides: factory model_factory, prefered_perimeter 3.4.
 aniso_flat["factory"] = "model_factory"
 aniso_flat["parameters"]["face_df"]["prefered_perimeter"] = 3.4
 write(
     "anisotropic",
-    description="Flat sheet with an AnisotropicTension step that biases line tension along a chosen "
+    description="Flat sheet with an AnisotropicTension process that biases line tension along a chosen "
     "axis, driving oriented (anisotropic) tissue elongation.",
     tags=["tissue", "mechanics"],
     processes=["EulerSolver", "AnisotropicTension"],
     state={
         "Tyssue": tyssue_node(aniso_flat),
         "Anisotropic": {
-            "_type": "step",
+            "_type": "process",
             "address": "local:AnisotropicTension",
             "config": {"axes": ["x", "y"], "tension_values": [0.0, 0.2]},
             "inputs": {"datasets": ["Tissue State"]},
             "outputs": {"behaviors": ["Behaviors"], "datasets": ["Tissue State"]},
+            "interval": INTERVAL,
         },
         **base_stores(),
     },

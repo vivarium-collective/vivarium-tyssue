@@ -51,8 +51,8 @@ Four discrete-event scenarios exercising the rate-based `CellDivisions` /
   `gillespie_restart` writes a checkpoint of its own, so the chain can be extended
   by pointing a further run at it. In the current runs `gillespie` has already
   settled by its second half: `pc` relaxes 150 → ~100 by `t` ≈ 36 and stays near
-  100 to `tf=72`. The restart opens on that composition (`pc` 99) and stays flat
-  (`pc` 96–111 over the whole run), so one checkpoint is enough for a stationary
+  100 to `tf=72`. The restart opens on that composition (`pc` 103) and stays flat
+  (`pc` 90–111 over the whole run), so one checkpoint is enough for a stationary
   start.
 
 `CellDivisions` is the renamed, rate-based successor of the old `TestRegulations`

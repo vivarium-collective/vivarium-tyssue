@@ -168,6 +168,21 @@ def test_split_cells_divides_at_once_and_restores_targets():
     assert (fd.loc[~daughter, "mother_uid"] == -1).all()
 
 
+def test_split_cells_increments_generation_on_both_halves():
+    sheet = _sheet()
+    sheet.face_df["generation"] = 0.0
+    uid = int(sheet.face_df.loc[0, "unique_id"])
+    split_cells(sheet, None, geom=SheetGeometry, cell_uids=[uid])
+    fd = sheet.face_df
+    halves = (fd["unique_id"] == uid) | (fd["mother_uid"] == uid)
+    assert fd.loc[halves, "generation"].tolist() == [1.0, 1.0]
+    assert (fd.loc[~halves, "generation"] == 0.0).all()
+    # No generation column -> none is created.
+    sheet = _sheet()
+    split_cells(sheet, None, geom=SheetGeometry, cell_uids=[uid])
+    assert "generation" not in sheet.face_df.columns
+
+
 def test_split_cells_resolves_every_uid_after_reindexing():
     sheet = _sheet()
     uids = sheet.face_df["unique_id"].tolist()

@@ -2,8 +2,9 @@
 
 Running COPASI or roadrunner once per cell is far too slow for a vertex model with
 hundreds to thousands of cells. Instead the SBML is parsed **once**: every kinetic
-law, assignment rule and rate rule is translated from its MathML AST into Python
-source, and the result is compiled into a single function
+law, assignment rule and rate rule is translated from its MathML AST into a tree
+of numpy closures (no Python source is generated or executed, so an SBML file can
+only describe math), composed into a single function
 
     rhs(Y, P, t=0.0) -> dY
 
@@ -25,6 +26,7 @@ something other than the SBML.
 from __future__ import annotations
 
 import math
+import operator
 from pathlib import Path
 
 import numpy as np
@@ -151,10 +153,9 @@ class VectorizedSBML:
         self._rate_rules = [
             (r.getVariable(), r.getMath()) for r in model.getListOfRules() if r.isRate()
         ]
-        self.source = self._generate_source()
-        namespace = {"np": np, "math": math}
-        exec(compile(self.source, f"<sbml:{self.model_id}>", "exec"), namespace)
-        self._rhs = namespace["_rhs"]
+        self._rhs = self._build_rhs()
+        # Rendered now: the AST nodes belong to ``doc``, which is freed after __init__.
+        self._equations = self._equation_text()
 
     # ------------------------------------------------------------------ loading
     @staticmethod
@@ -239,110 +240,139 @@ class VectorizedSBML:
             visit(var, frozenset())
         return ordered
 
-    # --------------------------------------------------------------- codegen
+    # --------------------------------------------------------------- compile
+    # Every expression compiles to a closure ``f(Y, P, t, A)``: ``Y`` the state,
+    # ``P`` the constants, ``t`` the time and ``A`` the assignment-rule values.
     def _symbol(self, name, locals_):
         if name in locals_:
-            return f"P[{locals_[name]!r}]"
+            key = locals_[name]
+            return lambda Y, P, t, A: P[key]
         if name in self._state_index:
-            return f"Y[{self._state_index[name]}]"
+            row = self._state_index[name]
+            return lambda Y, P, t, A: Y[row]
         if name in self._assigned:
-            return f"_a_{self._assigned[name]}"
+            slot = self._assigned[name]
+            return lambda Y, P, t, A: A[slot]
         if name in self._defaults:
-            return f"P[{name!r}]"
+            return lambda Y, P, t, A: P[name]
         raise KeyError(f"unknown SBML symbol {name!r}")
+
+    @staticmethod
+    def _const(value):
+        return lambda Y, P, t, A: value
+
+    @staticmethod
+    def _fold(op, fs):
+        """Left fold of ``op`` over the children, as Python evaluates ``a + b + c``."""
+        first, rest = fs[0], fs[1:]
+
+        def f(Y, P, t, A):
+            acc = first(Y, P, t, A)
+            for g in rest:
+                acc = op(acc, g(Y, P, t, A))
+            return acc
+        return f
+
+    @staticmethod
+    def _call(func, *fs):
+        return lambda Y, P, t, A: func(*(g(Y, P, t, A) for g in fs))
+
+    @staticmethod
+    def _reduce(func, fs):
+        return lambda Y, P, t, A: func([g(Y, P, t, A) for g in fs])
 
     def _expr(self, node, locals_=None):
         locals_ = locals_ or {}
         t = node.getType()
         kids = [node.getChild(i) for i in range(node.getNumChildren())]
-        e = lambda n: self._expr(n, locals_)  # noqa: E731
+        fs = [self._expr(k, locals_) for k in kids]
+        const, call, fold, reduce_ = self._const, self._call, self._fold, self._reduce
 
         if t in (libsbml.AST_INTEGER,):
-            return repr(float(node.getInteger()))
+            return const(float(node.getInteger()))
         if t in (libsbml.AST_REAL, libsbml.AST_REAL_E, libsbml.AST_RATIONAL):
-            return repr(float(node.getReal()))
+            return const(float(node.getReal()))
         if t == libsbml.AST_NAME:
             return self._symbol(node.getName(), locals_)
         if t == libsbml.AST_NAME_TIME:
-            return "t"
+            return lambda Y, P, t, A: t
         if t == libsbml.AST_NAME_AVOGADRO:
-            return repr(6.02214076e23)
+            return const(6.02214076e23)
         if t == libsbml.AST_CONSTANT_PI:
-            return repr(math.pi)
+            return const(math.pi)
         if t == libsbml.AST_CONSTANT_E:
-            return repr(math.e)
+            return const(math.e)
         if t == libsbml.AST_CONSTANT_TRUE:
-            return "True"
+            return const(True)
         if t == libsbml.AST_CONSTANT_FALSE:
-            return "False"
+            return const(False)
 
         if t == libsbml.AST_PLUS:
-            return "(" + " + ".join(e(k) for k in kids) + ")" if kids else "0.0"
+            return fold(operator.add, fs) if fs else const(0.0)
         if t == libsbml.AST_MINUS:
-            if len(kids) == 1:
-                return f"(-{e(kids[0])})"
-            return f"({e(kids[0])} - {e(kids[1])})"
+            if len(fs) == 1:
+                return call(operator.neg, fs[0])
+            return call(operator.sub, fs[0], fs[1])
         if t == libsbml.AST_TIMES:
-            return "(" + " * ".join(e(k) for k in kids) + ")" if kids else "1.0"
+            return fold(operator.mul, fs) if fs else const(1.0)
         if t == libsbml.AST_DIVIDE:
-            return f"({e(kids[0])} / {e(kids[1])})"
+            return call(operator.truediv, fs[0], fs[1])
         if t in (libsbml.AST_POWER, libsbml.AST_FUNCTION_POWER):
-            return f"({e(kids[0])} ** {e(kids[1])})"
+            return call(operator.pow, fs[0], fs[1])
 
         unary = {
-            libsbml.AST_FUNCTION_EXP: "np.exp",
-            libsbml.AST_FUNCTION_LN: "np.log",
-            libsbml.AST_FUNCTION_ABS: "np.abs",
-            libsbml.AST_FUNCTION_FLOOR: "np.floor",
-            libsbml.AST_FUNCTION_CEILING: "np.ceil",
-            libsbml.AST_FUNCTION_SIN: "np.sin",
-            libsbml.AST_FUNCTION_COS: "np.cos",
-            libsbml.AST_FUNCTION_TAN: "np.tan",
-            libsbml.AST_FUNCTION_TANH: "np.tanh",
-            libsbml.AST_FUNCTION_ARCTAN: "np.arctan",
+            libsbml.AST_FUNCTION_EXP: np.exp,
+            libsbml.AST_FUNCTION_LN: np.log,
+            libsbml.AST_FUNCTION_ABS: np.abs,
+            libsbml.AST_FUNCTION_FLOOR: np.floor,
+            libsbml.AST_FUNCTION_CEILING: np.ceil,
+            libsbml.AST_FUNCTION_SIN: np.sin,
+            libsbml.AST_FUNCTION_COS: np.cos,
+            libsbml.AST_FUNCTION_TAN: np.tan,
+            libsbml.AST_FUNCTION_TANH: np.tanh,
+            libsbml.AST_FUNCTION_ARCTAN: np.arctan,
         }
         if t in unary:
-            return f"{unary[t]}({e(kids[0])})"
+            return call(unary[t], fs[0])
         if t == libsbml.AST_FUNCTION_LOG:
             # log(x) is base 10; log(base, x) has the base as the first child.
-            if len(kids) == 1:
-                return f"np.log10({e(kids[0])})"
-            return f"(np.log({e(kids[1])}) / np.log({e(kids[0])}))"
+            if len(fs) == 1:
+                return call(np.log10, fs[0])
+            return call(lambda base, x: np.log(x) / np.log(base), fs[0], fs[1])
         if t == libsbml.AST_FUNCTION_ROOT:
-            if len(kids) == 1:
-                return f"np.sqrt({e(kids[0])})"
-            return f"({e(kids[1])} ** (1.0 / {e(kids[0])}))"
+            if len(fs) == 1:
+                return call(np.sqrt, fs[0])
+            return call(lambda degree, x: x ** (1.0 / degree), fs[0], fs[1])
         if t == getattr(libsbml, "AST_FUNCTION_MAX", None):
-            return "np.maximum.reduce([" + ", ".join(e(k) for k in kids) + "])"
+            return reduce_(np.maximum.reduce, fs)
         if t == getattr(libsbml, "AST_FUNCTION_MIN", None):
-            return "np.minimum.reduce([" + ", ".join(e(k) for k in kids) + "])"
+            return reduce_(np.minimum.reduce, fs)
 
         if t == libsbml.AST_FUNCTION_PIECEWISE:
             # (value, condition) pairs, then an optional otherwise value.
-            otherwise = e(kids[-1]) if len(kids) % 2 else "np.nan"
-            expr = otherwise
-            for i in range(len(kids) // 2 * 2 - 2, -1, -2):
-                expr = f"np.where({e(kids[i + 1])}, {e(kids[i])}, {expr})"
+            expr = fs[-1] if len(fs) % 2 else const(np.nan)
+            for i in range(len(fs) // 2 * 2 - 2, -1, -2):
+                expr = call(np.where, fs[i + 1], fs[i], expr)
             return expr
 
         relational = {
-            libsbml.AST_RELATIONAL_EQ: "==", libsbml.AST_RELATIONAL_NEQ: "!=",
-            libsbml.AST_RELATIONAL_GT: ">", libsbml.AST_RELATIONAL_GEQ: ">=",
-            libsbml.AST_RELATIONAL_LT: "<", libsbml.AST_RELATIONAL_LEQ: "<=",
+            libsbml.AST_RELATIONAL_EQ: operator.eq, libsbml.AST_RELATIONAL_NEQ: operator.ne,
+            libsbml.AST_RELATIONAL_GT: operator.gt, libsbml.AST_RELATIONAL_GEQ: operator.ge,
+            libsbml.AST_RELATIONAL_LT: operator.lt, libsbml.AST_RELATIONAL_LEQ: operator.le,
         }
         if t in relational:
             op = relational[t]
-            pairs = [f"({e(a)} {op} {e(b)})" for a, b in zip(kids, kids[1:])]
-            return pairs[0] if len(pairs) == 1 else "np.logical_and.reduce([" + ", ".join(pairs) + "])"
+            pairs = [call(op, a, b) for a, b in zip(fs, fs[1:])]
+            return pairs[0] if len(pairs) == 1 else reduce_(np.logical_and.reduce, pairs)
         logical = {
-            libsbml.AST_LOGICAL_AND: "np.logical_and.reduce",
-            libsbml.AST_LOGICAL_OR: "np.logical_or.reduce",
-            libsbml.AST_LOGICAL_XOR: "np.logical_xor.reduce",
+            libsbml.AST_LOGICAL_AND: np.logical_and.reduce,
+            libsbml.AST_LOGICAL_OR: np.logical_or.reduce,
+            libsbml.AST_LOGICAL_XOR: np.logical_xor.reduce,
         }
         if t in logical:
-            return f"{logical[t]}([" + ", ".join(e(k) for k in kids) + "])"
+            return reduce_(logical[t], fs)
         if t == libsbml.AST_LOGICAL_NOT:
-            return f"np.logical_not({e(kids[0])})"
+            return call(np.logical_not, fs[0])
 
         if t == libsbml.AST_FUNCTION_DELAY:
             raise NotImplementedError("SBML delay() is not supported")
@@ -350,30 +380,40 @@ class VectorizedSBML:
             f"unsupported SBML math: {libsbml.formulaToL3String(node)!r} (AST type {t})"
         )
 
-    def _generate_source(self):
+    def _build_rhs(self):
         self._assigned = {var: i for i, (var, _) in enumerate(self._assignment_rules)}
-        lines = ["def _rhs(Y, P, t=0.0):"]
-        for var, math_ in self._assignment_rules:
-            lines.append(f"    _a_{self._assigned[var]} = {self._expr(math_)}  # {var}")
-        lines.append("    dY = np.zeros(Y.shape, dtype=float)")
-        for i, (rid, math_, locals_, stoich) in enumerate(self._reactions):
-            lines.append(f"    _r{i} = {self._expr(math_, locals_)}  # {rid}")
+        assignments = [self._expr(math_) for _, math_ in self._assignment_rules]
+        reactions = []
+        for rid, math_, locals_, stoich in self._reactions:
+            terms = []
             for sid, coef in stoich.items():
                 if sid not in self._state_index or coef == 0.0:
                     continue
-                scale = coef
                 sp = self._species_meta[sid]
-                if not sp.getHasOnlySubstanceUnits():
-                    # Reaction rates are amount/time; convert to concentration/time.
-                    lines.append(
-                        f"    dY[{self._state_index[sid]}] += {scale!r} * _r{i} / P[{sp.getCompartment()!r}]"
-                    )
-                else:
-                    lines.append(f"    dY[{self._state_index[sid]}] += {scale!r} * _r{i}")
-        for var, math_ in self._rate_rules:
-            lines.append(f"    dY[{self._state_index[var]}] = {self._expr(math_)}  # rate rule {var}")
-        lines.append("    return dY")
-        return "\n".join(lines) + "\n"
+                # Reaction rates are amount/time; concentration species divide by
+                # their compartment size.
+                compartment = None if sp.getHasOnlySubstanceUnits() else sp.getCompartment()
+                terms.append((self._state_index[sid], coef, compartment))
+            reactions.append((self._expr(math_, locals_), terms))
+        rate_rules = [(self._state_index[var], self._expr(math_))
+                      for var, math_ in self._rate_rules]
+
+        def _rhs(Y, P, t=0.0):
+            A = []
+            for f in assignments:      # dependency order: each sees the earlier ones
+                A.append(f(Y, P, t, A))
+            dY = np.zeros(Y.shape, dtype=float)
+            for f, terms in reactions:
+                rate = f(Y, P, t, A)
+                for row, coef, compartment in terms:
+                    if compartment is None:
+                        dY[row] += coef * rate
+                    else:
+                        dY[row] += coef * rate / P[compartment]
+            for row, f in rate_rules:
+                dY[row] = f(Y, P, t, A)
+            return dY
+        return _rhs
 
     # ------------------------------------------------------------------- API
     @property
@@ -383,6 +423,21 @@ class VectorizedSBML:
     def index(self, state_id):
         """Row of ``state_id`` in ``Y``."""
         return self._state_index[state_id]
+
+    def equations(self):
+        """The compiled model as text, for reading: assignment rules, then each
+        reaction (with the species it changes), then rate rules, in SBML infix
+        syntax after function definitions are expanded."""
+        return self._equations
+
+    def _equation_text(self):
+        text = libsbml.formulaToL3String
+        lines = [f"{var} := {text(math_)}" for var, math_ in self._assignment_rules]
+        for rid, math_, _, stoich in self._reactions:
+            change = ", ".join(f"{coef:+g} {sid}" for sid, coef in stoich.items())
+            lines.append(f"{rid} [{change}]: {text(math_)}")
+        lines += [f"d{var}/dt = {text(math_)}" for var, math_ in self._rate_rules]
+        return "\n".join(lines)
 
     def initial_state(self):
         """The SBML initial values, shape ``(n_state,)``."""

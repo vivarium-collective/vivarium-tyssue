@@ -64,6 +64,13 @@ def test_rhs_matches_hand_written_model(model):
     np.testing.assert_allclose(model.rhs(Y, P), gerard_goldbeter_rhs(Y, P), rtol=1e-12)
 
 
+def test_equations_listing_outlives_the_sbml_document(model):
+    # The libsbml document is freed after __init__; the listing must not touch it.
+    lines = model.equations().splitlines()
+    assert len(lines) == 12
+    assert lines[0].startswith("R1_Synthesis_of_cyclin_D_Cdk4_6 [+1 cyclin_D_Cdk4_6]: ")
+
+
 def test_per_cell_parameter_arrays_broadcast(model):
     Y = np.tile(model.initial_state()[:, None], (1, 3))
     gf = np.array([0.0, 0.5, 2.0])
@@ -175,6 +182,12 @@ def test_phase_names_and_rule_order():
     assert [proc.phase_names[c] for c in proc.classify(Y)] == ["G1", "S", "M", "G2"]
 
 
+def test_growth_phases_replace_the_default():
+    # A non-empty list "_default" would be concatenated with the configured list.
+    assert _process(growth_phases=["S", "G2"]).growth_codes == [1, 3]
+    assert _process().growth_codes == [0, 3]          # default: G1 and G2
+
+
 def test_bad_phase_rules_raise():
     with pytest.raises(KeyError, match="cyclin_Z"):
         _process(phases=["S: cyclin_Z > 1"])
@@ -182,6 +195,31 @@ def test_bad_phase_rules_raise():
         _process(phases=["cyclin_E_Cdk2 > 1"])
     with pytest.raises(ValueError, match="not one of"):
         _process(phases=["S: cyclin_E_Cdk2 > 1"])      # no M phase to divide in
+
+
+@pytest.mark.parametrize("rule", [
+    "S: __import__('os').system('touch /tmp/pwned') > 0",
+    "S: (lambda: 1)() > 0",
+    "S: cyclin_E_Cdk2.__class__ > 1",
+    "S: cyclin_E_Cdk2 > 1 | cyclin_A_Cdk2 > 1",
+    "S: cyclin_E_Cdk2 > cyclin_A_Cdk2",
+])
+def test_phase_rules_are_parsed_not_evaluated(rule):
+    """A rule is only ever 'variable <op> number' joined by '&'; anything else is
+    refused before it could run (compose-api runs user-supplied configs)."""
+    with pytest.raises(ValueError, match="variable <op> number"):
+        _process(phases=[rule] + PHASES[1:])
+
+
+def test_sbml_and_phase_rules_never_execute_code():
+    """Neither the SBML compiler nor the phase rules generate or run Python source."""
+    import inspect
+    import vivarium_tyssue.processes.cell_cycle as cell_cycle
+    import vivarium_tyssue.sbml.vectorized as vectorized
+    for module in (vectorized, cell_cycle):
+        source = inspect.getsource(module)
+        for call in ("exec(", "eval(", "compile("):
+            assert call not in source.replace("re.compile(", ""), (module.__name__, call)
 
 
 def test_one_split_per_cycle_on_entering_m():
@@ -321,6 +359,52 @@ def test_ratio_input_column():
     faces = _faces(3).assign(area=[2.0, 2.0, 0.5], prefered_area=[1.0, 2.0, 1.0])
     proc._sync(faces, 0.0)
     np.testing.assert_allclose(proc._params(faces, proc.factors)["GF"], [2.0, 1.0, 0.5])
+
+
+def test_replicative_age_input_arrests_older_cells():
+    # GF = 0.05 ** generation (the senescence demo): generation 0 keeps cycling,
+    # generation 2 (GF 0.0025) finishes the cycle it is in, then stays in G0.
+    proc = _process(phases=PHASES + ["G0: cyclin_D_Cdk4_6 < 0.04"],
+                    input_columns={"GF": "generation"}, input_functions={"GF": "exponential"},
+                    input_args={"GF": {"a": 0.05, "c": 0.0}})
+    faces = _faces(2).assign(generation=[0.0, 2.0])
+    proc._sync(faces, 0.0)
+    np.testing.assert_allclose(proc._params(faces, proc.factors)["GF"], [1.0, 0.0025])
+    _run(proc, faces, 300)
+    later = _run(proc, faces, 600, t0=15.0)
+    assert {uid for _, uid in later} == {0}
+    assert proc.phase_names[proc.phase[1]] == "G0"
+
+
+def test_max_prefered_area_stops_growth():
+    proc = _process(phases=PHASES, max_prefered_area=2.0, initial_state="sbml")
+    faces = _faces(2).assign(prefered_area=[1.0, 2.0])
+    grown = set()
+    for k in range(200):
+        out = proc.update({"datasets": {"face_df": faces}, "global_time": k * 0.05}, 0.05)
+        for b in out["behaviors"]:
+            if b["func"] == "grow_cells":
+                grown |= set(b["cell_uids"])
+    assert grown == {0}
+
+
+def test_min_division_interval_blocks_a_second_split():
+    # At low GF cyclin A can peak right at the M rule's 2.0: a cell (and its
+    # daughter, born with the same state) leaves M for G2 and re-enters it. A cell
+    # that divided within min_division_interval must not split again; a founding
+    # cell, whose last_division is only the start time, still can.
+    proc = _process(min_division_interval=5.0)
+    faces = _faces(2)
+    _run(proc, faces, 1, dt=1e-4)
+    m_state = dict(zip(SPECIES, [0.03, 0.5, 0.5, 1.9, 1.2, 0.01]))
+    proc.Y[:] = np.array([[m_state[s]] * 2 for s in SPECIES])
+    assert [proc.phase_names[c] for c in proc.classify(proc.Y)] == ["M", "M"]
+    proc.phase[:] = proc.phase_names.index("G2")
+    proc.last_division[:] = [0.6, 0.0]          # uid 0 divided at 0.6; uid 1 never
+    out = proc.update({"datasets": {"face_df": faces}, "global_time": 1.0}, 1e-4)
+    split = [b for b in out["behaviors"] if b["func"] == "split_cells"]
+    assert [b["cell_uids"] for b in split] == [[1]]
+    assert proc.n_refractory == 1
 
 
 def test_state_columns_are_written():
