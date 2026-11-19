@@ -52,3 +52,8 @@ Notebooks/*.gif
 # Local-only experiments, kept off GitHub
 Experiments/tumor_coupling/
 Experiments/t3_incorporation/
+
+# Backups of earlier runs (outputs/_<label>_<date>/) and editor/merge backups: local only
+Experiments/*/outputs/_*/
+*.bak
+*.orig

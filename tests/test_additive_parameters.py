@@ -139,6 +139,30 @@ def test_jamming_ramp_matches_the_multiplicative_ramp_and_stacks():
     assert manager.requeued["component"] == "jam"
 
 
+def test_jamming_ramp_stops_on_the_limit():
+    sheet = _sheet()
+    sheet.face_df["prefered_perimeter"] = [3.8, 3.9, 4.0]
+
+    class Manager:
+        queue = []
+
+        def append(self, func, **kwargs):
+            self.queue.append((func, kwargs))
+
+    manager = Manager()
+    manager.queue.append((cell_jamming, dict(rate=-0.05, limits=[3.0, 4.2], dt=0.1)))
+    steps = 0
+    while manager.queue and steps < 10_000:
+        func, kwargs = manager.queue.pop(0)
+        func(sheet, manager, **kwargs)
+        steps += 1
+    assert not manager.queue                      # stopped by itself
+    assert sheet.face_df["prefered_perimeter"].mean() == pytest.approx(3.0)
+    # Uniform scaling: the cells keep their ratios.
+    np.testing.assert_allclose(sheet.face_df["prefered_perimeter"],
+                               np.array([3.8, 3.9, 4.0]) * 3.0 / 3.9)
+
+
 # --------------------------------------------------------------------------
 # share bookkeeping in the processes
 # --------------------------------------------------------------------------

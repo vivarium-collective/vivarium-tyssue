@@ -11,9 +11,12 @@ now splits the cell's strength between its vertices (vivatyssue `9007de9`); befo
 vertex carried the full strength. Face 96 is a hexagon, so 0.6 gives each vertex the
 force it had before. With 0.1 the cell barely moves (final displacement 0.77).
 
-- **Jamming** — `CellJamming` fires at `t = 300` (run to `t = 400`, `dt = 0.1`),
-  ramping every cell's preferred perimeter down so the tissue solidifies and the
-  migrating cell arrests.
+- **Jamming** — `CellJamming` fires at `t = 300` (run to `t = 400`, `dt = 0.1`) and
+  lowers every cell's preferred perimeter by 0.5% per step (`rate = -0.05` per unit
+  time, relative to the current value) until the mean reaches the lower limit, 3.0.
+  The step that would cross the limit is shortened to land on it, so P₀ goes from 3.8
+  to exactly 3.0 at `t = 304.8` and stays there. Runs before 2026-11-19 never stopped
+  the ramp (its limit check was always true), so P₀ fell to 0.026 by `t = 400`.
 - **Gradient** — `ParameterGradient` imposes a linear `prefered_perimeter`
   gradient along x (`m = -0.1`, `c = 4.6`; `dt = 0.05`, run to `t = 600` — the
   notebook's `t = 300` extended), so the migrating cell moves through a
@@ -78,8 +81,10 @@ The nominal values differ only because the two scenarios integrate at different
 `dt`; the *effective* per-step rate is identical, and matches July's. On the
 jamming run this took the final displacement from 2.630 back to 9.194, against the
 July `run.log` figure of 9.854. The current run, started from the relaxed mesh (see
-**Initial relaxation**), ends at **6.44** (7.11 at its peak, just after jamming at
-`t = 300`); the gradient run ends at **14.09** (13.62 before `ParameterGradient` became
+**Initial relaxation**), ends at **7.82**. Jamming to P₀ = 3.0 slows the tissue
+(10-unit ΔR_rms 0.131 before `t = 300`, 0.099 after) but does not arrest the migrating
+cell, which is still moving at `t = 400`. With the unbounded ramp it ended at 6.44
+(peak 7.11 just after `t = 300`). The gradient run ends at **14.09** (13.62 before `ParameterGradient` became
 a Process on 2026-11-19: it now reads the start-of-tick mesh, like the other regulators,
 instead of running as a Step after each solver tick). Started from the unrelaxed input
 mesh, the same runs ended at 7.84 (peak 8.24) and 14.03.
