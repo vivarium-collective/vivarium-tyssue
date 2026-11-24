@@ -56,7 +56,7 @@ def run_study(study: str, sim_name: str, composite, steps: int,
     ``interval`` argument; a process whose ``interval`` was pinned to a literal
     keeps that value.
     """
-    from viva_superpowers.composite_spec import load_spec, build_composite_from_spec
+    from discovery_engine.composite_spec import load_spec, build_composite_from_spec
     from vivarium_tyssue.core import build_core
 
     np.random.seed(seed)
