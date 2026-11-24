@@ -27,7 +27,7 @@ overrides = [
     { name = "viva-simbio", git = "https://github.com/vivarium-collective/viva-simbio.git" },
     { name = "viva-superpowers", git = "https://github.com/vivarium-collective/viva-superpowers.git" },
     { name = "viva-tellurium", git = "https://github.com/vivarium-collective/viva-tellurium.git" },
-    { name = "vivarium-workbench", extras = ["chat"], specifier = ">=0.5.8" },
+    { name = "vivarium-workbench", extras = ["chat"], git = "https://github.com/vivarium-collective/vivarium-workbench.git?tag=v0.5.8" },
 ]
 
 [[package]]
@@ -1340,15 +1340,11 @@ wheels = [
 [[package]]
 name = "investigation-contracts"
 version = "0.2.0"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/vivarium-collective/investigation-contracts.git?rev=65c793fd231d952e49a9cfe4244797dadde1bedc#65c793fd231d952e49a9cfe4244797dadde1bedc" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "pydantic", version = "2.13.5", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.15'" },
     { name = "pydantic", version = "2.14.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.15'" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/1a/95/49648459105d7acb0cf5424c0b58d73697add0e7e4ef9f7cd64a69d23575/investigation_contracts-0.2.0.tar.gz", hash = "sha256:9977d9ef56422b033fec22648e73ffe2a3155b81d69ac3609d5b4322dc19a810", size = 6752, upload-time = "2026-06-29T12:48:06.634Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/8d/07/4f3a5ba84d31745bf86593ada7d4df2fcf13987461c95c80b6df745fec94/investigation_contracts-0.2.0-py3-none-any.whl", hash = "sha256:34182d159e261e15f77935a8e1c5e1702e0fce7c2c1efc0468a7dde96342c41c", size = 6224, upload-time = "2026-06-29T12:48:05.563Z" },
 ]
 
 [[package]]
@@ -4811,16 +4807,12 @@ wheels = [
 [[package]]
 name = "viva-basic-processes"
 version = "0.4.1"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/vivarium-collective/viva-basic-processes.git?branch=main#6df549394fbbc1a513acf0b2fbcde731ec6024d2" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "numpy" },
     { name = "process-bigraph" },
     { name = "sympy" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/15/d0/2409bc0a0ed7d4522166ffde9fb523d97fb43a3a44fafeb00e56841379a9/viva_basic_processes-0.4.1.tar.gz", hash = "sha256:70101a43ec3e7cfc7489d535342d9017ef4c6457b71f22c601c809b0fc2ec9cc", size = 19444, upload-time = "2026-11-23T19:28:37.211Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/be/5e/38e6e45537370a1ab38d5950a54793fef07bb9a296127ecca15479de355a/viva_basic_processes-0.4.1-py3-none-any.whl", hash = "sha256:14559daceb771965583ac184911a84cf3319df96cfae7c806c0b65bcfa06fd66", size = 17859, upload-time = "2026-11-23T19:28:36.138Z" },
 ]
 
 [[package]]
@@ -4853,11 +4845,7 @@ dependencies = [
 [[package]]
 name = "viva-catalog"
 version = "0.1.0"
-source = { registry = "https://pypi.org/simple" }
-sdist = { url = "https://files.pythonhosted.org/packages/d4/e0/389e9e8e6e329a6f978dc23914237b37fe3a41cfc9a5669786a9855b5613/viva_catalog-0.1.0.tar.gz", hash = "sha256:2c45b0fcb413fa06a217fa73e6bab9866eafb73f1198847ab61decd029f5d61c", size = 67137, upload-time = "2026-09-25T02:49:18.363Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/26/a3/ceb7ad0290f1db8a7f708d07964a8720e7dd2d1810bfcd6097034879b8e9/viva_catalog-0.1.0-py3-none-any.whl", hash = "sha256:bc1fc04fd384fcb1c5f0abcd0c6a10995e0945c83fa0f12f5a6e1283fe238280", size = 61783, upload-time = "2026-09-25T02:49:17.247Z" },
-]
+source = { git = "https://github.com/vivarium-collective/viva-marketplace.git?rev=4e72e3b7f6c88d9683ae113a58e59bcafc5efb65#4e72e3b7f6c88d9683ae113a58e59bcafc5efb65" }
 
 [[package]]
 name = "viva-copasi"
@@ -5036,14 +5024,14 @@ requires-dist = [
     { name = "viva-discovery-engine", specifier = ">=0.7.2" },
     { name = "viva-emitters", extras = ["parquet"], git = "https://github.com/vivarium-collective/viva-emitters.git?rev=591133cb831463fd4bf333f7d01a729f1cbe2745" },
     { name = "viva-superpowers", git = "https://github.com/vivarium-collective/viva-superpowers.git" },
-    { name = "vivarium-workbench", extras = ["chat"], specifier = ">=0.5.8" },
+    { name = "vivarium-workbench", extras = ["chat"], git = "https://github.com/vivarium-collective/vivarium-workbench.git?tag=v0.5.8" },
 ]
 provides-extras = ["dev", "sim", "viz3d", "fetch", "hra"]
 
 [[package]]
 name = "vivarium-workbench"
 version = "0.5.8"
-source = { registry = "https://pypi.org/simple" }
+source = { git = "https://github.com/vivarium-collective/vivarium-workbench.git?tag=v0.5.8#9b5688cbba19cb2472ecddc85a6265bea61ed232" }
 dependencies = [
     { name = "bigraph-schema" },
     { name = "boto3" },
@@ -5070,10 +5058,6 @@ dependencies = [
     { name = "viva-workspace" },
     { name = "xarray" },
     { name = "zarr" },
-]
-sdist = { url = "https://files.pythonhosted.org/packages/f1/71/28a3e2d358a691cae724d9faba926a552cd18a6cf2148c0905c9794390cb/vivarium_workbench-0.5.8.tar.gz", hash = "sha256:da5127cefcd5ec380523f2c20781f2b788ce6252092a10a7478995f5e4b5c0e7", size = 5663072, upload-time = "2026-11-23T05:36:53.17Z" }
-wheels = [
-    { url = "https://files.pythonhosted.org/packages/c7/f5/e206c27267768dd9f646581daffa7509f3dd92a5d041ebb92448e7a76dcc/vivarium_workbench-0.5.8-py3-none-any.whl", hash = "sha256:e46aef01d7f3451a4f8c865155f79fe2a9e8372d075f4cb716488afafa7a5a5a", size = 7780312, upload-time = "2026-11-23T05:36:51.024Z" },
 ]
 
 [package.optional-dependencies]

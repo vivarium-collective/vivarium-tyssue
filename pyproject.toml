@@ -45,9 +45,10 @@ dependencies = [
     "ipywidgets",
     # Web-based workspace dashboard (server + templates + assets + lib helpers);
     # provides the `vivarium-workbench serve` CLI invoked by scripts/serve.sh and
-    # the Dockerfile CMD. From PyPI; 0.5.8 sends runs to compose-api when
-    # `--backend-base-url` names it (the lock had pinned the old
-    # git source at 0.3.78, which has none, so runs stayed local). [chat]: the chat panel.
+    # the Dockerfile CMD. Resolved via [tool.uv.sources] below, pinned to the v0.5.8
+    # release: it sends runs to compose-api when `--backend-base-url` names it (the lock
+    # had pinned 0.3.78, which has no compose-api dispatch, so runs stayed local).
+    # [chat]: the chat panel.
     "vivarium-workbench[chat]>=0.5.8",
     # ParquetEmitter — the workspace's default emitter (see workspace.yaml
     # runtime.default_emitter and vivarium_tyssue.core). The [parquet] extra pulls
@@ -93,10 +94,10 @@ build-backend = "hatchling.build"
 #   git+https://…viva-biomodels.git#subdirectory=../vivarium-workbench
 # URLs that fail to resolve.  override-dependencies is applied unconditionally
 # BEFORE the resolver fetches any URL, so it replaces those bad URLs with the
-# correct git refs for the other three, and vivarium-workbench to its PyPI release.
+# correct git refs for all four packages.
 [tool.uv]
 override-dependencies = [
-    "vivarium-workbench[chat]>=0.5.8",
+    "vivarium-workbench[chat] @ git+https://github.com/vivarium-collective/vivarium-workbench.git@v0.5.8",
     "viva-tellurium @ git+https://github.com/vivarium-collective/viva-tellurium.git",
     "viva-simbio @ git+https://github.com/vivarium-collective/viva-simbio.git",
     "viva-copasi @ git+https://github.com/vivarium-collective/viva-copasi.git@6ab8c7b93b87116015bd721e0306a3cc6c50c060",
@@ -111,8 +112,9 @@ override-dependencies = [
     "viva-emitters[parquet] @ git+https://github.com/vivarium-collective/viva-emitters.git@591133cb831463fd4bf333f7d01a729f1cbe2745",
 ]
 
-# [tool.uv.sources]: git sources for the packages not on PyPI (vivarium-workbench is
-# on PyPI now; override-dependencies above keeps viva-biomodels' path source away).
+# [tool.uv.sources] supplies the git URL for vivarium-workbench. The root-workspace source
+# should in principle override viva-biomodels' path source, but override-dependencies
+# above is the primary fix; this is belt-and-suspenders.
 [tool.uv.sources]
 # The pandas-3-compatible tyssue fork (adds VesselGeometry/model_factory_* and
 # patches get_opposite so cell_division/remove_face work under read-only pandas-3
@@ -125,12 +127,13 @@ override-dependencies = [
 # .gitmodules uses an https URL for the docs submodule, so installers without an ssh
 # client (compose-api's lock, sandboxed builds) can clone it.
 tyssue = { git = "https://github.com/vivarium-collective/vivatyssue.git", rev = "29671f1030bb90d4ef58b091811e46d3e278b64a" }
+vivarium-workbench = { git = "https://github.com/vivarium-collective/vivarium-workbench.git", tag = "v0.5.8" }
 viva-tellurium = { git = "https://github.com/vivarium-collective/viva-tellurium.git" }
 viva-simbio = { git = "https://github.com/vivarium-collective/viva-simbio.git" }
 viva-copasi = { git = "https://github.com/vivarium-collective/viva-copasi.git", rev = "6ab8c7b93b87116015bd721e0306a3cc6c50c060" }
 viva-superpowers = { git = "https://github.com/vivarium-collective/viva-superpowers.git" }
 
-# Allow PEP 508 direct git URLs (viva-emitters, which is not on PyPI).
+# Allow the PEP 508 direct git URLs (vivarium-workbench, viva-emitters).
 [tool.hatch.metadata]
 allow-direct-references = true
 
